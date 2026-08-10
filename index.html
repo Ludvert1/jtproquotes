@@ -2492,6 +2492,17 @@ function PreviewModal({
   const isOwnerViewer = me && me.role === "owner";
   const releasable = ["approved", "sent", "won"].includes(quote.status);
   const canPrint = isOwnerViewer || releasable;
+  const viewerTag = useMemo(() => {
+    const who = me ? me.name : "Unknown";
+    const when = new Date().toLocaleString("en-US", {
+      month: "short",
+      day: "numeric",
+      year: "numeric",
+      hour: "numeric",
+      minute: "2-digit"
+    });
+    return quote.quoteNo + " · " + who + " · " + when;
+  }, [quote.quoteNo, me]);
   useEffect(() => {
     logActivity(me ? me.name : "Unknown", "Previewed quote", quote.quoteNo);
   }, []);
@@ -2561,11 +2572,17 @@ function PreviewModal({
     style: {
       position: "absolute",
       inset: 0,
-      display: "flex",
-      alignItems: "center",
-      justifyContent: "center",
+      overflow: "hidden",
       pointerEvents: "none",
       zIndex: 5
+    }
+  }, React.createElement("div", {
+    style: {
+      position: "absolute",
+      inset: 0,
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "center"
     }
   }, React.createElement("div", {
     style: {
@@ -2578,9 +2595,41 @@ function PreviewModal({
       padding: "8px 28px",
       borderRadius: 10,
       letterSpacing: "0.08em",
+      whiteSpace: "nowrap",
+      textAlign: "center"
+    }
+  }, "DRAFT \xB7 NOT APPROVED", React.createElement("div", {
+    style: {
+      fontSize: 15,
+      letterSpacing: "0.04em",
+      marginTop: 4,
+      fontFamily: "'Barlow', sans-serif"
+    }
+  }, viewerTag))), React.createElement("div", {
+    style: {
+      position: "absolute",
+      inset: "-20%",
+      transform: "rotate(-24deg)",
+      display: "flex",
+      flexDirection: "column",
+      justifyContent: "space-around"
+    }
+  }, [0, 1, 2, 3, 4, 5, 6, 7].map(r => React.createElement("div", {
+    key: r,
+    style: {
+      display: "flex",
+      justifyContent: "space-around",
       whiteSpace: "nowrap"
     }
-  }, "DRAFT \xB7 NOT APPROVED")), React.createElement("div", {
+  }, [0, 1, 2].map(col => React.createElement("span", {
+    key: col,
+    style: {
+      fontSize: 11,
+      fontWeight: 600,
+      color: "rgba(179,55,46,0.13)",
+      letterSpacing: "0.06em"
+    }
+  }, viewerTag)))))), React.createElement("div", {
     style: {
       display: "flex",
       justifyContent: "space-between",

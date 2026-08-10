@@ -1243,6 +1243,13 @@ function PreviewModal({ quote, settings, users, me, onClose }) {
   const isOwnerViewer = me && me.role === "owner";
   const releasable = ["approved", "sent", "won"].includes(quote.status);
   const canPrint = isOwnerViewer || releasable;
+  /* Stamped across every unapproved quote so a leaked screenshot identifies
+     whoever had it open. Fixed at open time so it matches the activity log. */
+  const viewerTag = useMemo(() => {
+    const who = me ? me.name : "Unknown";
+    const when = new Date().toLocaleString("en-US", { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" });
+    return quote.quoteNo + " · " + who + " · " + when;
+  }, [quote.quoteNo, me]);
   useEffect(() => { logActivity(me ? me.name : "Unknown", "Previewed quote", quote.quoteNo); }, []);
   const doPrint = () => { logActivity(me ? me.name : "Unknown", "Printed / saved PDF", quote.quoteNo); window.print(); };
   const validUntil = new Date(new Date(quote.createdAt).getTime() + 30 * 864e5);
@@ -1258,8 +1265,24 @@ function PreviewModal({ quote, settings, users, me, onClose }) {
         </div>
         <div id="print-doc" style={{ background: "#fff", padding: "42px 46px", color: BRAND.ink, position: "relative" }}>
           {!releasable && (
-            <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", pointerEvents: "none", zIndex: 5 }}>
-              <div style={{ transform: "rotate(-24deg)", fontFamily: "'Barlow Condensed', sans-serif", fontSize: 52, fontWeight: 700, color: "rgba(179,55,46,0.16)", border: "5px solid rgba(179,55,46,0.16)", padding: "8px 28px", borderRadius: 10, letterSpacing: "0.08em", whiteSpace: "nowrap" }}>DRAFT · NOT APPROVED</div>
+            <div style={{ position: "absolute", inset: 0, overflow: "hidden", pointerEvents: "none", zIndex: 5 }}>
+              {/* Centre stamp */}
+              <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                <div style={{ transform: "rotate(-24deg)", fontFamily: "'Barlow Condensed', sans-serif", fontSize: 52, fontWeight: 700, color: "rgba(179,55,46,0.16)", border: "5px solid rgba(179,55,46,0.16)", padding: "8px 28px", borderRadius: 10, letterSpacing: "0.08em", whiteSpace: "nowrap", textAlign: "center" }}>
+                  DRAFT · NOT APPROVED
+                  <div style={{ fontSize: 15, letterSpacing: "0.04em", marginTop: 4, fontFamily: "'Barlow', sans-serif" }}>{viewerTag}</div>
+                </div>
+              </div>
+              {/* Tiled trace marks — a cropped screenshot still carries the name. */}
+              <div style={{ position: "absolute", inset: "-20%", transform: "rotate(-24deg)", display: "flex", flexDirection: "column", justifyContent: "space-around" }}>
+                {[0, 1, 2, 3, 4, 5, 6, 7].map((r) => (
+                  <div key={r} style={{ display: "flex", justifyContent: "space-around", whiteSpace: "nowrap" }}>
+                    {[0, 1, 2].map((col) => (
+                      <span key={col} style={{ fontSize: 11, fontWeight: 600, color: "rgba(179,55,46,0.13)", letterSpacing: "0.06em" }}>{viewerTag}</span>
+                    ))}
+                  </div>
+                ))}
+              </div>
             </div>
           )}
           {/* Letterhead */}
