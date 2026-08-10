@@ -1,0 +1,79 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner() {
+      return signedIn() &&
+        exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'owner';
+    }
+
+    // ---- USER PROFILES ----
+    match /users/{uid} {
+      allow read: if signedIn();
+      // A person can create only their own profile.
+      allow create: if signedIn() && request.auth.uid == uid;
+      // Only the owner can change roles or deactivate accounts.
+      allow update: if isOwner();
+      allow delete: if false;
+    }
+
+    // ---- QUOTES ----
+    match /quotes/{quoteId} {
+      // Owner sees everything. Associates see only their own.
+      allow read: if isOwner() ||
+        (signedIn() && resource.data.createdBy == request.auth.uid);
+
+      // The owner can create a quote in any state (they can approve their own
+      // work on the spot). Associates can only create unapproved work.
+      allow create: if isOwner() ||
+        (signedIn() &&
+         request.resource.data.createdBy == request.auth.uid &&
+         request.resource.data.status in ['draft', 'pending']);
+
+      // Associates can edit their own work only while it is unapproved, and
+      // cannot promote it past 'pending'. Once you approve it, they are out.
+      allow update: if isOwner() ||
+        (signedIn() &&
+         resource.data.createdBy == request.auth.uid &&
+         request.resource.data.createdBy == request.auth.uid &&
+         resource.data.status in ['draft', 'pending', 'changes'] &&
+         request.resource.data.status in ['draft', 'pending', 'changes']);
+
+      // Nobody can delete a quote. Not associates, not you.
+      allow delete: if false;
+    }
+
+    // ---- COMPANY SETTINGS ----
+    match /settings/company {
+      // Labor rates and margins are internal. Signed-in team only.
+      allow read: if signedIn();
+      allow write: if isOwner();
+    }
+
+    // The sign-up screen has to check the team code before anyone is signed
+    // in, so the code lives in its own document. It contains no pricing data.
+    match /settings/joincode {
+      allow read: if true;
+      allow write: if isOwner();
+    }
+
+    // ---- ACTIVITY LOG ----
+    match /activity/{entryId} {
+      // Only the owner can read the log.
+      allow read: if isOwner();
+      // Anyone signed in can add to it, but nobody can alter history.
+      allow create: if signedIn();
+      allow update, delete: if false;
+    }
+
+    // Anything not matched above is denied.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

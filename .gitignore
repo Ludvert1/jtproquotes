@@ -1,0 +1,14 @@
+# Superseded originals — kept on disk as a backup, not part of the repo.
+# The live source now lives in src/app.jsx and firestore.rules.
+jtproquotes.html
+jtproquotes (*).html
+firestore-rules.txt
+
+node_modules/
+.vercel
+.DS_Store
+Thumbs.db
+*.log
+npm-debug.log*
+.env
+.env.local
