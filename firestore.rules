@@ -12,13 +12,41 @@ service cloud.firestore {
         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'owner';
     }
 
+    // The one address allowed to hold the 'owner' role. Must match
+    // ownerEmail in config.js. Change both together.
+    function ownerEmail() {
+      return 'info@jtproconstruction.com';
+    }
+
+    function claimedEmail() {
+      return request.auth.token.email.lower();
+    }
+
     // ---- USER PROFILES ----
     match /users/{uid} {
       allow read: if signedIn();
-      // A person can create only their own profile.
-      allow create: if signedIn() && request.auth.uid == uid;
-      // Only the owner can change roles or deactivate accounts.
-      allow update: if isOwner();
+
+      // A person can create only their own profile, and only as an
+      // associate. Without this, anyone who signs up could hand
+      // themselves role:'owner' and read every quote in the company.
+      // The owner role is granted solely to the address above, proven
+      // by the verified email on the auth token — not by anything the
+      // browser sends.
+      allow create: if signedIn()
+        && request.auth.uid == uid
+        && request.resource.data.email.lower() == claimedEmail()
+        && request.resource.data.active == true
+        && (
+             request.resource.data.role == 'associate'
+             || (request.resource.data.role == 'owner' && claimedEmail() == ownerEmail())
+           );
+
+      // Only the owner can change roles or deactivate accounts, and even
+      // the owner cannot strip their own owner role by accident.
+      allow update: if isOwner()
+        && (request.resource.data.role == resource.data.role
+            || request.auth.uid != uid);
+
       allow delete: if false;
     }
 
