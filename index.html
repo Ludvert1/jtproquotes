@@ -590,6 +590,16 @@ function App() {
     setQuotes(q);
     await sSet("jtpq:quotes", q);
   };
+  const deleteUser = async id => {
+    if (CLOUD) {
+      await db.collection("users").doc(id).delete();
+      return;
+    }
+    const next = Object.assign({}, users);
+    delete next[id];
+    setUsers(next);
+    await sSet("jtpq:users", next);
+  };
   const saveSettings = async s => {
     if (CLOUD) {
       await db.collection("settings").doc("company").set(s);
@@ -807,8 +817,10 @@ function App() {
     quotes: Object.values(quotes),
     users: users,
     settings: settings,
+    me: me,
     onUpdateQuote: upsertQuote,
     onSaveUsers: saveUsers,
+    onDeleteUser: deleteUser,
     onPreview: setPreviewQuote,
     onOpen: q => {
       setActiveQuote(q);
@@ -2208,8 +2220,10 @@ function TeamView({
   quotes,
   users,
   settings,
+  me,
   onUpdateQuote,
   onSaveUsers,
+  onDeleteUser,
   onPreview,
   onOpen,
   notify
@@ -2241,6 +2255,21 @@ function TeamView({
     });
     await onUpdateQuote(upd);
     notify(`Quote ${q.quoteNo}: ${STATUS[status].label}`);
+  };
+  const removeUser = async u => {
+    if (u.role === "owner") return notify("The owner account can't be removed.");
+    if (me && u.id === me.id) return notify("You can't remove your own account.");
+    const theirs = quotes.filter(q => q.createdBy === u.id).length;
+    const msg = "Remove " + u.name + " from the team?\n\n" + (theirs ? "Their " + theirs + " quote(s) stay in the system and keep their name on them.\n\n" : "") + "This clears the profile but does not delete their login. If they sign up again they'll reappear as a pending request. To keep them locked out permanently, use Decline instead.";
+    if (!window.confirm(msg)) return;
+    try {
+      await onDeleteUser(u.id);
+      logActivity("Owner", "Removed account: " + u.name);
+      notify(`${u.name} removed`);
+    } catch (e) {
+      warn("remove user")(e);
+      notify("Could not remove that account.");
+    }
   };
   const awaiting = Object.values(users).filter(u => u.role !== "owner" && u.active !== true && u.declined !== true).sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
   const associates = Object.values(users);
@@ -2431,7 +2460,11 @@ function TeamView({
       logActivity("Owner", "Declined account: " + u.name);
       notify(`${u.name} declined`);
     }
-  }, "Decline")))))), React.createElement("div", null, React.createElement("div", {
+  }, "Decline"), React.createElement(Btn, {
+    small: true,
+    kind: "ghost",
+    onClick: () => removeUser(u)
+  }, "Remove")))))), React.createElement("div", null, React.createElement("div", {
     className: "flex items-center justify-between flex-wrap gap-2 mb-3"
   }, React.createElement("h2", {
     style: Object.assign({}, h2Style, {
@@ -2473,7 +2506,9 @@ function TeamView({
       fontSize: 12,
       color: BRAND.sub
     }
-  }, "@", u.username, " \xB7 joined ", fmtDate(u.createdAt))), u.role !== "owner" && React.createElement(Btn, {
+  }, "@", u.username, " \xB7 joined ", fmtDate(u.createdAt))), u.role !== "owner" && React.createElement("div", {
+    className: "flex gap-2 flex-wrap justify-end"
+  }, React.createElement(Btn, {
     small: true,
     kind: u.active !== true ? "gold" : "danger",
     onClick: async () => {
@@ -2487,7 +2522,11 @@ function TeamView({
       logActivity("Owner", (turningOn ? "Reactivated" : "Deactivated") + " account: " + u.name);
       notify(turningOn ? `${u.name} reactivated` : `${u.name} deactivated`);
     }
-  }, u.active !== true ? "Reactivate" : "Deactivate")), React.createElement("div", {
+  }, u.active !== true ? "Reactivate" : "Deactivate"), React.createElement(Btn, {
+    small: true,
+    kind: "ghost",
+    onClick: () => removeUser(u)
+  }, "Remove"))), React.createElement("div", {
     className: "grid grid-cols-3 gap-2 mt-3 text-center"
   }, [["Quotes", count], ["Pipeline", money(pipeline)], ["Won", money(won)]].map(([l, v]) => React.createElement("div", {
     key: l,

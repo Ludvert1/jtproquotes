@@ -455,6 +455,13 @@ function App() {
     setUsers(u); await sSet("jtpq:users", u);
   };
   const saveQuotes = async (q) => { setQuotes(q); await sSet("jtpq:quotes", q); };
+  /* Removes a person's profile. Their quotes are untouched — those are
+     permanent by design and stay attributed to their name. */
+  const deleteUser = async (id) => {
+    if (CLOUD) { await db.collection("users").doc(id).delete(); return; }
+    const next = Object.assign({}, users); delete next[id];
+    setUsers(next); await sSet("jtpq:users", next);
+  };
   const saveSettings = async (s) => {
     if (CLOUD) {
       await db.collection("settings").doc("company").set(s);
@@ -541,8 +548,8 @@ function App() {
             onPreview={setPreviewQuote} onCancel={() => { setView("dashboard"); setActiveQuote(null); }} />
         )}
 
-        {view === "team" && isOwner && <TeamView quotes={Object.values(quotes)} users={users} settings={settings}
-          onUpdateQuote={upsertQuote} onSaveUsers={saveUsers} onPreview={setPreviewQuote}
+        {view === "team" && isOwner && <TeamView quotes={Object.values(quotes)} users={users} settings={settings} me={me}
+          onUpdateQuote={upsertQuote} onSaveUsers={saveUsers} onDeleteUser={deleteUser} onPreview={setPreviewQuote}
           onOpen={(q) => { setActiveQuote(q); setView("edit"); }} notify={notify} />}
 
         {view === "settings" && isOwner && <SettingsView settings={settings} onSave={async (s) => { await saveSettings(s); notify("Settings saved"); }} />}
@@ -1112,7 +1119,7 @@ function QuoteForm({ me, isOwner, settings, existing, onSave, onAutosave, onPrev
 }
 
 /* ================= OWNER: TEAM & REVIEW ================= */
-function TeamView({ quotes, users, settings, onUpdateQuote, onSaveUsers, onPreview, onOpen, notify }) {
+function TeamView({ quotes, users, settings, me, onUpdateQuote, onSaveUsers, onDeleteUser, onPreview, onOpen, notify }) {
   const [period, setPeriod] = useState("month");
   const [activity, setActivity] = useState([]);
   useEffect(() => {
@@ -1131,6 +1138,27 @@ function TeamView({ quotes, users, settings, onUpdateQuote, onSaveUsers, onPrevi
     const upd = Object.assign({}, q, extra || {}, { status, history: (q.history || []).concat([{ at: new Date().toISOString(), by: "Owner", action: STATUS[status].label }]) });
     await onUpdateQuote(upd);
     notify(`Quote ${q.quoteNo}: ${STATUS[status].label}`);
+  };
+
+  /* Deleting a profile is for tidying up junk accounts. It does NOT revoke
+     a sign-in — the person could register again and land back in the queue.
+     To keep someone out for good, Decline instead. */
+  const removeUser = async (u) => {
+    if (u.role === "owner") return notify("The owner account can't be removed.");
+    if (me && u.id === me.id) return notify("You can't remove your own account.");
+    const theirs = quotes.filter((q) => q.createdBy === u.id).length;
+    const msg = "Remove " + u.name + " from the team?\n\n"
+      + (theirs ? "Their " + theirs + " quote(s) stay in the system and keep their name on them.\n\n" : "")
+      + "This clears the profile but does not delete their login. If they sign up again they'll reappear as a pending request. To keep them locked out permanently, use Decline instead.";
+    if (!window.confirm(msg)) return;
+    try {
+      await onDeleteUser(u.id);
+      logActivity("Owner", "Removed account: " + u.name);
+      notify(`${u.name} removed`);
+    } catch (e) {
+      warn("remove user")(e);
+      notify("Could not remove that account.");
+    }
   };
 
   // Never approved yet: inactive and not explicitly declined.
@@ -1225,6 +1253,7 @@ function TeamView({ quotes, users, settings, onUpdateQuote, onSaveUsers, onPrevi
                     logActivity("Owner", "Declined account: " + u.name);
                     notify(`${u.name} declined`);
                   }}>Decline</Btn>
+                  <Btn small kind="ghost" onClick={() => removeUser(u)}>Remove</Btn>
                 </div>
               </Card>
             ))}
@@ -1248,6 +1277,7 @@ function TeamView({ quotes, users, settings, onUpdateQuote, onSaveUsers, onPrevi
                   <div style={{ fontSize: 12, color: BRAND.sub }}>@{u.username} · joined {fmtDate(u.createdAt)}</div>
                 </div>
                 {u.role !== "owner" && (
+                  <div className="flex gap-2 flex-wrap justify-end">
                   <Btn small kind={u.active !== true ? "gold" : "danger"} onClick={async () => {
                     const turningOn = u.active !== true;
                     const next = Object.assign({}, users);
@@ -1258,6 +1288,8 @@ function TeamView({ quotes, users, settings, onUpdateQuote, onSaveUsers, onPrevi
                     logActivity("Owner", (turningOn ? "Reactivated" : "Deactivated") + " account: " + u.name);
                     notify(turningOn ? `${u.name} reactivated` : `${u.name} deactivated`);
                   }}>{u.active !== true ? "Reactivate" : "Deactivate"}</Btn>
+                  <Btn small kind="ghost" onClick={() => removeUser(u)}>Remove</Btn>
+                  </div>
                 )}
               </div>
               <div className="grid grid-cols-3 gap-2 mt-3 text-center">
