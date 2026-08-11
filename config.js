@@ -20,12 +20,12 @@
 
 window.JTPQ_CONFIG = {
   firebase: {
-    apiKey: "",
-    authDomain: "",
-    projectId: "",
-    storageBucket: "",
-    messagingSenderId: "",
-    appId: "",
+    apiKey: "AIzaSyCG6AJn66iGzK0cChgNTnRDSTMZrasdNbc",
+    authDomain: "jtproquotes.firebaseapp.com",
+    projectId: "jtproquotes",
+    storageBucket: "jtproquotes.firebasestorage.app",
+    messagingSenderId: "994940793610",
+    appId: "1:994940793610:web:a69d8c47e38f657886c0f3",
   },
 
   // This email address gets Owner rights. Everyone else is an associate.
