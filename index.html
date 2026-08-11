@@ -444,6 +444,7 @@ function App() {
   const [previewQuote, setPreviewQuote] = useState(null);
   const [toast, setToast] = useState(null);
   const [joinGate, setJoinGate] = useState(null);
+  const [pending, setPending] = useState(null);
   const DEFAULT_SETTINGS = {
     laborRate: 35,
     overheadPct: 10,
@@ -483,23 +484,25 @@ function App() {
         }
         if (!fu) {
           setMe(null);
+          setPending(null);
           setUsers({});
           setQuotes({});
           setSettings(DEFAULT_SETTINGS);
           return;
         }
         let profile;
+        const ref = db.collection("users").doc(fu.uid);
         try {
-          const ref = db.collection("users").doc(fu.uid);
           let snap = await ref.get();
           if (!snap.exists) {
+            const isTheOwner = fu.email.toLowerCase() === OWNER_EMAIL.toLowerCase();
             await ref.set({
               id: fu.uid,
               name: fu.displayName || fu.email,
               username: fu.email,
               email: fu.email,
-              role: fu.email.toLowerCase() === OWNER_EMAIL.toLowerCase() ? "owner" : "associate",
-              active: true,
+              role: isTheOwner ? "owner" : "associate",
+              active: isTheOwner,
               createdAt: new Date().toISOString()
             });
             snap = await ref.get();
@@ -511,11 +514,18 @@ function App() {
           fbAuth.signOut();
           return;
         }
-        if (profile.active === false) {
-          alert("This account has been deactivated. Contact the owner.");
-          fbAuth.signOut();
+        if (profile.active !== true) {
+          setPending(profile);
+          setUsers({});
+          setQuotes({});
+          setSettings(DEFAULT_SETTINGS);
+          unsubU = ref.onSnapshot(d => {
+            const p = d.data();
+            if (p && p.active === true) window.location.reload();else setPending(p || profile);
+          }, warn("pending profile"));
           return;
         }
+        setPending(null);
         const owner = profile.role === "owner";
         unsubS = db.collection("settings").doc("company").onSnapshot(d => {
           if (d.exists) setSettings(d.data());else {
@@ -636,6 +646,10 @@ function App() {
       letterSpacing: "0.15em"
     }
   }, "LOADING JTPROQUOTES\u2026"));
+  if (pending) return React.createElement(PendingApproval, {
+    profile: pending,
+    onSignOut: () => fbAuth.signOut()
+  });
   if (!me) return CLOUD ? React.createElement(CloudAuth, {
     gate: joinGate
   }) : React.createElement(Auth, {
@@ -830,6 +844,104 @@ function App() {
     }
   }, toast));
 }
+function PendingApproval({
+  profile,
+  onSignOut
+}) {
+  const declined = profile && profile.declined === true;
+  return React.createElement("div", {
+    className: "min-h-screen flex items-center justify-center px-4",
+    style: {
+      background: BRAND.navy
+    }
+  }, React.createElement("div", {
+    className: "w-full",
+    style: {
+      maxWidth: 440
+    }
+  }, React.createElement("div", {
+    className: "text-center mb-6"
+  }, React.createElement("div", {
+    style: {
+      display: "inline-flex",
+      width: 56,
+      height: 56,
+      background: BRAND.gold,
+      borderRadius: 12,
+      alignItems: "center",
+      justifyContent: "center",
+      fontFamily: "'Barlow Condensed', sans-serif",
+      fontWeight: 700,
+      fontSize: 28,
+      color: BRAND.navy
+    }
+  }, "JT"), React.createElement("h1", {
+    style: {
+      color: "#fff",
+      fontFamily: "'Barlow Condensed', sans-serif",
+      fontSize: 34,
+      fontWeight: 700,
+      letterSpacing: "0.08em",
+      margin: "12px 0 2px"
+    }
+  }, "JTPROQUOTES")), React.createElement("div", {
+    style: {
+      background: "#fff",
+      borderRadius: 14,
+      padding: 28,
+      textAlign: "center"
+    }
+  }, React.createElement("div", {
+    style: {
+      fontSize: 40,
+      marginBottom: 6
+    }
+  }, declined ? "🔒" : "⏳"), React.createElement("h2", {
+    style: {
+      fontFamily: "'Barlow Condensed', sans-serif",
+      fontSize: 25,
+      fontWeight: 700,
+      color: BRAND.navy,
+      letterSpacing: "0.04em",
+      marginBottom: 10
+    }
+  }, declined ? "ACCESS TURNED OFF" : "WAITING FOR APPROVAL"), React.createElement("p", {
+    style: {
+      fontSize: 14,
+      color: BRAND.sub,
+      lineHeight: 1.55
+    }
+  }, declined ? "This account no longer has access to JTProQuotes. Contact the owner if you think that's a mistake." : "Your account was created and the owner has been notified. Once it's approved you'll be able to build quotes — this page unlocks on its own, no need to sign in again."), React.createElement("div", {
+    style: {
+      background: BRAND.paper,
+      borderRadius: 10,
+      padding: "12px 14px",
+      marginTop: 16,
+      fontSize: 13,
+      color: BRAND.ink
+    }
+  }, React.createElement("div", {
+    style: {
+      fontWeight: 700
+    }
+  }, profile && profile.name), React.createElement("div", {
+    style: {
+      color: BRAND.sub
+    }
+  }, profile && profile.email)), React.createElement("div", {
+    className: "mt-4"
+  }, React.createElement(Btn, {
+    kind: "ghost",
+    onClick: onSignOut
+  }, "Sign out"))), React.createElement("p", {
+    style: {
+      color: "rgba(255,255,255,0.6)",
+      fontSize: 12,
+      textAlign: "center",
+      marginTop: 14
+    }
+  }, COMPANY.name, " \xB7 ", COMPANY.area)));
+}
 function CloudAuth({
   gate
 }) {
@@ -853,6 +965,7 @@ function CloudAuth({
         if (!name.trim()) throw new Error("Enter your full name.");
         if (!gate) throw new Error("Still connecting — try again in a moment.");
         if (gate.requireTeamCode && code.trim().toUpperCase() !== String(gate.teamCode || "").toUpperCase()) throw new Error("Invalid team code. Ask the owner for the current code.");
+        const isTheOwner = email.trim().toLowerCase() === OWNER_EMAIL.toLowerCase();
         const cred = await fbAuth.createUserWithEmailAndPassword(email.trim(), pw);
         await cred.user.updateProfile({
           displayName: name.trim()
@@ -862,11 +975,11 @@ function CloudAuth({
           name: name.trim(),
           username: email.trim(),
           email: email.trim(),
-          role: email.trim().toLowerCase() === OWNER_EMAIL.toLowerCase() ? "owner" : "associate",
-          active: true,
+          role: isTheOwner ? "owner" : "associate",
+          active: isTheOwner,
           createdAt: new Date().toISOString()
         });
-        logActivity(name.trim(), "Created account");
+        if (isTheOwner) logActivity(name.trim(), "Created account");
       }
     } catch (e) {
       setErr((e.message || "Something went wrong.").replace("Firebase: ", "").replace(/\(auth.*\)\.?/, "").trim());
@@ -964,7 +1077,17 @@ function CloudAuth({
     value: code,
     onChange: e => setCode(e.target.value),
     placeholder: "JTPRO-XXXX"
-  })), err && React.createElement("div", {
+  })), mode === "register" && React.createElement("div", {
+    style: {
+      background: "#FBF3DE",
+      color: BRAND.amber,
+      borderRadius: 8,
+      padding: "10px 12px",
+      fontSize: 12.5,
+      fontWeight: 600,
+      marginBottom: 12
+    }
+  }, "New accounts need the owner's approval before you can build quotes."), err && React.createElement("div", {
     style: {
       color: BRAND.red,
       fontSize: 13,
@@ -1022,6 +1145,7 @@ function Auth({
 }) {
   const firstUser = Object.keys(users).length === 0;
   const [mode, setMode] = useState(firstUser ? "register" : "login");
+  const [msgPending, setMsgPending] = useState(false);
   const [name, setName] = useState("");
   const [username, setUsername] = useState("");
   const [pin, setPin] = useState("");
@@ -1062,7 +1186,7 @@ function Auth({
     if (mode === "login") {
       const u = Object.values(users).find(x => x.username === uname);
       if (!u || u.pinHash !== hashPin(pin)) return setErr("Username or PIN doesn't match.");
-      if (u.active === false) return setErr("This account has been deactivated. Contact the owner.");
+      if (u.active !== true) return setErr(u.declined ? "This account has been turned off. Contact the owner." : "This account is waiting for the owner to approve it.");
       onLogin(u);
     } else {
       if (!name.trim() || !uname || pin.length < 4) return setErr("Enter your name, a username, and a PIN of at least 4 digits.");
@@ -1074,12 +1198,17 @@ function Auth({
         username: uname,
         pinHash: hashPin(pin),
         role: firstUser ? "owner" : "associate",
-        active: true,
+        active: !!firstUser,
         createdAt: new Date().toISOString()
       };
       const next = Object.assign({}, users);
       next[u.id] = u;
       await onSaveUsers(next);
+      if (!firstUser) {
+        setMode("login");
+        setErr("");
+        return setMsgPending(true);
+      }
       onLogin(u);
     }
   };
@@ -1180,7 +1309,17 @@ function Auth({
       fontWeight: 600,
       marginBottom: 12
     }
-  }, err), React.createElement(Btn, {
+  }, err), msgPending && React.createElement("div", {
+    style: {
+      background: "#FBF3DE",
+      color: BRAND.amber,
+      borderRadius: 8,
+      padding: "10px 12px",
+      fontSize: 13,
+      fontWeight: 600,
+      marginBottom: 12
+    }
+  }, "Account created. The owner has to approve it before you can sign in."), React.createElement(Btn, {
     kind: "gold",
     onClick: submit
   }, mode === "login" ? "Sign in" : "Create account"), !firstUser && React.createElement("button", {
@@ -2103,6 +2242,7 @@ function TeamView({
     await onUpdateQuote(upd);
     notify(`Quote ${q.quoteNo}: ${STATUS[status].label}`);
   };
+  const awaiting = Object.values(users).filter(u => u.role !== "owner" && u.active !== true && u.declined !== true).sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
   const associates = Object.values(users);
   const perAssociate = associates.map(u => {
     const qs = quotes.filter(q => q.createdBy === u.id && inPeriod(q.createdAt, period));
@@ -2218,7 +2358,80 @@ function TeamView({
         setNoteFor(null);
       }
     }, "Send back")));
-  })), React.createElement("div", null, React.createElement("div", {
+  })), React.createElement("div", null, React.createElement("h2", {
+    style: h2Style
+  }, "ACCOUNTS AWAITING APPROVAL", awaiting.length > 0 && React.createElement("span", {
+    style: {
+      background: BRAND.gold,
+      color: BRAND.navy,
+      borderRadius: 99,
+      padding: "2px 10px",
+      fontSize: 13,
+      marginLeft: 10
+    }
+  }, awaiting.length)), awaiting.length === 0 ? React.createElement(Card, {
+    style: {
+      padding: 18
+    }
+  }, React.createElement("div", {
+    style: {
+      fontSize: 14,
+      color: BRAND.sub
+    }
+  }, "Nobody is waiting. New sign-ups land here and can't see or build anything until you approve them.")) : React.createElement("div", {
+    className: "grid md-grid-cols-2 gap-3"
+  }, awaiting.map(u => React.createElement(Card, {
+    key: u.id,
+    style: {
+      borderLeft: `4px solid ${BRAND.gold}`
+    }
+  }, React.createElement("div", {
+    style: {
+      fontWeight: 700,
+      fontSize: 15
+    }
+  }, u.name), React.createElement("div", {
+    style: {
+      fontSize: 13,
+      color: BRAND.sub,
+      marginBottom: 2
+    }
+  }, u.email || u.username), React.createElement("div", {
+    style: {
+      fontSize: 12,
+      color: BRAND.sub
+    }
+  }, "Signed up ", fmtDate(u.createdAt)), React.createElement("div", {
+    className: "flex gap-2 mt-3 flex-wrap"
+  }, React.createElement(Btn, {
+    small: true,
+    kind: "gold",
+    onClick: async () => {
+      const next = Object.assign({}, users);
+      next[u.id] = Object.assign({}, u, {
+        active: true,
+        declined: false,
+        approvedAt: new Date().toISOString()
+      });
+      await onSaveUsers(next);
+      logActivity("Owner", "Approved account: " + u.name);
+      notify(`${u.name} approved — they can build quotes now`);
+    }
+  }, "Approve"), React.createElement(Btn, {
+    small: true,
+    kind: "ghost",
+    onClick: async () => {
+      if (!window.confirm(`Decline ${u.name}? They keep their login but stay locked out.`)) return;
+      const next = Object.assign({}, users);
+      next[u.id] = Object.assign({}, u, {
+        active: false,
+        declined: true
+      });
+      await onSaveUsers(next);
+      logActivity("Owner", "Declined account: " + u.name);
+      notify(`${u.name} declined`);
+    }
+  }, "Decline")))))), React.createElement("div", null, React.createElement("div", {
     className: "flex items-center justify-between flex-wrap gap-2 mb-3"
   }, React.createElement("h2", {
     style: Object.assign({}, h2Style, {
@@ -2262,16 +2475,19 @@ function TeamView({
     }
   }, "@", u.username, " \xB7 joined ", fmtDate(u.createdAt))), u.role !== "owner" && React.createElement(Btn, {
     small: true,
-    kind: u.active === false ? "gold" : "danger",
+    kind: u.active !== true ? "gold" : "danger",
     onClick: async () => {
+      const turningOn = u.active !== true;
       const next = Object.assign({}, users);
       next[u.id] = Object.assign({}, u, {
-        active: u.active === false
+        active: turningOn,
+        declined: !turningOn
       });
       await onSaveUsers(next);
-      notify(u.active === false ? `${u.name} reactivated` : `${u.name} deactivated`);
+      logActivity("Owner", (turningOn ? "Reactivated" : "Deactivated") + " account: " + u.name);
+      notify(turningOn ? `${u.name} reactivated` : `${u.name} deactivated`);
     }
-  }, u.active === false ? "Reactivate" : "Deactivate")), React.createElement("div", {
+  }, u.active !== true ? "Reactivate" : "Deactivate")), React.createElement("div", {
     className: "grid grid-cols-3 gap-2 mt-3 text-center"
   }, [["Quotes", count], ["Pipeline", money(pipeline)], ["Won", money(won)]].map(([l, v]) => React.createElement("div", {
     key: l,

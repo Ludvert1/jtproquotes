@@ -361,6 +361,7 @@ function App() {
   const [previewQuote, setPreviewQuote] = useState(null);
   const [toast, setToast] = useState(null);
   const [joinGate, setJoinGate] = useState(null);
+  const [pending, setPending] = useState(null);
 
   const DEFAULT_SETTINGS ={ laborRate: 35, overheadPct: 10, targetMargin: 25, requireTeamCode: false, teamCode: "JTPRO-" + Math.random().toString(36).slice(2, 6).toUpperCase() };
 
@@ -379,16 +380,18 @@ function App() {
         if (unsubQ) { unsubQ(); unsubQ = null; }
         if (unsubU) { unsubU(); unsubU = null; }
         if (unsubS) { unsubS(); unsubS = null; }
-        if (!fu) { setMe(null); setUsers({}); setQuotes({}); setSettings(DEFAULT_SETTINGS); return; }
+        if (!fu) { setMe(null); setPending(null); setUsers({}); setQuotes({}); setSettings(DEFAULT_SETTINGS); return; }
 
         let profile;
+        const ref = db.collection("users").doc(fu.uid);
         try {
-          const ref = db.collection("users").doc(fu.uid);
           let snap = await ref.get();
           if (!snap.exists) {
+            const isTheOwner = fu.email.toLowerCase() === OWNER_EMAIL.toLowerCase();
             await ref.set({ id: fu.uid, name: fu.displayName || fu.email, username: fu.email, email: fu.email,
-              role: fu.email.toLowerCase() === OWNER_EMAIL.toLowerCase() ? "owner" : "associate",
-              active: true, createdAt: new Date().toISOString() });
+              role: isTheOwner ? "owner" : "associate",
+              // New associates wait for the owner to approve them.
+              active: isTheOwner, createdAt: new Date().toISOString() });
             snap = await ref.get();
           }
           profile = snap.data();
@@ -397,7 +400,19 @@ function App() {
           alert("Could not reach the database. Check your connection and try again.");
           fbAuth.signOut(); return;
         }
-        if (profile.active === false) { alert("This account has been deactivated. Contact the owner."); fbAuth.signOut(); return; }
+        // Not approved yet (or switched off again) — park them on a waiting
+        // screen and subscribe to their own profile so approval lands live.
+        if (profile.active !== true) {
+          setPending(profile);
+          setUsers({}); setQuotes({}); setSettings(DEFAULT_SETTINGS);
+          unsubU = ref.onSnapshot((d) => {
+            const p = d.data();
+            if (p && p.active === true) window.location.reload();
+            else setPending(p || profile);
+          }, warn("pending profile"));
+          return;
+        }
+        setPending(null);
         const owner = profile.role === "owner";
 
         // Settings are readable only once signed in, so subscribe here.
@@ -469,6 +484,8 @@ function App() {
     </div>
   );
 
+  if (pending) return <PendingApproval profile={pending} onSignOut={() => fbAuth.signOut()} />;
+
   if (!me) return CLOUD
     ? <CloudAuth gate={joinGate} />
     : <Auth users={users} settings={settings} onSaveUsers={saveUsers} onLogin={async (u) => { setMe(u); await sessionSet(u.id); logActivity(u.name, "Signed in"); }} />;
@@ -538,6 +555,40 @@ function App() {
   );
 }
 
+/* ================= AWAITING OWNER APPROVAL ================= */
+function PendingApproval({ profile, onSignOut }) {
+  const declined = profile && profile.declined === true;
+  return (
+    <div className="min-h-screen flex items-center justify-center px-4" style={{ background: BRAND.navy }}>
+      <div className="w-full" style={{ maxWidth: 440 }}>
+        <div className="text-center mb-6">
+          <div style={{ display: "inline-flex", width: 56, height: 56, background: BRAND.gold, borderRadius: 12, alignItems: "center", justifyContent: "center", fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 28, color: BRAND.navy }}>JT</div>
+          <h1 style={{ color: "#fff", fontFamily: "'Barlow Condensed', sans-serif", fontSize: 34, fontWeight: 700, letterSpacing: "0.08em", margin: "12px 0 2px" }}>JTPROQUOTES</h1>
+        </div>
+        <div style={{ background: "#fff", borderRadius: 14, padding: 28, textAlign: "center" }}>
+          <div style={{ fontSize: 40, marginBottom: 6 }}>{declined ? "🔒" : "⏳"}</div>
+          <h2 style={{ fontFamily: "'Barlow Condensed', sans-serif", fontSize: 25, fontWeight: 700, color: BRAND.navy, letterSpacing: "0.04em", marginBottom: 10 }}>
+            {declined ? "ACCESS TURNED OFF" : "WAITING FOR APPROVAL"}
+          </h2>
+          <p style={{ fontSize: 14, color: BRAND.sub, lineHeight: 1.55 }}>
+            {declined
+              ? "This account no longer has access to JTProQuotes. Contact the owner if you think that's a mistake."
+              : "Your account was created and the owner has been notified. Once it's approved you'll be able to build quotes — this page unlocks on its own, no need to sign in again."}
+          </p>
+          <div style={{ background: BRAND.paper, borderRadius: 10, padding: "12px 14px", marginTop: 16, fontSize: 13, color: BRAND.ink }}>
+            <div style={{ fontWeight: 700 }}>{profile && profile.name}</div>
+            <div style={{ color: BRAND.sub }}>{profile && profile.email}</div>
+          </div>
+          <div className="mt-4"><Btn kind="ghost" onClick={onSignOut}>Sign out</Btn></div>
+        </div>
+        <p style={{ color: "rgba(255,255,255,0.6)", fontSize: 12, textAlign: "center", marginTop: 14 }}>
+          {COMPANY.name} · {COMPANY.area}
+        </p>
+      </div>
+    </div>
+  );
+}
+
 /* ================= CLOUD AUTH (Firebase) ================= */
 function CloudAuth({ gate }) {
   const [mode, setMode] = useState("login");
@@ -560,14 +611,16 @@ function CloudAuth({ gate }) {
         if (!gate) throw new Error("Still connecting — try again in a moment.");
         if (gate.requireTeamCode && code.trim().toUpperCase() !== String(gate.teamCode || "").toUpperCase())
           throw new Error("Invalid team code. Ask the owner for the current code.");
+        const isTheOwner = email.trim().toLowerCase() === OWNER_EMAIL.toLowerCase();
         const cred = await fbAuth.createUserWithEmailAndPassword(email.trim(), pw);
         await cred.user.updateProfile({ displayName: name.trim() });
         await db.collection("users").doc(cred.user.uid).set({
           id: cred.user.uid, name: name.trim(), username: email.trim(), email: email.trim(),
-          role: email.trim().toLowerCase() === OWNER_EMAIL.toLowerCase() ? "owner" : "associate",
-          active: true, createdAt: new Date().toISOString(),
+          role: isTheOwner ? "owner" : "associate",
+          // Associates start locked until the owner approves them.
+          active: isTheOwner, createdAt: new Date().toISOString(),
         });
-        logActivity(name.trim(), "Created account");
+        if (isTheOwner) logActivity(name.trim(), "Created account");
       }
     } catch (e) {
       setErr((e.message || "Something went wrong.").replace("Firebase: ", "").replace(/\(auth.*\)\.?/, "").trim());
@@ -597,6 +650,7 @@ function CloudAuth({ gate }) {
             <input style={inputStyle} type="password" value={pw} onChange={(e) => setPw(e.target.value)} placeholder="••••••••" />
           </Field>
           {mode === "register" && gate && gate.requireTeamCode && <Field label="Team code" hint="Provided by the owner."><input style={inputStyle} value={code} onChange={(e) => setCode(e.target.value)} placeholder="JTPRO-XXXX" /></Field>}
+          {mode === "register" && <div style={{ background: "#FBF3DE", color: BRAND.amber, borderRadius: 8, padding: "10px 12px", fontSize: 12.5, fontWeight: 600, marginBottom: 12 }}>New accounts need the owner's approval before you can build quotes.</div>}
           {err && <div style={{ color: BRAND.red, fontSize: 13, fontWeight: 600, marginBottom: 12 }}>{err}</div>}
           {msg && <div style={{ color: BRAND.green, fontSize: 13, fontWeight: 600, marginBottom: 12 }}>{msg}</div>}
           <Btn kind="gold" onClick={submit} disabled={busy}>{busy ? "Please wait…" : mode === "login" ? "Sign in" : "Create account"}</Btn>
@@ -619,6 +673,7 @@ function CloudAuth({ gate }) {
 function Auth({ users, settings, onSaveUsers, onLogin }) {
   const firstUser = Object.keys(users).length === 0;
   const [mode, setMode] = useState(firstUser ? "register" : "login");
+  const [msgPending, setMsgPending] = useState(false);
   const [name, setName] = useState("");
   const [username, setUsername] = useState("");
   const [pin, setPin] = useState("");
@@ -659,15 +714,20 @@ function Auth({ users, settings, onSaveUsers, onLogin }) {
     if (mode === "login") {
       const u = Object.values(users).find((x) => x.username === uname);
       if (!u || u.pinHash !== hashPin(pin)) return setErr("Username or PIN doesn't match.");
-      if (u.active === false) return setErr("This account has been deactivated. Contact the owner.");
+      if (u.active !== true) return setErr(u.declined
+        ? "This account has been turned off. Contact the owner."
+        : "This account is waiting for the owner to approve it.");
       onLogin(u);
     } else {
       if (!name.trim() || !uname || pin.length < 4) return setErr("Enter your name, a username, and a PIN of at least 4 digits.");
       if (Object.values(users).some((x) => x.username === uname)) return setErr("That username is taken.");
       if (!firstUser && settings.requireTeamCode && code.trim().toUpperCase() !== settings.teamCode) return setErr("Invalid team code. Ask the owner for the current code.");
-      const u = { id: uid(), name: name.trim(), username: uname, pinHash: hashPin(pin), role: firstUser ? "owner" : "associate", active: true, createdAt: new Date().toISOString() };
+      // The first account is the owner and is live immediately. Everyone
+      // after that waits for the owner to approve them.
+      const u = { id: uid(), name: name.trim(), username: uname, pinHash: hashPin(pin), role: firstUser ? "owner" : "associate", active: !!firstUser, createdAt: new Date().toISOString() };
       const next = Object.assign({}, users); next[u.id] = u;
       await onSaveUsers(next);
+      if (!firstUser) { setMode("login"); setErr(""); return setMsgPending(true); }
       onLogin(u);
     }
   };
@@ -687,6 +747,7 @@ function Auth({ users, settings, onSaveUsers, onLogin }) {
           <Field label="PIN" hint="At least 4 digits — you'll use it to sign in."><input style={inputStyle} type="password" inputMode="numeric" value={pin} onChange={(e) => setPin(e.target.value)} placeholder="••••" /></Field>
           {mode === "register" && !firstUser && settings.requireTeamCode && <Field label="Team code" hint="Provided by the owner. Keeps outsiders from creating accounts."><input style={inputStyle} value={code} onChange={(e) => setCode(e.target.value)} placeholder="JTPRO-XXXX" /></Field>}
           {err && <div style={{ color: BRAND.red, fontSize: 13, fontWeight: 600, marginBottom: 12 }}>{err}</div>}
+          {msgPending && <div style={{ background: "#FBF3DE", color: BRAND.amber, borderRadius: 8, padding: "10px 12px", fontSize: 13, fontWeight: 600, marginBottom: 12 }}>Account created. The owner has to approve it before you can sign in.</div>}
           <Btn kind="gold" onClick={submit}>{mode === "login" ? "Sign in" : "Create account"}</Btn>
           {!firstUser && (
             <button onClick={() => { setMode(mode === "login" ? "register" : "login"); setErr(""); }}
@@ -1072,6 +1133,11 @@ function TeamView({ quotes, users, settings, onUpdateQuote, onSaveUsers, onPrevi
     notify(`Quote ${q.quoteNo}: ${STATUS[status].label}`);
   };
 
+  // Never approved yet: inactive and not explicitly declined.
+  const awaiting = Object.values(users)
+    .filter((u) => u.role !== "owner" && u.active !== true && u.declined !== true)
+    .sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
+
   const associates = Object.values(users);
   const perAssociate = associates.map((u) => {
     const qs = quotes.filter((q) => q.createdBy === u.id && inPeriod(q.createdAt, period));
@@ -1126,6 +1192,46 @@ function TeamView({ quotes, users, settings, onUpdateQuote, onSaveUsers, onPrevi
         })}
       </div>
 
+      {/* ---- ACCOUNTS AWAITING APPROVAL ---- */}
+      <div>
+        <h2 style={h2Style}>
+          ACCOUNTS AWAITING APPROVAL
+          {awaiting.length > 0 && <span style={{ background: BRAND.gold, color: BRAND.navy, borderRadius: 99, padding: "2px 10px", fontSize: 13, marginLeft: 10 }}>{awaiting.length}</span>}
+        </h2>
+        {awaiting.length === 0 ? (
+          <Card style={{ padding: 18 }}>
+            <div style={{ fontSize: 14, color: BRAND.sub }}>Nobody is waiting. New sign-ups land here and can't see or build anything until you approve them.</div>
+          </Card>
+        ) : (
+          <div className="grid md-grid-cols-2 gap-3">
+            {awaiting.map((u) => (
+              <Card key={u.id} style={{ borderLeft: `4px solid ${BRAND.gold}` }}>
+                <div style={{ fontWeight: 700, fontSize: 15 }}>{u.name}</div>
+                <div style={{ fontSize: 13, color: BRAND.sub, marginBottom: 2 }}>{u.email || u.username}</div>
+                <div style={{ fontSize: 12, color: BRAND.sub }}>Signed up {fmtDate(u.createdAt)}</div>
+                <div className="flex gap-2 mt-3 flex-wrap">
+                  <Btn small kind="gold" onClick={async () => {
+                    const next = Object.assign({}, users);
+                    next[u.id] = Object.assign({}, u, { active: true, declined: false, approvedAt: new Date().toISOString() });
+                    await onSaveUsers(next);
+                    logActivity("Owner", "Approved account: " + u.name);
+                    notify(`${u.name} approved — they can build quotes now`);
+                  }}>Approve</Btn>
+                  <Btn small kind="ghost" onClick={async () => {
+                    if (!window.confirm(`Decline ${u.name}? They keep their login but stay locked out.`)) return;
+                    const next = Object.assign({}, users);
+                    next[u.id] = Object.assign({}, u, { active: false, declined: true });
+                    await onSaveUsers(next);
+                    logActivity("Owner", "Declined account: " + u.name);
+                    notify(`${u.name} declined`);
+                  }}>Decline</Btn>
+                </div>
+              </Card>
+            ))}
+          </div>
+        )}
+      </div>
+
       <div>
         <div className="flex items-center justify-between flex-wrap gap-2 mb-3">
           <h2 style={Object.assign({}, h2Style, { marginBottom: 0 })}>TEAM PERFORMANCE</h2>
@@ -1142,11 +1248,16 @@ function TeamView({ quotes, users, settings, onUpdateQuote, onSaveUsers, onPrevi
                   <div style={{ fontSize: 12, color: BRAND.sub }}>@{u.username} · joined {fmtDate(u.createdAt)}</div>
                 </div>
                 {u.role !== "owner" && (
-                  <Btn small kind={u.active === false ? "gold" : "danger"} onClick={async () => {
-                    const next = Object.assign({}, users); next[u.id] = Object.assign({}, u, { active: u.active === false });
+                  <Btn small kind={u.active !== true ? "gold" : "danger"} onClick={async () => {
+                    const turningOn = u.active !== true;
+                    const next = Object.assign({}, users);
+                    // `declined` keeps a switched-off account out of the
+                    // approval queue, so it can't quietly reappear there.
+                    next[u.id] = Object.assign({}, u, { active: turningOn, declined: !turningOn });
                     await onSaveUsers(next);
-                    notify(u.active === false ? `${u.name} reactivated` : `${u.name} deactivated`);
-                  }}>{u.active === false ? "Reactivate" : "Deactivate"}</Btn>
+                    logActivity("Owner", (turningOn ? "Reactivated" : "Deactivated") + " account: " + u.name);
+                    notify(turningOn ? `${u.name} reactivated` : `${u.name} deactivated`);
+                  }}>{u.active !== true ? "Reactivate" : "Deactivate"}</Btn>
                 )}
               </div>
               <div className="grid grid-cols-3 gap-2 mt-3 text-center">

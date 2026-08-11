@@ -6,10 +6,23 @@ service cloud.firestore {
       return request.auth != null;
     }
 
-    function isOwner() {
+    function profile() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
+    function hasProfile() {
       return signedIn() &&
-        exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
-        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'owner';
+        exists(/databases/$(database)/documents/users/$(request.auth.uid));
+    }
+
+    function isOwner() {
+      return hasProfile() && profile().role == 'owner';
+    }
+
+    // A signed-up account is inert until the owner approves it. Until then
+    // it can see nothing and write nothing except its own pending profile.
+    function isApproved() {
+      return hasProfile() && profile().active == true;
     }
 
     // The one address allowed to hold the 'owner' role. Must match
@@ -24,7 +37,10 @@ service cloud.firestore {
 
     // ---- USER PROFILES ----
     match /users/{uid} {
-      allow read: if signedIn();
+      // You can always read your own profile (that is how the app learns
+      // whether you have been approved yet). Seeing the rest of the team
+      // requires approval.
+      allow read: if isApproved() || (signedIn() && request.auth.uid == uid);
 
       // A person can create only their own profile, and only as an
       // associate. Without this, anyone who signs up could hand
@@ -32,13 +48,17 @@ service cloud.firestore {
       // The owner role is granted solely to the address above, proven
       // by the verified email on the auth token — not by anything the
       // browser sends.
+      // New associates are created INACTIVE and stay locked out until the
+      // owner approves them. Only the owner's own address may self-create
+      // an active profile, otherwise nobody could ever approve anyone.
       allow create: if signedIn()
         && request.auth.uid == uid
         && request.resource.data.email.lower() == claimedEmail()
-        && request.resource.data.active == true
         && (
-             request.resource.data.role == 'associate'
-             || (request.resource.data.role == 'owner' && claimedEmail() == ownerEmail())
+             (request.resource.data.role == 'associate' && request.resource.data.active == false)
+             || (request.resource.data.role == 'owner'
+                 && request.resource.data.active == true
+                 && claimedEmail() == ownerEmail())
            );
 
       // Only the owner can change roles or deactivate accounts, and even
@@ -47,26 +67,29 @@ service cloud.firestore {
         && (request.resource.data.role == resource.data.role
             || request.auth.uid != uid);
 
-      allow delete: if false;
+      // The owner can remove a declined or stale profile. Quotes are still
+      // permanent — this only clears out people, never work.
+      allow delete: if isOwner() && request.auth.uid != uid;
     }
 
     // ---- QUOTES ----
     match /quotes/{quoteId} {
-      // Owner sees everything. Associates see only their own.
+      // Owner sees everything. Approved associates see only their own.
+      // An unapproved account sees nothing at all.
       allow read: if isOwner() ||
-        (signedIn() && resource.data.createdBy == request.auth.uid);
+        (isApproved() && resource.data.createdBy == request.auth.uid);
 
       // The owner can create a quote in any state (they can approve their own
-      // work on the spot). Associates can only create unapproved work.
+      // work on the spot). Approved associates create unapproved work only.
       allow create: if isOwner() ||
-        (signedIn() &&
+        (isApproved() &&
          request.resource.data.createdBy == request.auth.uid &&
          request.resource.data.status in ['draft', 'pending']);
 
       // Associates can edit their own work only while it is unapproved, and
       // cannot promote it past 'pending'. Once you approve it, they are out.
       allow update: if isOwner() ||
-        (signedIn() &&
+        (isApproved() &&
          resource.data.createdBy == request.auth.uid &&
          request.resource.data.createdBy == request.auth.uid &&
          resource.data.status in ['draft', 'pending', 'changes'] &&
@@ -78,8 +101,9 @@ service cloud.firestore {
 
     // ---- COMPANY SETTINGS ----
     match /settings/company {
-      // Labor rates and margins are internal. Signed-in team only.
-      allow read: if signedIn();
+      // Labor rates and margins are internal. Approved team only —
+      // a pending account must not learn your cost basis.
+      allow read: if isApproved();
       allow write: if isOwner();
     }
 
@@ -94,8 +118,8 @@ service cloud.firestore {
     match /activity/{entryId} {
       // Only the owner can read the log.
       allow read: if isOwner();
-      // Anyone signed in can add to it, but nobody can alter history.
-      allow create: if signedIn();
+      // Approved members add to it; nobody can alter history.
+      allow create: if isApproved();
       allow update, delete: if false;
     }
 
