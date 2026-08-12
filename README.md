@@ -2,7 +2,10 @@
 
 Quoting platform for **JTProconstruction LLC**. Crew-based pricing, owner review and approval, client-ready quote documents.
 
-Live site: _(add your Vercel URL here after the first deploy)_
+Live at **https://quotes.jtproconstruction.com** (also on `jtproquotes.vercel.app`).
+
+Hosted on Vercel, data in Firebase (project `jtproquotes`). Pushing to
+`main` redeploys automatically.
 
 ---
 
@@ -65,22 +68,55 @@ The first person to register with the `ownerEmail` address becomes the Owner. Ev
 
 ## Who can do what
 
-**Owner**
+| | Owner | Assistant | Associate |
+| --- | :---: | :---: | :---: |
+| See every quote | ✓ | ✓ | own only |
+| Approve / send back / mark outcomes | ✓ | ✓ | — |
+| Void and restore quotes | ✓ | ✓ | — |
+| Approve new signups | ✓ | ✓ | — |
+| Read the activity log | ✓ | ✓ | — |
+| Promote, deactivate, remove people | ✓ | — | — |
+| Permanently delete a quote | ✓ | — | — |
+| Edit labor rate, overhead, margin | ✓ | — | — |
 
-- Sees every quote from every associate
-- Approves, requests changes, marks quotes sent / won / declined
-- Manages the team, deactivates accounts, sets the team join code
-- Sets labor rate, overhead and target margin
-- Reads the full activity log
+Associates can edit their own work while it is a draft, pending review, or
+sent back for changes, and lose edit access the moment it is approved.
 
-**Associate**
+All of this is enforced in `firestore.rules`, not just hidden in the
+interface — an unapproved or under-privileged account is refused by the
+database itself.
 
-- Sees only their own quotes
-- Can edit their work while it is a draft, pending review, or sent back for changes
-- Loses edit access the moment a quote is approved
-- Cannot see pricing settings, other people's quotes, or the activity log
+### Accounts need approval
 
-Nobody — including the Owner — can delete a quote. This is enforced in the database rules, not just the interface.
+New signups are created inactive. Until the owner or an assistant approves
+them they can read nothing at all — no quotes, no pricing, not even the team
+list — and see only a waiting screen. Approval unlocks their browser live.
+
+**Decline** locks someone out permanently while keeping their login.
+**Remove** deletes the profile but *not* the Firebase login, so a removed
+person could sign up again and reappear in the queue. Use Decline to block,
+Remove only to tidy up.
+
+### Void vs delete
+
+**Void** marks a quote dead with a reason. It drops out of every money
+figure, can never be printed, shows greyed and struck through — but the
+record survives, which matters if a client ever disputes what you quoted.
+Reversible with **Restore**.
+
+**Delete forever** erases the quote from the database. Owner only, double
+confirmed, and only reachable from the voided list.
+
+### Team join code
+
+If "require team code" is on in Settings, the code rotates automatically
+every time the queue is cleared, so in practice each code admits one person
+and then dies. There is also a **Rotate now** button in Team & review.
+
+Rotation happens when a manager clears the queue, not at the instant of
+signup — if two people sign up before anyone is approved, the same code
+works for both. Closing that gap requires a server-side function on
+Firebase's paid plan.
 
 ---
 
@@ -102,5 +138,12 @@ Changing `config.js` does **not** require a rebuild — it's loaded directly by 
 ## Notes
 
 - The site is set to `noindex` so it won't appear in search results.
+- `quotes.jtproconstruction.com` is a CNAME to `cname.vercel-dns.com` in
+  Cloudflare. Cloudflare caches `config.js` for 4 hours regardless of what
+  Vercel asks — purge the Cloudflare cache after changing Firebase settings.
+- Unapproved quotes carry a watermark stamped with the quote number, the
+  viewer's name and a timestamp, tiled across the page, so a leaked
+  screenshot traces back to whoever had it open. Screenshots cannot be
+  blocked in a browser; this is deterrence by attribution.
 - Quote documents print to PDF from the browser (Ctrl/Cmd + P). Unapproved quotes carry a **DRAFT · NOT APPROVED** watermark and cannot be printed clean.
 - If something isn't saving in cloud mode, open the browser console (F12). Permission problems from the database rules are logged there with a `[JTProQuotes]` prefix.
