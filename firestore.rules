@@ -19,6 +19,17 @@ service cloud.firestore {
       return hasProfile() && profile().role == 'owner';
     }
 
+    // An assistant is a trusted reviewer: they see and approve everyone's
+    // work and can clear the signup queue, but they cannot change anyone's
+    // role, remove people, edit pricing, or delete a quote.
+    function isAssistant() {
+      return hasProfile() && profile().role == 'assistant' && profile().active == true;
+    }
+
+    function isManager() {
+      return isOwner() || isAssistant();
+    }
+
     // A signed-up account is inert until the owner approves it. Until then
     // it can see nothing and write nothing except its own pending profile.
     function isApproved() {
@@ -61,42 +72,56 @@ service cloud.firestore {
                  && claimedEmail() == ownerEmail())
            );
 
-      // Only the owner can change roles or deactivate accounts, and even
-      // the owner cannot strip their own owner role by accident.
-      allow update: if isOwner()
-        && (request.resource.data.role == resource.data.role
-            || request.auth.uid != uid);
+      // The owner can change anything except their own role.
+      // An assistant may only flip the approval switch on an associate:
+      // never a role, never the owner, never another assistant.
+      allow update: if
+        (
+          isOwner()
+          && (request.resource.data.role == resource.data.role
+              || request.auth.uid != uid)
+        )
+        || (
+          isAssistant()
+          && resource.data.role == 'associate'
+          && request.resource.data.role == 'associate'
+          && request.resource.data.id == resource.data.id
+          && request.resource.data.email == resource.data.email
+          && request.auth.uid != uid
+        );
 
-      // The owner can remove a declined or stale profile. Quotes are still
-      // permanent — this only clears out people, never work.
+      // Removing people is the owner's alone. Quotes are unaffected —
+      // this only clears out profiles, never work.
       allow delete: if isOwner() && request.auth.uid != uid;
     }
 
     // ---- QUOTES ----
     match /quotes/{quoteId} {
-      // Owner sees everything. Approved associates see only their own.
-      // An unapproved account sees nothing at all.
-      allow read: if isOwner() ||
+      // Owner and assistants see everything. Approved associates see only
+      // their own. An unapproved account sees nothing at all.
+      allow read: if isManager() ||
         (isApproved() && resource.data.createdBy == request.auth.uid);
 
-      // The owner can create a quote in any state (they can approve their own
+      // Managers can create a quote in any state (they can approve their own
       // work on the spot). Approved associates create unapproved work only.
-      allow create: if isOwner() ||
+      allow create: if isManager() ||
         (isApproved() &&
          request.resource.data.createdBy == request.auth.uid &&
          request.resource.data.status in ['draft', 'pending']);
 
       // Associates can edit their own work only while it is unapproved, and
-      // cannot promote it past 'pending'. Once you approve it, they are out.
-      allow update: if isOwner() ||
+      // cannot promote it past 'pending'. Once it is approved or voided,
+      // they are out.
+      allow update: if isManager() ||
         (isApproved() &&
          resource.data.createdBy == request.auth.uid &&
          request.resource.data.createdBy == request.auth.uid &&
          resource.data.status in ['draft', 'pending', 'changes'] &&
          request.resource.data.status in ['draft', 'pending', 'changes']);
 
-      // Nobody can delete a quote. Not associates, not you.
-      allow delete: if false;
+      // Voiding is reversible and leaves the record intact, so assistants
+      // can do it. Erasing a quote outright is the owner's call alone.
+      allow delete: if isOwner();
     }
 
     // ---- COMPANY SETTINGS ----
@@ -109,15 +134,16 @@ service cloud.firestore {
 
     // The sign-up screen has to check the team code before anyone is signed
     // in, so the code lives in its own document. It contains no pricing data.
+    // Managers write it because the code rotates when the queue is cleared.
     match /settings/joincode {
       allow read: if true;
-      allow write: if isOwner();
+      allow write: if isManager();
     }
 
     // ---- ACTIVITY LOG ----
     match /activity/{entryId} {
-      // Only the owner can read the log.
-      allow read: if isOwner();
+      // Owner and assistants can read the log.
+      allow read: if isManager();
       // Approved members add to it; nobody can alter history.
       allow create: if isApproved();
       allow update, delete: if false;

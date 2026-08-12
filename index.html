@@ -159,8 +159,22 @@ const STATUS = {
     label: "Declined",
     color: BRAND.sub,
     bg: "#ECEEF1"
+  },
+  void: {
+    label: "Void",
+    color: "#7A6A55",
+    bg: "#EDE7DC"
   }
 };
+const isVoid = q => q && q.status === "void";
+const ROLE_LABEL = {
+  owner: "Owner",
+  assistant: "Assistant",
+  associate: "Associate"
+};
+const roleOf = u => u && u.role || "associate";
+const canManage = u => roleOf(u) === "owner" || roleOf(u) === "assistant";
+const isOwnerRole = u => roleOf(u) === "owner";
 const uid = () => Math.random().toString(36).slice(2, 9) + Date.now().toString(36).slice(-4);
 const hashPin = s => {
   let h = 5381;
@@ -526,7 +540,8 @@ function App() {
           return;
         }
         setPending(null);
-        const owner = profile.role === "owner";
+        const owner = isOwnerRole(profile);
+        const manager = canManage(profile);
         unsubS = db.collection("settings").doc("company").onSnapshot(d => {
           if (d.exists) setSettings(d.data());else {
             if (owner) db.collection("settings").doc("company").set(DEFAULT_SETTINGS).catch(warn("seed settings"));
@@ -546,7 +561,7 @@ function App() {
             [profile.id]: profile
           });
         });
-        const qref = owner ? db.collection("quotes") : db.collection("quotes").where("createdBy", "==", fu.uid);
+        const qref = manager ? db.collection("quotes") : db.collection("quotes").where("createdBy", "==", fu.uid);
         unsubQ = qref.onSnapshot(s => {
           const o = {};
           s.forEach(d => o[d.id] = d.data());
@@ -672,9 +687,10 @@ function App() {
       logActivity(u.name, "Signed in");
     }
   });
-  const isOwner = me.role === "owner";
+  const isOwner = isOwnerRole(me);
+  const isManager = canManage(me);
   const myQuotes = Object.values(quotes).filter(q => q.createdBy === me.id);
-  const visibleQuotes = isOwner ? Object.values(quotes) : myQuotes;
+  const visibleQuotes = isManager ? Object.values(quotes) : myQuotes;
   const upsertQuote = async q => {
     if (CLOUD) {
       await db.collection("quotes").doc(q.id).set(q);
@@ -682,6 +698,15 @@ function App() {
     }
     const next = Object.assign({}, quotes);
     next[q.id] = q;
+    await saveQuotes(next);
+  };
+  const deleteQuote = async id => {
+    if (CLOUD) {
+      await db.collection("quotes").doc(id).delete();
+      return;
+    }
+    const next = Object.assign({}, quotes);
+    delete next[id];
     await saveQuotes(next);
   };
   const logout = async () => {
@@ -696,10 +721,8 @@ function App() {
     await sessionClear();
   };
   const navItems = [["dashboard", "Dashboard"], ["new", "New quote"]];
-  if (isOwner) {
-    navItems.push(["team", "Team & review"]);
-    navItems.push(["settings", "Settings"]);
-  }
+  if (isManager) navItems.push(["team", "Team & review"]);
+  if (isOwner) navItems.push(["settings", "Settings"]);
   return React.createElement("div", {
     className: "min-h-screen",
     style: {
@@ -783,9 +806,10 @@ function App() {
     style: {
       color: BRAND.ink
     }
-  }, me.name), " \xB7 ", isOwner ? "Owner" : "Associate"), view === "dashboard" && React.createElement(Dashboard, {
+  }, me.name), " \xB7 ", ROLE_LABEL[roleOf(me)]), view === "dashboard" && React.createElement(Dashboard, {
     me: me,
     isOwner: isOwner,
+    isManager: isManager,
     quotes: visibleQuotes,
     users: users,
     settings: settings,
@@ -799,6 +823,7 @@ function App() {
     key: activeQuote ? activeQuote.id : "new",
     me: me,
     isOwner: isOwner,
+    isManager: isManager,
     settings: settings,
     existing: view === "edit" ? activeQuote : null,
     onAutosave: upsertQuote,
@@ -813,7 +838,7 @@ function App() {
       setView("dashboard");
       setActiveQuote(null);
     }
-  }), view === "team" && isOwner && React.createElement(TeamView, {
+  }), view === "team" && isManager && React.createElement(TeamView, {
     quotes: Object.values(quotes),
     users: users,
     settings: settings,
@@ -821,6 +846,8 @@ function App() {
     onUpdateQuote: upsertQuote,
     onSaveUsers: saveUsers,
     onDeleteUser: deleteUser,
+    onDeleteQuote: deleteQuote,
+    onSaveSettings: saveSettings,
     onPreview: setPreviewQuote,
     onOpen: q => {
       setActiveQuote(q);
@@ -1392,6 +1419,7 @@ function inPeriod(iso, p) {
 function Dashboard({
   me,
   isOwner,
+  isManager,
   quotes,
   users,
   settings,
@@ -1401,7 +1429,7 @@ function Dashboard({
 }) {
   const [period, setPeriod] = useState("month");
   const [filter, setFilter] = useState("all");
-  const periodQuotes = quotes.filter(q => inPeriod(q.createdAt, period));
+  const periodQuotes = quotes.filter(q => inPeriod(q.createdAt, period) && !isVoid(q));
   const totals = useMemo(() => {
     let pipeline = 0,
       booked = 0,
@@ -1420,7 +1448,7 @@ function Dashboard({
       count
     };
   }, [periodQuotes, settings]);
-  const list = periodQuotes.filter(q => filter === "all" || q.status === filter).sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+  const list = quotes.filter(q => inPeriod(q.createdAt, period)).filter(q => filter === "all" || q.status === filter).sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
   return React.createElement("div", null, React.createElement("div", {
     className: "flex items-center justify-between flex-wrap gap-3 mb-5"
   }, React.createElement("h2", {
@@ -1431,7 +1459,7 @@ function Dashboard({
       color: BRAND.navy,
       letterSpacing: "0.03em"
     }
-  }, isOwner ? "COMPANY OVERVIEW" : "MY QUOTES"), React.createElement("div", {
+  }, isManager ? "COMPANY OVERVIEW" : "MY QUOTES"), React.createElement("div", {
     className: "flex gap-2 items-center flex-wrap"
   }, React.createElement("select", {
     style: Object.assign({}, inputStyle, {
@@ -1510,7 +1538,11 @@ function Dashboard({
     const c = computeQuote(q, settings);
     return React.createElement(Card, {
       key: q.id,
-      style: {
+      style: isVoid(q) ? {
+        padding: 14,
+        opacity: 0.6,
+        background: "#FAF9F6"
+      } : {
         padding: 14
       }
     }, React.createElement("div", {
@@ -1522,27 +1554,36 @@ function Dashboard({
     }, React.createElement("div", {
       style: {
         fontWeight: 700,
-        fontSize: 15
+        fontSize: 15,
+        textDecoration: isVoid(q) ? "line-through" : "none"
       }
     }, q.quoteNo, " \xB7 ", q.clientName || "Unnamed client"), React.createElement("div", {
       style: {
         fontSize: 13,
         color: BRAND.sub
       }
-    }, q.jobTitle || q.category, " \xB7 ", fmtDate(q.createdAt), isOwner && users[q.createdBy] ? ` · by ${users[q.createdBy].name}` : ""), q.reviewNote && q.status === "changes" && React.createElement("div", {
+    }, q.jobTitle || q.category, " \xB7 ", fmtDate(q.createdAt), isManager && users[q.createdBy] ? ` · by ${users[q.createdBy].name}` : ""), q.reviewNote && q.status === "changes" && React.createElement("div", {
       style: {
         fontSize: 12,
         color: BRAND.red,
         marginTop: 3
       }
-    }, "Owner note: ", q.reviewNote)), React.createElement("div", {
+    }, "Owner note: ", q.reviewNote), isVoid(q) && React.createElement("div", {
+      style: {
+        fontSize: 12,
+        color: "#7A6A55",
+        marginTop: 3,
+        fontWeight: 600
+      }
+    }, "Voided", q.voidedBy ? " by " + q.voidedBy : "", q.voidReason ? " — " + q.voidReason : "", " \xB7 does not count toward any total")), React.createElement("div", {
       className: "flex items-center gap-3 flex-wrap"
     }, React.createElement("div", {
       style: {
         fontFamily: "'Barlow Condensed', sans-serif",
         fontSize: 22,
         fontWeight: 700,
-        color: BRAND.navy
+        color: BRAND.navy,
+        textDecoration: isVoid(q) ? "line-through" : "none"
       }
     }, money(c.total)), React.createElement(Badge, {
       status: q.status
@@ -1550,7 +1591,7 @@ function Dashboard({
       small: true,
       kind: "ghost",
       onClick: () => onPreview(q)
-    }, "Preview"), (q.createdBy === me.id || isOwner) && React.createElement(Btn, {
+    }, "Preview"), (q.createdBy === me.id || isManager) && !isVoid(q) && React.createElement(Btn, {
       small: true,
       kind: "ghost",
       onClick: () => onOpen(q)
@@ -1560,6 +1601,7 @@ function Dashboard({
 function QuoteForm({
   me,
   isOwner,
+  isManager,
   settings,
   existing,
   onSave,
@@ -1607,7 +1649,7 @@ function QuoteForm({
       [k]: v
     }));
   };
-  const locked = !isOwner && ["approved", "sent", "won", "lost"].includes(q.status);
+  const locked = isVoid(q) || !isManager && ["approved", "sent", "won", "lost"].includes(q.status);
   useEffect(() => {
     if (!dirty) return;
     if (!existing && !loggedStart) {
@@ -1699,13 +1741,13 @@ function QuoteForm({
       updatedAt: new Date().toISOString()
     });
     if (submit) {
-      next.status = isOwner ? "approved" : "pending";
+      next.status = isManager ? "approved" : "pending";
       next.history = (q.history || []).concat([{
         at: new Date().toISOString(),
         by: me.name,
-        action: isOwner ? "Saved & approved" : "Submitted for review"
+        action: isManager ? "Saved & approved" : "Submitted for review"
       }]);
-      logActivity(me.name, isOwner ? "Saved & approved quote" : "Submitted quote for review", q.quoteNo);
+      logActivity(me.name, isManager ? "Saved & approved quote" : "Submitted quote for review", q.quoteNo);
     } else {
       next.history = (q.history || []).concat([{
         at: new Date().toISOString(),
@@ -2202,7 +2244,7 @@ function QuoteForm({
     onClick: () => onPreview(Object.assign({}, q))
   }, "Preview client quote"), !locked && React.createElement(Btn, {
     onClick: () => save(true)
-  }, isOwner ? "Save & approve" : "Submit for owner review"), !locked && React.createElement(Btn, {
+  }, isManager ? "Save & approve" : "Submit for review"), !locked && React.createElement(Btn, {
     kind: "ghost",
     onClick: () => save(false)
   }, "Save as draft"), React.createElement(Btn, {
@@ -2224,6 +2266,8 @@ function TeamView({
   onUpdateQuote,
   onSaveUsers,
   onDeleteUser,
+  onDeleteQuote,
+  onSaveSettings,
   onPreview,
   onOpen,
   notify
@@ -2244,19 +2288,85 @@ function TeamView({
   const [noteFor, setNoteFor] = useState(null);
   const [note, setNote] = useState("");
   const pending = quotes.filter(q => q.status === "pending").sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+  const who = me ? me.name : "Owner";
+  const myRole = roleOf(me);
+  const iAmOwner = myRole === "owner";
+  const rotateTeamCode = async reason => {
+    const fresh = "JTPRO-" + Math.random().toString(36).slice(2, 6).toUpperCase();
+    try {
+      await onSaveSettings(Object.assign({}, settings, {
+        teamCode: fresh
+      }));
+      logActivity(who, "Team code rotated" + (reason ? " (" + reason + ")" : ""));
+      return fresh;
+    } catch (e) {
+      warn("rotate team code")(e);
+      return null;
+    }
+  };
   const act = async (q, status, extra) => {
     const upd = Object.assign({}, q, extra || {}, {
       status,
       history: (q.history || []).concat([{
         at: new Date().toISOString(),
-        by: "Owner",
+        by: who,
         action: STATUS[status].label
       }])
     });
     await onUpdateQuote(upd);
     notify(`Quote ${q.quoteNo}: ${STATUS[status].label}`);
   };
+  const voidQuote = async q => {
+    const reason = window.prompt("Why is quote " + q.quoteNo + " being voided?\n(e.g. duplicate, client cancelled, priced in error)");
+    if (reason === null) return;
+    const upd = Object.assign({}, q, {
+      status: "void",
+      voidReason: reason.trim(),
+      voidedAt: new Date().toISOString(),
+      voidedBy: who,
+      prevStatus: q.status,
+      history: (q.history || []).concat([{
+        at: new Date().toISOString(),
+        by: who,
+        action: "Voided" + (reason.trim() ? " — " + reason.trim() : "")
+      }])
+    });
+    await onUpdateQuote(upd);
+    logActivity(who, "Voided quote", q.quoteNo);
+    notify(`Quote ${q.quoteNo} voided`);
+  };
+  const unvoidQuote = async q => {
+    const back = q.prevStatus && STATUS[q.prevStatus] && q.prevStatus !== "void" ? q.prevStatus : "draft";
+    const upd = Object.assign({}, q, {
+      status: back,
+      voidReason: "",
+      voidedAt: null,
+      voidedBy: "",
+      history: (q.history || []).concat([{
+        at: new Date().toISOString(),
+        by: who,
+        action: "Restored to " + STATUS[back].label
+      }])
+    });
+    await onUpdateQuote(upd);
+    logActivity(who, "Restored voided quote", q.quoteNo);
+    notify(`Quote ${q.quoteNo} restored`);
+  };
+  const removeQuote = async q => {
+    if (!iAmOwner) return notify("Only the owner can permanently delete a quote.");
+    if (!window.confirm("Permanently delete quote " + q.quoteNo + " for " + (q.clientName || "this client") + "?\n\nThis erases it from the database. It cannot be undone and leaves no record of what was quoted.\n\nIf you only want it out of the way, cancel and use Void instead.")) return;
+    if (!window.confirm("Last check — delete " + q.quoteNo + " forever?")) return;
+    try {
+      await onDeleteQuote(q.id);
+      logActivity(who, "Permanently deleted quote", q.quoteNo);
+      notify(`Quote ${q.quoteNo} deleted`);
+    } catch (e) {
+      warn("delete quote")(e);
+      notify("Could not delete that quote.");
+    }
+  };
   const removeUser = async u => {
+    if (!iAmOwner) return notify("Only the owner can remove team members.");
     if (u.role === "owner") return notify("The owner account can't be removed.");
     if (me && u.id === me.id) return notify("You can't remove your own account.");
     const theirs = quotes.filter(q => q.createdBy === u.id).length;
@@ -2264,7 +2374,7 @@ function TeamView({
     if (!window.confirm(msg)) return;
     try {
       await onDeleteUser(u.id);
-      logActivity("Owner", "Removed account: " + u.name);
+      logActivity(who, "Removed account: " + u.name);
       notify(`${u.name} removed`);
     } catch (e) {
       warn("remove user")(e);
@@ -2274,7 +2384,7 @@ function TeamView({
   const awaiting = Object.values(users).filter(u => u.role !== "owner" && u.active !== true && u.declined !== true).sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
   const associates = Object.values(users);
   const perAssociate = associates.map(u => {
-    const qs = quotes.filter(q => q.createdBy === u.id && inPeriod(q.createdAt, period));
+    const qs = quotes.filter(q => q.createdBy === u.id && inPeriod(q.createdAt, period) && !isVoid(q));
     let pipeline = 0,
       won = 0;
     qs.forEach(q => {
@@ -2298,6 +2408,7 @@ function TeamView({
     marginBottom: 12
   };
   const outcomeQuotes = quotes.filter(q => ["approved", "sent"].includes(q.status));
+  const voided = quotes.filter(isVoid).sort((a, b) => new Date(b.voidedAt || 0) - new Date(a.voidedAt || 0));
   return React.createElement("div", {
     className: "flex flex-col gap-6"
   }, React.createElement("div", null, React.createElement("h2", {
@@ -2368,7 +2479,11 @@ function TeamView({
         setNoteFor(q.id);
         setNote("");
       }
-    }, "Request changes"))), noteFor === q.id && React.createElement("div", {
+    }, "Request changes"), React.createElement(Btn, {
+      small: true,
+      kind: "ghost",
+      onClick: () => voidQuote(q)
+    }, "Void"))), noteFor === q.id && React.createElement("div", {
       className: "flex gap-2 mt-3 flex-wrap"
     }, React.createElement("input", {
       style: Object.assign({}, inputStyle, {
@@ -2398,7 +2513,46 @@ function TeamView({
       fontSize: 13,
       marginLeft: 10
     }
-  }, awaiting.length)), awaiting.length === 0 ? React.createElement(Card, {
+  }, awaiting.length)), React.createElement(Card, {
+    style: {
+      padding: 14,
+      marginBottom: 12,
+      background: "#FBF3DE",
+      border: "none"
+    }
+  }, React.createElement("div", {
+    className: "flex justify-between items-center flex-wrap gap-2"
+  }, React.createElement("div", null, React.createElement("div", {
+    style: {
+      fontSize: 12,
+      textTransform: "uppercase",
+      letterSpacing: "0.08em",
+      color: BRAND.sub,
+      fontWeight: 700,
+      fontFamily: "'Barlow Condensed', sans-serif"
+    }
+  }, "Current team code"), React.createElement("div", {
+    style: {
+      fontFamily: "'Barlow Condensed', sans-serif",
+      fontSize: 26,
+      fontWeight: 700,
+      color: BRAND.navy,
+      letterSpacing: "0.06em"
+    }
+  }, settings && settings.requireTeamCode ? settings.teamCode || "—" : "Not required"), React.createElement("div", {
+    style: {
+      fontSize: 12,
+      color: BRAND.sub,
+      marginTop: 2
+    }
+  }, settings && settings.requireTeamCode ? "Changes automatically each time you approve or decline someone. Give the current code to one new hire at a time." : "Turn on “require team code” in Settings to stop strangers from signing up at all.")), settings && settings.requireTeamCode && React.createElement(Btn, {
+    small: true,
+    kind: "ghost",
+    onClick: async () => {
+      const nc = await rotateTeamCode("manual");
+      notify(nc ? `New team code: ${nc}` : "Could not change the code.");
+    }
+  }, "Rotate now"))), awaiting.length === 0 ? React.createElement(Card, {
     style: {
       padding: 18
     }
@@ -2443,8 +2597,9 @@ function TeamView({
         approvedAt: new Date().toISOString()
       });
       await onSaveUsers(next);
-      logActivity("Owner", "Approved account: " + u.name);
-      notify(`${u.name} approved — they can build quotes now`);
+      logActivity(who, "Approved account: " + u.name);
+      const nc = await rotateTeamCode("after approving " + u.name);
+      notify(nc ? `${u.name} approved · new team code ${nc}` : `${u.name} approved — they can build quotes now`);
     }
   }, "Approve"), React.createElement(Btn, {
     small: true,
@@ -2457,10 +2612,11 @@ function TeamView({
         declined: true
       });
       await onSaveUsers(next);
-      logActivity("Owner", "Declined account: " + u.name);
-      notify(`${u.name} declined`);
+      logActivity(who, "Declined account: " + u.name);
+      const nc = await rotateTeamCode("after declining " + u.name);
+      notify(nc ? `${u.name} declined · new team code ${nc}` : `${u.name} declined`);
     }
-  }, "Decline"), React.createElement(Btn, {
+  }, "Decline"), iAmOwner && React.createElement(Btn, {
     small: true,
     kind: "ghost",
     onClick: () => removeUser(u)
@@ -2501,12 +2657,22 @@ function TeamView({
       color: BRAND.gold,
       fontSize: 12
     }
-  }, "\u2605 Owner")), React.createElement("div", {
+  }, "\u2605 Owner"), u.role === "assistant" && React.createElement("span", {
+    style: {
+      background: BRAND.navySoft,
+      color: "#fff",
+      fontSize: 11,
+      fontWeight: 700,
+      borderRadius: 99,
+      padding: "2px 8px",
+      letterSpacing: "0.04em"
+    }
+  }, "ASSISTANT")), React.createElement("div", {
     style: {
       fontSize: 12,
       color: BRAND.sub
     }
-  }, "@", u.username, " \xB7 joined ", fmtDate(u.createdAt))), u.role !== "owner" && React.createElement("div", {
+  }, "@", u.username, " \xB7 joined ", fmtDate(u.createdAt))), u.role !== "owner" && iAmOwner && React.createElement("div", {
     className: "flex gap-2 flex-wrap justify-end"
   }, React.createElement(Btn, {
     small: true,
@@ -2519,10 +2685,25 @@ function TeamView({
         declined: !turningOn
       });
       await onSaveUsers(next);
-      logActivity("Owner", (turningOn ? "Reactivated" : "Deactivated") + " account: " + u.name);
+      logActivity(who, (turningOn ? "Reactivated" : "Deactivated") + " account: " + u.name);
       notify(turningOn ? `${u.name} reactivated` : `${u.name} deactivated`);
     }
   }, u.active !== true ? "Reactivate" : "Deactivate"), React.createElement(Btn, {
+    small: true,
+    kind: "ghost",
+    onClick: async () => {
+      const up = u.role === "assistant";
+      const nextRole = up ? "associate" : "assistant";
+      if (!window.confirm(up ? `Return ${u.name} to a regular associate?\n\nThey'll lose the ability to review and approve quotes, and will only see their own work again.` : `Make ${u.name} an assistant?\n\nThey'll be able to see and approve every associate's quotes, clear the signup queue, and read the activity log.\n\nThey will NOT be able to change roles, remove people, edit pricing, or delete quotes — those stay yours.`)) return;
+      const next = Object.assign({}, users);
+      next[u.id] = Object.assign({}, u, {
+        role: nextRole
+      });
+      await onSaveUsers(next);
+      logActivity(who, (up ? "Demoted to associate: " : "Promoted to assistant: ") + u.name);
+      notify(up ? `${u.name} is now an associate` : `${u.name} is now an assistant`);
+    }
+  }, u.role === "assistant" ? "Make associate" : "Make assistant"), React.createElement(Btn, {
     small: true,
     kind: "ghost",
     onClick: () => removeUser(u)
@@ -2586,12 +2767,73 @@ function TeamView({
     small: true,
     kind: "ghost",
     onClick: () => act(q, "lost")
-  }, "Declined"))))), outcomeQuotes.length === 0 && React.createElement(Card, null, React.createElement("div", {
+  }, "Declined"), React.createElement(Btn, {
+    small: true,
+    kind: "ghost",
+    onClick: () => voidQuote(q)
+  }, "Void"))))), outcomeQuotes.length === 0 && React.createElement(Card, null, React.createElement("div", {
     style: {
       color: BRAND.sub,
       fontSize: 14
     }
   }, "Approved and sent quotes will appear here so you can record whether the client accepted.")))), React.createElement("div", null, React.createElement("h2", {
+    style: h2Style
+  }, "VOIDED QUOTES", voided.length > 0 && React.createElement("span", {
+    style: {
+      background: "#EDE7DC",
+      color: "#7A6A55",
+      borderRadius: 99,
+      padding: "2px 10px",
+      fontSize: 13,
+      marginLeft: 10
+    }
+  }, voided.length)), voided.length === 0 ? React.createElement(Card, {
+    style: {
+      padding: 18
+    }
+  }, React.createElement("div", {
+    style: {
+      fontSize: 14,
+      color: BRAND.sub
+    }
+  }, "Nothing voided. Voided quotes drop out of every total but stay on record, so you can always show what was quoted and why it was pulled.")) : React.createElement("div", {
+    className: "flex flex-col gap-2"
+  }, voided.map(q => React.createElement(Card, {
+    key: q.id,
+    style: {
+      padding: 12,
+      opacity: 0.85,
+      borderLeft: "4px solid #C9BDA6"
+    }
+  }, React.createElement("div", {
+    className: "flex justify-between items-start flex-wrap gap-2"
+  }, React.createElement("div", {
+    style: {
+      fontSize: 14
+    }
+  }, React.createElement("div", null, React.createElement("strong", {
+    style: {
+      textDecoration: "line-through"
+    }
+  }, q.quoteNo), " \xB7 ", q.clientName, " \xB7 ", money(computeQuote(q, settings).total), " ", React.createElement(Badge, {
+    status: "void"
+  })), React.createElement("div", {
+    style: {
+      fontSize: 12,
+      color: BRAND.sub,
+      marginTop: 3
+    }
+  }, "Voided by ", q.voidedBy || "—", q.voidedAt ? " · " + fmtDate(q.voidedAt) : "", q.voidReason ? " · " + q.voidReason : "")), React.createElement("div", {
+    className: "flex gap-2 flex-wrap"
+  }, React.createElement(Btn, {
+    small: true,
+    kind: "gold",
+    onClick: () => unvoidQuote(q)
+  }, "Restore"), iAmOwner && React.createElement(Btn, {
+    small: true,
+    kind: "danger",
+    onClick: () => removeQuote(q)
+  }, "Delete forever"))))))), React.createElement("div", null, React.createElement("h2", {
     style: h2Style
   }, "ACTIVITY LOG"), React.createElement(Card, {
     style: {
@@ -2744,9 +2986,10 @@ function PreviewModal({
 }) {
   const c = computeQuote(quote, settings);
   const author = users[quote.createdBy];
-  const isOwnerViewer = me && me.role === "owner";
-  const releasable = ["approved", "sent", "won"].includes(quote.status);
-  const canPrint = isOwnerViewer || releasable;
+  const isOwnerViewer = me && canManage(me);
+  const voided = isVoid(quote);
+  const releasable = !voided && ["approved", "sent", "won"].includes(quote.status);
+  const canPrint = !voided && (isOwnerViewer || releasable);
   const viewerTag = useMemo(() => {
     const who = me ? me.name : "Unknown";
     const when = new Date().toLocaleString("en-US", {
@@ -2796,14 +3039,14 @@ function PreviewModal({
     onClick: doPrint
   }, "Print / Save as PDF") : React.createElement("span", {
     style: {
-      background: "#FBF3DE",
-      color: BRAND.amber,
+      background: voided ? "#EDE7DC" : "#FBF3DE",
+      color: voided ? "#7A6A55" : BRAND.amber,
       padding: "7px 14px",
       borderRadius: 8,
       fontSize: 13,
       fontWeight: 700
     }
-  }, "Printing unlocks after owner approval"), React.createElement("button", {
+  }, voided ? "This quote is void and cannot be printed" : "Printing unlocks after owner approval"), React.createElement("button", {
     onClick: onClose,
     style: {
       background: "transparent",
@@ -2853,7 +3096,7 @@ function PreviewModal({
       whiteSpace: "nowrap",
       textAlign: "center"
     }
-  }, "DRAFT \xB7 NOT APPROVED", React.createElement("div", {
+  }, voided ? "VOID · NOT VALID" : "DRAFT · NOT APPROVED", React.createElement("div", {
     style: {
       fontSize: 15,
       letterSpacing: "0.04em",

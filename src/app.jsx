@@ -215,7 +215,18 @@ const STATUS = {
   sent:     { label: "Sent to client", color: BRAND.navySoft, bg: "#E4EBF6" },
   won:      { label: "Won", color: BRAND.green, bg: "#D7EEDF" },
   lost:     { label: "Declined", color: BRAND.sub, bg: "#ECEEF1" },
+  void:     { label: "Void", color: "#7A6A55", bg: "#EDE7DC" },
 };
+
+/* Voided quotes are ignored by every money figure and can never be printed,
+   but the record stays so there is always proof of what was quoted. */
+const isVoid = (q) => q && q.status === "void";
+
+/* ---------- roles ---------- */
+const ROLE_LABEL = { owner: "Owner", assistant: "Assistant", associate: "Associate" };
+const roleOf = (u) => (u && u.role) || "associate";
+const canManage = (u) => roleOf(u) === "owner" || roleOf(u) === "assistant";
+const isOwnerRole = (u) => roleOf(u) === "owner";
 
 /* ---------- helpers ---------- */
 const uid = () => Math.random().toString(36).slice(2, 9) + Date.now().toString(36).slice(-4);
@@ -413,7 +424,8 @@ function App() {
           return;
         }
         setPending(null);
-        const owner = profile.role === "owner";
+        const owner = isOwnerRole(profile);
+        const manager = canManage(profile);
 
         // Settings are readable only once signed in, so subscribe here.
         unsubS = db.collection("settings").doc("company").onSnapshot((d) => {
@@ -429,7 +441,7 @@ function App() {
           const o = {}; s.forEach((d) => (o[d.id] = d.data())); setUsers(o);
         }, (e) => { warn("team list")(e); setUsers({ [profile.id]: profile }); });
 
-        const qref = owner ? db.collection("quotes") : db.collection("quotes").where("createdBy", "==", fu.uid);
+        const qref = manager ? db.collection("quotes") : db.collection("quotes").where("createdBy", "==", fu.uid);
         unsubQ = qref.onSnapshot((s) => {
           const o = {}; s.forEach((d) => (o[d.id] = d.data())); setQuotes(o);
         }, (e) => { warn("quotes")(e); setQuotes({}); });
@@ -497,12 +509,18 @@ function App() {
     ? <CloudAuth gate={joinGate} />
     : <Auth users={users} settings={settings} onSaveUsers={saveUsers} onLogin={async (u) => { setMe(u); await sessionSet(u.id); logActivity(u.name, "Signed in"); }} />;
 
-  const isOwner = me.role === "owner";
+  const isOwner = isOwnerRole(me);
+  const isManager = canManage(me);
   const myQuotes = Object.values(quotes).filter((q) => q.createdBy === me.id);
-  const visibleQuotes = isOwner ? Object.values(quotes) : myQuotes;
+  const visibleQuotes = isManager ? Object.values(quotes) : myQuotes;
   const upsertQuote = async (q) => {
     if (CLOUD) { await db.collection("quotes").doc(q.id).set(q); return; }
     const next = Object.assign({}, quotes); next[q.id] = q; await saveQuotes(next);
+  };
+  /* Permanent erase. Owner only, and deliberately separate from voiding. */
+  const deleteQuote = async (id) => {
+    if (CLOUD) { await db.collection("quotes").doc(id).delete(); return; }
+    const next = Object.assign({}, quotes); delete next[id]; await saveQuotes(next);
   };
   const logout = async () => {
     if (CLOUD) { await fbAuth.signOut(); setMe(null); setView("dashboard"); return; }
@@ -510,7 +528,8 @@ function App() {
   };
 
   const navItems = [["dashboard", "Dashboard"], ["new", "New quote"]];
-  if (isOwner) { navItems.push(["team", "Team & review"]); navItems.push(["settings", "Settings"]); }
+  if (isManager) navItems.push(["team", "Team & review"]);
+  if (isOwner) navItems.push(["settings", "Settings"]);
 
   return (
     <div className="min-h-screen" style={{ background: BRAND.paper, color: BRAND.ink }}>
@@ -535,21 +554,21 @@ function App() {
 
       <main className="max-w-5xl mx-auto px-4 py-6">
         <div className="mb-4 text-sm" style={{ color: BRAND.sub }}>
-          Signed in as <strong style={{ color: BRAND.ink }}>{me.name}</strong> · {isOwner ? "Owner" : "Associate"}
+          Signed in as <strong style={{ color: BRAND.ink }}>{me.name}</strong> · {ROLE_LABEL[roleOf(me)]}
         </div>
 
-        {view === "dashboard" && <Dashboard me={me} isOwner={isOwner} quotes={visibleQuotes} users={users} settings={settings}
+        {view === "dashboard" && <Dashboard me={me} isOwner={isOwner} isManager={isManager} quotes={visibleQuotes} users={users} settings={settings}
           onOpen={(q) => { setActiveQuote(q); setView("edit"); }} onPreview={setPreviewQuote} onNew={() => setView("new")} />}
 
         {(view === "new" || view === "edit") && (
-          <QuoteForm key={activeQuote ? activeQuote.id : "new"} me={me} isOwner={isOwner} settings={settings} existing={view === "edit" ? activeQuote : null}
+          <QuoteForm key={activeQuote ? activeQuote.id : "new"} me={me} isOwner={isOwner} isManager={isManager} settings={settings} existing={view === "edit" ? activeQuote : null}
             onAutosave={upsertQuote}
             onSave={async (q) => { await upsertQuote(q); notify(q.status === "draft" ? "Draft saved — visible to the owner" : q.status === "approved" ? "Quote saved & approved" : "Quote submitted for owner review"); setView("dashboard"); setActiveQuote(null); }}
             onPreview={setPreviewQuote} onCancel={() => { setView("dashboard"); setActiveQuote(null); }} />
         )}
 
-        {view === "team" && isOwner && <TeamView quotes={Object.values(quotes)} users={users} settings={settings} me={me}
-          onUpdateQuote={upsertQuote} onSaveUsers={saveUsers} onDeleteUser={deleteUser} onPreview={setPreviewQuote}
+        {view === "team" && isManager && <TeamView quotes={Object.values(quotes)} users={users} settings={settings} me={me}
+          onUpdateQuote={upsertQuote} onSaveUsers={saveUsers} onDeleteUser={deleteUser} onDeleteQuote={deleteQuote} onSaveSettings={saveSettings} onPreview={setPreviewQuote}
           onOpen={(q) => { setActiveQuote(q); setView("edit"); }} notify={notify} />}
 
         {view === "settings" && isOwner && <SettingsView settings={settings} onSave={async (s) => { await saveSettings(s); notify("Settings saved"); }} />}
@@ -800,11 +819,12 @@ function inPeriod(iso, p) {
   return d.getFullYear() === n.getFullYear() && d.getMonth() === n.getMonth();
 }
 
-function Dashboard({ me, isOwner, quotes, users, settings, onOpen, onPreview, onNew }) {
+function Dashboard({ me, isOwner, isManager, quotes, users, settings, onOpen, onPreview, onNew }) {
   const [period, setPeriod] = useState("month");
   const [filter, setFilter] = useState("all");
 
-  const periodQuotes = quotes.filter((q) => inPeriod(q.createdAt, period));
+  // Voided quotes never count toward any figure.
+  const periodQuotes = quotes.filter((q) => inPeriod(q.createdAt, period) && !isVoid(q));
   const totals = useMemo(() => {
     let pipeline = 0, booked = 0, sentOut = 0, count = periodQuotes.length;
     periodQuotes.forEach((q) => {
@@ -816,7 +836,11 @@ function Dashboard({ me, isOwner, quotes, users, settings, onOpen, onPreview, on
     return { pipeline, booked, sentOut, count };
   }, [periodQuotes, settings]);
 
-  const list = periodQuotes
+  /* Voided quotes are excluded from the money figures above, but they still
+     belong in the list — otherwise a quote appears to vanish and nobody
+     knows what happened to it. */
+  const list = quotes
+    .filter((q) => inPeriod(q.createdAt, period))
     .filter((q) => filter === "all" || q.status === filter)
     .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
 
@@ -824,7 +848,7 @@ function Dashboard({ me, isOwner, quotes, users, settings, onOpen, onPreview, on
     <div>
       <div className="flex items-center justify-between flex-wrap gap-3 mb-5">
         <h2 style={{ fontFamily: "'Barlow Condensed', sans-serif", fontSize: 28, fontWeight: 700, color: BRAND.navy, letterSpacing: "0.03em" }}>
-          {isOwner ? "COMPANY OVERVIEW" : "MY QUOTES"}
+          {isManager ? "COMPANY OVERVIEW" : "MY QUOTES"}
         </h2>
         <div className="flex gap-2 items-center flex-wrap">
           <select style={Object.assign({}, inputStyle, { width: "auto", padding: "8px 10px" })} value={period} onChange={(e) => setPeriod(e.target.value)}>
@@ -868,18 +892,19 @@ function Dashboard({ me, isOwner, quotes, users, settings, onOpen, onPreview, on
           {list.map((q) => {
             const c = computeQuote(q, settings);
             return (
-              <Card key={q.id} style={{ padding: 14 }}>
+              <Card key={q.id} style={isVoid(q) ? { padding: 14, opacity: 0.6, background: "#FAF9F6" } : { padding: 14 }}>
                 <div className="flex items-center justify-between flex-wrap gap-2">
                   <div style={{ minWidth: 200 }}>
-                    <div style={{ fontWeight: 700, fontSize: 15 }}>{q.quoteNo} · {q.clientName || "Unnamed client"}</div>
-                    <div style={{ fontSize: 13, color: BRAND.sub }}>{q.jobTitle || q.category} · {fmtDate(q.createdAt)}{isOwner && users[q.createdBy] ? ` · by ${users[q.createdBy].name}` : ""}</div>
+                    <div style={{ fontWeight: 700, fontSize: 15, textDecoration: isVoid(q) ? "line-through" : "none" }}>{q.quoteNo} · {q.clientName || "Unnamed client"}</div>
+                    <div style={{ fontSize: 13, color: BRAND.sub }}>{q.jobTitle || q.category} · {fmtDate(q.createdAt)}{isManager && users[q.createdBy] ? ` · by ${users[q.createdBy].name}` : ""}</div>
                     {q.reviewNote && q.status === "changes" && <div style={{ fontSize: 12, color: BRAND.red, marginTop: 3 }}>Owner note: {q.reviewNote}</div>}
+                    {isVoid(q) && <div style={{ fontSize: 12, color: "#7A6A55", marginTop: 3, fontWeight: 600 }}>Voided{q.voidedBy ? " by " + q.voidedBy : ""}{q.voidReason ? " — " + q.voidReason : ""} · does not count toward any total</div>}
                   </div>
                   <div className="flex items-center gap-3 flex-wrap">
-                    <div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontSize: 22, fontWeight: 700, color: BRAND.navy }}>{money(c.total)}</div>
+                    <div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontSize: 22, fontWeight: 700, color: BRAND.navy, textDecoration: isVoid(q) ? "line-through" : "none" }}>{money(c.total)}</div>
                     <Badge status={q.status} />
                     <Btn small kind="ghost" onClick={() => onPreview(q)}>Preview</Btn>
-                    {(q.createdBy === me.id || isOwner) && <Btn small kind="ghost" onClick={() => onOpen(q)}>Open</Btn>}
+                    {(q.createdBy === me.id || isManager) && !isVoid(q) && <Btn small kind="ghost" onClick={() => onOpen(q)}>Open</Btn>}
                   </div>
                 </div>
               </Card>
@@ -892,7 +917,7 @@ function Dashboard({ me, isOwner, quotes, users, settings, onOpen, onPreview, on
 }
 
 /* ================= QUOTE FORM ================= */
-function QuoteForm({ me, isOwner, settings, existing, onSave, onAutosave, onPreview, onCancel }) {
+function QuoteForm({ me, isOwner, isManager, settings, existing, onSave, onAutosave, onPreview, onCancel }) {
   const [q, setQ] = useState(existing || {
     id: uid(),
     quoteNo: "Q-" + new Date().getFullYear() + "-" + Math.floor(1000 + Math.random() * 9000),
@@ -908,7 +933,7 @@ function QuoteForm({ me, isOwner, settings, existing, onSave, onAutosave, onPrev
   const [dirty, setDirty] = useState(false);
   const [loggedStart, setLoggedStart] = useState(false);
   const set = (k, v) => { setDirty(true); setQ((p) => Object.assign({}, p, { [k]: v })); };
-  const locked = !isOwner && ["approved", "sent", "won", "lost"].includes(q.status);
+  const locked = isVoid(q) || (!isManager && ["approved", "sent", "won", "lost"].includes(q.status));
   useEffect(() => {
     if (!dirty) return;
     if (!existing && !loggedStart) { logActivity(me.name, "Started a new draft", q.quoteNo); setLoggedStart(true); }
@@ -944,9 +969,9 @@ function QuoteForm({ me, isOwner, settings, existing, onSave, onAutosave, onPrev
     if (!q.clientName.trim()) return alert("Enter the client's name.");
     const next = Object.assign({}, q, { updatedAt: new Date().toISOString() });
     if (submit) {
-      next.status = isOwner ? "approved" : "pending";
-      next.history = (q.history || []).concat([{ at: new Date().toISOString(), by: me.name, action: isOwner ? "Saved & approved" : "Submitted for review" }]);
-      logActivity(me.name, isOwner ? "Saved & approved quote" : "Submitted quote for review", q.quoteNo);
+      next.status = isManager ? "approved" : "pending";
+      next.history = (q.history || []).concat([{ at: new Date().toISOString(), by: me.name, action: isManager ? "Saved & approved" : "Submitted for review" }]);
+      logActivity(me.name, isManager ? "Saved & approved quote" : "Submitted quote for review", q.quoteNo);
     } else {
       next.history = (q.history || []).concat([{ at: new Date().toISOString(), by: me.name, action: "Saved draft" }]);
       logActivity(me.name, "Saved draft", q.quoteNo);
@@ -1106,7 +1131,7 @@ function QuoteForm({ me, isOwner, settings, existing, onSave, onAutosave, onPrev
 
             <div className="flex flex-col gap-2 mt-4">
               <Btn kind="gold" onClick={() => onPreview(Object.assign({}, q))}>Preview client quote</Btn>
-              {!locked && <Btn onClick={() => save(true)}>{isOwner ? "Save & approve" : "Submit for owner review"}</Btn>}
+              {!locked && <Btn onClick={() => save(true)}>{isManager ? "Save & approve" : "Submit for review"}</Btn>}
               {!locked && <Btn kind="ghost" onClick={() => save(false)}>Save as draft</Btn>}
               <Btn kind="ghost" onClick={onCancel}>Back</Btn>
             </div>
@@ -1119,7 +1144,7 @@ function QuoteForm({ me, isOwner, settings, existing, onSave, onAutosave, onPrev
 }
 
 /* ================= OWNER: TEAM & REVIEW ================= */
-function TeamView({ quotes, users, settings, me, onUpdateQuote, onSaveUsers, onDeleteUser, onPreview, onOpen, notify }) {
+function TeamView({ quotes, users, settings, me, onUpdateQuote, onSaveUsers, onDeleteUser, onDeleteQuote, onSaveSettings, onPreview, onOpen, notify }) {
   const [period, setPeriod] = useState("month");
   const [activity, setActivity] = useState([]);
   useEffect(() => {
@@ -1134,16 +1159,74 @@ function TeamView({ quotes, users, settings, me, onUpdateQuote, onSaveUsers, onD
   const [note, setNote] = useState("");
   const pending = quotes.filter((q) => q.status === "pending").sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
 
+  const who = me ? me.name : "Owner";
+  const myRole = roleOf(me);
+  const iAmOwner = myRole === "owner";
+
+  /* The join code burns after each use. Clearing someone from the queue
+     rotates it, so in practice a code gets one person in and then dies.
+     (A true rotate-on-signup would need a server-side function.) */
+  const rotateTeamCode = async (reason) => {
+    const fresh = "JTPRO-" + Math.random().toString(36).slice(2, 6).toUpperCase();
+    try {
+      await onSaveSettings(Object.assign({}, settings, { teamCode: fresh }));
+      logActivity(who, "Team code rotated" + (reason ? " (" + reason + ")" : ""));
+      return fresh;
+    } catch (e) { warn("rotate team code")(e); return null; }
+  };
+
   const act = async (q, status, extra) => {
-    const upd = Object.assign({}, q, extra || {}, { status, history: (q.history || []).concat([{ at: new Date().toISOString(), by: "Owner", action: STATUS[status].label }]) });
+    const upd = Object.assign({}, q, extra || {}, { status, history: (q.history || []).concat([{ at: new Date().toISOString(), by: who, action: STATUS[status].label }]) });
     await onUpdateQuote(upd);
     notify(`Quote ${q.quoteNo}: ${STATUS[status].label}`);
+  };
+
+  /* Void keeps the record but takes the quote out of circulation: no
+     printing, no pipeline, no revenue. Reversible, unlike delete. */
+  const voidQuote = async (q) => {
+    const reason = window.prompt("Why is quote " + q.quoteNo + " being voided?\n(e.g. duplicate, client cancelled, priced in error)");
+    if (reason === null) return;
+    const upd = Object.assign({}, q, {
+      status: "void",
+      voidReason: reason.trim(),
+      voidedAt: new Date().toISOString(),
+      voidedBy: who,
+      prevStatus: q.status,
+      history: (q.history || []).concat([{ at: new Date().toISOString(), by: who, action: "Voided" + (reason.trim() ? " — " + reason.trim() : "") }]),
+    });
+    await onUpdateQuote(upd);
+    logActivity(who, "Voided quote", q.quoteNo);
+    notify(`Quote ${q.quoteNo} voided`);
+  };
+
+  const unvoidQuote = async (q) => {
+    const back = q.prevStatus && STATUS[q.prevStatus] && q.prevStatus !== "void" ? q.prevStatus : "draft";
+    const upd = Object.assign({}, q, {
+      status: back, voidReason: "", voidedAt: null, voidedBy: "",
+      history: (q.history || []).concat([{ at: new Date().toISOString(), by: who, action: "Restored to " + STATUS[back].label }]),
+    });
+    await onUpdateQuote(upd);
+    logActivity(who, "Restored voided quote", q.quoteNo);
+    notify(`Quote ${q.quoteNo} restored`);
+  };
+
+  /* Erases the quote outright. Owner only — assistants void instead. */
+  const removeQuote = async (q) => {
+    if (!iAmOwner) return notify("Only the owner can permanently delete a quote.");
+    if (!window.confirm("Permanently delete quote " + q.quoteNo + " for " + (q.clientName || "this client") + "?\n\nThis erases it from the database. It cannot be undone and leaves no record of what was quoted.\n\nIf you only want it out of the way, cancel and use Void instead.")) return;
+    if (!window.confirm("Last check — delete " + q.quoteNo + " forever?")) return;
+    try {
+      await onDeleteQuote(q.id);
+      logActivity(who, "Permanently deleted quote", q.quoteNo);
+      notify(`Quote ${q.quoteNo} deleted`);
+    } catch (e) { warn("delete quote")(e); notify("Could not delete that quote."); }
   };
 
   /* Deleting a profile is for tidying up junk accounts. It does NOT revoke
      a sign-in — the person could register again and land back in the queue.
      To keep someone out for good, Decline instead. */
   const removeUser = async (u) => {
+    if (!iAmOwner) return notify("Only the owner can remove team members.");
     if (u.role === "owner") return notify("The owner account can't be removed.");
     if (me && u.id === me.id) return notify("You can't remove your own account.");
     const theirs = quotes.filter((q) => q.createdBy === u.id).length;
@@ -1153,7 +1236,7 @@ function TeamView({ quotes, users, settings, me, onUpdateQuote, onSaveUsers, onD
     if (!window.confirm(msg)) return;
     try {
       await onDeleteUser(u.id);
-      logActivity("Owner", "Removed account: " + u.name);
+      logActivity(who, "Removed account: " + u.name);
       notify(`${u.name} removed`);
     } catch (e) {
       warn("remove user")(e);
@@ -1168,7 +1251,7 @@ function TeamView({ quotes, users, settings, me, onUpdateQuote, onSaveUsers, onD
 
   const associates = Object.values(users);
   const perAssociate = associates.map((u) => {
-    const qs = quotes.filter((q) => q.createdBy === u.id && inPeriod(q.createdAt, period));
+    const qs = quotes.filter((q) => q.createdBy === u.id && inPeriod(q.createdAt, period) && !isVoid(q));
     let pipeline = 0, won = 0;
     qs.forEach((q) => {
       const t = computeQuote(q, settings).total;
@@ -1180,6 +1263,7 @@ function TeamView({ quotes, users, settings, me, onUpdateQuote, onSaveUsers, onD
 
   const h2Style = { fontFamily: "'Barlow Condensed', sans-serif", fontSize: 26, fontWeight: 700, color: BRAND.navy, letterSpacing: "0.03em", marginBottom: 12 };
   const outcomeQuotes = quotes.filter((q) => ["approved", "sent"].includes(q.status));
+  const voided = quotes.filter(isVoid).sort((a, b) => new Date(b.voidedAt || 0) - new Date(a.voidedAt || 0));
 
   return (
     <div className="flex flex-col gap-6">
@@ -1207,6 +1291,7 @@ function TeamView({ quotes, users, settings, me, onUpdateQuote, onSaveUsers, onD
                   <Btn small kind="ghost" onClick={() => onOpen(q)}>Edit</Btn>
                   <Btn small kind="gold" onClick={() => act(q, "approved", { reviewNote: "" })}>Approve</Btn>
                   <Btn small kind="danger" onClick={() => { setNoteFor(q.id); setNote(""); }}>Request changes</Btn>
+                  <Btn small kind="ghost" onClick={() => voidQuote(q)}>Void</Btn>
                 </div>
               </div>
               {noteFor === q.id && (
@@ -1226,6 +1311,27 @@ function TeamView({ quotes, users, settings, me, onUpdateQuote, onSaveUsers, onD
           ACCOUNTS AWAITING APPROVAL
           {awaiting.length > 0 && <span style={{ background: BRAND.gold, color: BRAND.navy, borderRadius: 99, padding: "2px 10px", fontSize: 13, marginLeft: 10 }}>{awaiting.length}</span>}
         </h2>
+        <Card style={{ padding: 14, marginBottom: 12, background: "#FBF3DE", border: "none" }}>
+          <div className="flex justify-between items-center flex-wrap gap-2">
+            <div>
+              <div style={{ fontSize: 12, textTransform: "uppercase", letterSpacing: "0.08em", color: BRAND.sub, fontWeight: 700, fontFamily: "'Barlow Condensed', sans-serif" }}>Current team code</div>
+              <div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontSize: 26, fontWeight: 700, color: BRAND.navy, letterSpacing: "0.06em" }}>
+                {settings && settings.requireTeamCode ? (settings.teamCode || "—") : "Not required"}
+              </div>
+              <div style={{ fontSize: 12, color: BRAND.sub, marginTop: 2 }}>
+                {settings && settings.requireTeamCode
+                  ? "Changes automatically each time you approve or decline someone. Give the current code to one new hire at a time."
+                  : "Turn on “require team code” in Settings to stop strangers from signing up at all."}
+              </div>
+            </div>
+            {settings && settings.requireTeamCode && (
+              <Btn small kind="ghost" onClick={async () => {
+                const nc = await rotateTeamCode("manual");
+                notify(nc ? `New team code: ${nc}` : "Could not change the code.");
+              }}>Rotate now</Btn>
+            )}
+          </div>
+        </Card>
         {awaiting.length === 0 ? (
           <Card style={{ padding: 18 }}>
             <div style={{ fontSize: 14, color: BRAND.sub }}>Nobody is waiting. New sign-ups land here and can't see or build anything until you approve them.</div>
@@ -1242,18 +1348,20 @@ function TeamView({ quotes, users, settings, me, onUpdateQuote, onSaveUsers, onD
                     const next = Object.assign({}, users);
                     next[u.id] = Object.assign({}, u, { active: true, declined: false, approvedAt: new Date().toISOString() });
                     await onSaveUsers(next);
-                    logActivity("Owner", "Approved account: " + u.name);
-                    notify(`${u.name} approved — they can build quotes now`);
+                    logActivity(who, "Approved account: " + u.name);
+                    const nc = await rotateTeamCode("after approving " + u.name);
+                    notify(nc ? `${u.name} approved · new team code ${nc}` : `${u.name} approved — they can build quotes now`);
                   }}>Approve</Btn>
                   <Btn small kind="ghost" onClick={async () => {
                     if (!window.confirm(`Decline ${u.name}? They keep their login but stay locked out.`)) return;
                     const next = Object.assign({}, users);
                     next[u.id] = Object.assign({}, u, { active: false, declined: true });
                     await onSaveUsers(next);
-                    logActivity("Owner", "Declined account: " + u.name);
-                    notify(`${u.name} declined`);
+                    logActivity(who, "Declined account: " + u.name);
+                    const nc = await rotateTeamCode("after declining " + u.name);
+                    notify(nc ? `${u.name} declined · new team code ${nc}` : `${u.name} declined`);
                   }}>Decline</Btn>
-                  <Btn small kind="ghost" onClick={() => removeUser(u)}>Remove</Btn>
+                  {iAmOwner && <Btn small kind="ghost" onClick={() => removeUser(u)}>Remove</Btn>}
                 </div>
               </Card>
             ))}
@@ -1273,10 +1381,15 @@ function TeamView({ quotes, users, settings, me, onUpdateQuote, onSaveUsers, onD
             <Card key={u.id}>
               <div className="flex justify-between items-start">
                 <div>
-                  <div style={{ fontWeight: 700, fontSize: 15 }}>{u.name} {u.role === "owner" && <span style={{ color: BRAND.gold, fontSize: 12 }}>★ Owner</span>}</div>
+                  <div style={{ fontWeight: 700, fontSize: 15 }}>
+                    {u.name}{" "}
+                    {u.role === "owner" && <span style={{ color: BRAND.gold, fontSize: 12 }}>★ Owner</span>}
+                    {u.role === "assistant" && <span style={{ background: BRAND.navySoft, color: "#fff", fontSize: 11, fontWeight: 700, borderRadius: 99, padding: "2px 8px", letterSpacing: "0.04em" }}>ASSISTANT</span>}
+                  </div>
                   <div style={{ fontSize: 12, color: BRAND.sub }}>@{u.username} · joined {fmtDate(u.createdAt)}</div>
                 </div>
-                {u.role !== "owner" && (
+                {/* Deactivating, promoting and removing are the owner's alone. */}
+                {u.role !== "owner" && iAmOwner && (
                   <div className="flex gap-2 flex-wrap justify-end">
                   <Btn small kind={u.active !== true ? "gold" : "danger"} onClick={async () => {
                     const turningOn = u.active !== true;
@@ -1285,9 +1398,21 @@ function TeamView({ quotes, users, settings, me, onUpdateQuote, onSaveUsers, onD
                     // approval queue, so it can't quietly reappear there.
                     next[u.id] = Object.assign({}, u, { active: turningOn, declined: !turningOn });
                     await onSaveUsers(next);
-                    logActivity("Owner", (turningOn ? "Reactivated" : "Deactivated") + " account: " + u.name);
+                    logActivity(who, (turningOn ? "Reactivated" : "Deactivated") + " account: " + u.name);
                     notify(turningOn ? `${u.name} reactivated` : `${u.name} deactivated`);
                   }}>{u.active !== true ? "Reactivate" : "Deactivate"}</Btn>
+                  <Btn small kind="ghost" onClick={async () => {
+                    const up = u.role === "assistant";
+                    const nextRole = up ? "associate" : "assistant";
+                    if (!window.confirm(up
+                      ? `Return ${u.name} to a regular associate?\n\nThey'll lose the ability to review and approve quotes, and will only see their own work again.`
+                      : `Make ${u.name} an assistant?\n\nThey'll be able to see and approve every associate's quotes, clear the signup queue, and read the activity log.\n\nThey will NOT be able to change roles, remove people, edit pricing, or delete quotes — those stay yours.`)) return;
+                    const next = Object.assign({}, users);
+                    next[u.id] = Object.assign({}, u, { role: nextRole });
+                    await onSaveUsers(next);
+                    logActivity(who, (up ? "Demoted to associate: " : "Promoted to assistant: ") + u.name);
+                    notify(up ? `${u.name} is now an associate` : `${u.name} is now an assistant`);
+                  }}>{u.role === "assistant" ? "Make associate" : "Make assistant"}</Btn>
                   <Btn small kind="ghost" onClick={() => removeUser(u)}>Remove</Btn>
                   </div>
                 )}
@@ -1317,12 +1442,45 @@ function TeamView({ quotes, users, settings, me, onUpdateQuote, onSaveUsers, onD
                   {q.status === "approved" && <Btn small onClick={() => act(q, "sent")}>Mark sent</Btn>}
                   <Btn small kind="gold" onClick={() => act(q, "won")}>Won</Btn>
                   <Btn small kind="ghost" onClick={() => act(q, "lost")}>Declined</Btn>
+                  <Btn small kind="ghost" onClick={() => voidQuote(q)}>Void</Btn>
                 </div>
               </div>
             </Card>
           ))}
           {outcomeQuotes.length === 0 && <Card><div style={{ color: BRAND.sub, fontSize: 14 }}>Approved and sent quotes will appear here so you can record whether the client accepted.</div></Card>}
         </div>
+      </div>
+
+      {/* ---- VOIDED QUOTES ---- */}
+      <div>
+        <h2 style={h2Style}>
+          VOIDED QUOTES
+          {voided.length > 0 && <span style={{ background: "#EDE7DC", color: "#7A6A55", borderRadius: 99, padding: "2px 10px", fontSize: 13, marginLeft: 10 }}>{voided.length}</span>}
+        </h2>
+        {voided.length === 0 ? (
+          <Card style={{ padding: 18 }}>
+            <div style={{ fontSize: 14, color: BRAND.sub }}>Nothing voided. Voided quotes drop out of every total but stay on record, so you can always show what was quoted and why it was pulled.</div>
+          </Card>
+        ) : (
+          <div className="flex flex-col gap-2">
+            {voided.map((q) => (
+              <Card key={q.id} style={{ padding: 12, opacity: 0.85, borderLeft: "4px solid #C9BDA6" }}>
+                <div className="flex justify-between items-start flex-wrap gap-2">
+                  <div style={{ fontSize: 14 }}>
+                    <div><strong style={{ textDecoration: "line-through" }}>{q.quoteNo}</strong> · {q.clientName} · {money(computeQuote(q, settings).total)} <Badge status="void" /></div>
+                    <div style={{ fontSize: 12, color: BRAND.sub, marginTop: 3 }}>
+                      Voided by {q.voidedBy || "—"}{q.voidedAt ? " · " + fmtDate(q.voidedAt) : ""}{q.voidReason ? " · " + q.voidReason : ""}
+                    </div>
+                  </div>
+                  <div className="flex gap-2 flex-wrap">
+                    <Btn small kind="gold" onClick={() => unvoidQuote(q)}>Restore</Btn>
+                    {iAmOwner && <Btn small kind="danger" onClick={() => removeQuote(q)}>Delete forever</Btn>}
+                  </div>
+                </div>
+              </Card>
+            ))}
+          </div>
+        )}
       </div>
 
       <div>
@@ -1383,9 +1541,11 @@ function SettingsView({ settings, onSave }) {
 function PreviewModal({ quote, settings, users, me, onClose }) {
   const c = computeQuote(quote, settings);
   const author = users[quote.createdBy];
-  const isOwnerViewer = me && me.role === "owner";
-  const releasable = ["approved", "sent", "won"].includes(quote.status);
-  const canPrint = isOwnerViewer || releasable;
+  const isOwnerViewer = me && canManage(me);
+  const voided = isVoid(quote);
+  const releasable = !voided && ["approved", "sent", "won"].includes(quote.status);
+  // A voided quote can never be printed or sent, by anyone.
+  const canPrint = !voided && (isOwnerViewer || releasable);
   /* Stamped across every unapproved quote so a leaked screenshot identifies
      whoever had it open. Fixed at open time so it matches the activity log. */
   const viewerTag = useMemo(() => {
@@ -1403,7 +1563,7 @@ function PreviewModal({ quote, settings, users, me, onClose }) {
         <div className="flex justify-end gap-2 mb-2">
           {canPrint
             ? <Btn small kind="gold" onClick={doPrint}>Print / Save as PDF</Btn>
-            : <span style={{ background: "#FBF3DE", color: BRAND.amber, padding: "7px 14px", borderRadius: 8, fontSize: 13, fontWeight: 700 }}>Printing unlocks after owner approval</span>}
+            : <span style={{ background: voided ? "#EDE7DC" : "#FBF3DE", color: voided ? "#7A6A55" : BRAND.amber, padding: "7px 14px", borderRadius: 8, fontSize: 13, fontWeight: 700 }}>{voided ? "This quote is void and cannot be printed" : "Printing unlocks after owner approval"}</span>}
           <button onClick={onClose} style={{ background: "transparent", color: "#fff", border: "1.5px solid rgba(255,255,255,0.5)", padding: "6px 14px", borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: "pointer" }}>Close</button>
         </div>
         <div id="print-doc" style={{ background: "#fff", padding: "42px 46px", color: BRAND.ink, position: "relative" }}>
@@ -1412,7 +1572,7 @@ function PreviewModal({ quote, settings, users, me, onClose }) {
               {/* Centre stamp */}
               <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
                 <div style={{ transform: "rotate(-24deg)", fontFamily: "'Barlow Condensed', sans-serif", fontSize: 52, fontWeight: 700, color: "rgba(179,55,46,0.16)", border: "5px solid rgba(179,55,46,0.16)", padding: "8px 28px", borderRadius: 10, letterSpacing: "0.08em", whiteSpace: "nowrap", textAlign: "center" }}>
-                  DRAFT · NOT APPROVED
+                  {voided ? "VOID · NOT VALID" : "DRAFT · NOT APPROVED"}
                   <div style={{ fontSize: 15, letterSpacing: "0.04em", marginTop: 4, fontFamily: "'Barlow', sans-serif" }}>{viewerTag}</div>
                 </div>
               </div>
