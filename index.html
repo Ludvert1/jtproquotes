@@ -818,7 +818,19 @@ function App() {
       setView("edit");
     },
     onPreview: setPreviewQuote,
-    onNew: () => setView("new")
+    onNew: () => setView("new"),
+    onDelete: async q => {
+      if (!window.confirm("Permanently delete quote " + q.quoteNo + " for " + (q.clientName || "this client") + "?\n\nThis erases it from the database. It cannot be undone and leaves no record of what was quoted.\n\nIf you only want it out of the way, cancel and use Void instead.")) return;
+      if (!window.confirm("Last check — delete " + q.quoteNo + " forever?")) return;
+      try {
+        await deleteQuote(q.id);
+        logActivity(me.name, "Permanently deleted quote", q.quoteNo);
+        notify(`Quote ${q.quoteNo} deleted`);
+      } catch (e) {
+        warn("delete quote")(e);
+        notify("Could not delete that quote.");
+      }
+    }
   }), (view === "new" || view === "edit") && React.createElement(QuoteForm, {
     key: activeQuote ? activeQuote.id : "new",
     me: me,
@@ -1425,7 +1437,8 @@ function Dashboard({
   settings,
   onOpen,
   onPreview,
-  onNew
+  onNew,
+  onDelete
 }) {
   const [period, setPeriod] = useState("month");
   const [filter, setFilter] = useState("all");
@@ -1595,7 +1608,11 @@ function Dashboard({
       small: true,
       kind: "ghost",
       onClick: () => onOpen(q)
-    }, "Open"))));
+    }, "Open"), isOwner && onDelete && React.createElement(Btn, {
+      small: true,
+      kind: "danger",
+      onClick: () => onDelete(q)
+    }, "Delete"))));
   })));
 }
 function QuoteForm({
@@ -2317,6 +2334,7 @@ function TeamView({
     notify(`Quote ${q.quoteNo}: ${STATUS[status].label}`);
   };
   const voidQuote = async q => {
+    if (!window.confirm("Void quote " + q.quoteNo + " for " + (q.clientName || "this client") + "?\n\nVoiding is permanent. The quote is frozen for good — it can't be edited, printed, or brought back, and it stops counting toward any total. The record stays so you can always show what was quoted.\n\nOnly deleting it (owner only) removes it entirely.")) return;
     const reason = window.prompt("Why is quote " + q.quoteNo + " being voided?\n(e.g. duplicate, client cancelled, priced in error)");
     if (reason === null) return;
     const upd = Object.assign({}, q, {
@@ -2334,23 +2352,6 @@ function TeamView({
     await onUpdateQuote(upd);
     logActivity(who, "Voided quote", q.quoteNo);
     notify(`Quote ${q.quoteNo} voided`);
-  };
-  const unvoidQuote = async q => {
-    const back = q.prevStatus && STATUS[q.prevStatus] && q.prevStatus !== "void" ? q.prevStatus : "draft";
-    const upd = Object.assign({}, q, {
-      status: back,
-      voidReason: "",
-      voidedAt: null,
-      voidedBy: "",
-      history: (q.history || []).concat([{
-        at: new Date().toISOString(),
-        by: who,
-        action: "Restored to " + STATUS[back].label
-      }])
-    });
-    await onUpdateQuote(upd);
-    logActivity(who, "Restored voided quote", q.quoteNo);
-    notify(`Quote ${q.quoteNo} restored`);
   };
   const removeQuote = async q => {
     if (!iAmOwner) return notify("Only the owner can permanently delete a quote.");
@@ -2796,7 +2797,7 @@ function TeamView({
       fontSize: 14,
       color: BRAND.sub
     }
-  }, "Nothing voided. Voided quotes drop out of every total but stay on record, so you can always show what was quoted and why it was pulled.")) : React.createElement("div", {
+  }, "Nothing voided. Voiding is permanent \u2014 a voided quote is frozen for good, drops out of every total, and can't be printed or reopened. The record stays so you can always show what was quoted and why it was pulled.")) : React.createElement("div", {
     className: "flex flex-col gap-2"
   }, voided.map(q => React.createElement(Card, {
     key: q.id,
@@ -2824,12 +2825,14 @@ function TeamView({
       marginTop: 3
     }
   }, "Voided by ", q.voidedBy || "—", q.voidedAt ? " · " + fmtDate(q.voidedAt) : "", q.voidReason ? " · " + q.voidReason : "")), React.createElement("div", {
-    className: "flex gap-2 flex-wrap"
-  }, React.createElement(Btn, {
-    small: true,
-    kind: "gold",
-    onClick: () => unvoidQuote(q)
-  }, "Restore"), iAmOwner && React.createElement(Btn, {
+    className: "flex gap-2 flex-wrap items-center"
+  }, React.createElement("span", {
+    style: {
+      fontSize: 12,
+      color: "#7A6A55",
+      fontWeight: 600
+    }
+  }, "Permanently voided"), iAmOwner && React.createElement(Btn, {
     small: true,
     kind: "danger",
     onClick: () => removeQuote(q)

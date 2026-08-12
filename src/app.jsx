@@ -558,7 +558,16 @@ function App() {
         </div>
 
         {view === "dashboard" && <Dashboard me={me} isOwner={isOwner} isManager={isManager} quotes={visibleQuotes} users={users} settings={settings}
-          onOpen={(q) => { setActiveQuote(q); setView("edit"); }} onPreview={setPreviewQuote} onNew={() => setView("new")} />}
+          onOpen={(q) => { setActiveQuote(q); setView("edit"); }} onPreview={setPreviewQuote} onNew={() => setView("new")}
+          onDelete={async (q) => {
+            if (!window.confirm("Permanently delete quote " + q.quoteNo + " for " + (q.clientName || "this client") + "?\n\nThis erases it from the database. It cannot be undone and leaves no record of what was quoted.\n\nIf you only want it out of the way, cancel and use Void instead.")) return;
+            if (!window.confirm("Last check — delete " + q.quoteNo + " forever?")) return;
+            try {
+              await deleteQuote(q.id);
+              logActivity(me.name, "Permanently deleted quote", q.quoteNo);
+              notify(`Quote ${q.quoteNo} deleted`);
+            } catch (e) { warn("delete quote")(e); notify("Could not delete that quote."); }
+          }} />}
 
         {(view === "new" || view === "edit") && (
           <QuoteForm key={activeQuote ? activeQuote.id : "new"} me={me} isOwner={isOwner} isManager={isManager} settings={settings} existing={view === "edit" ? activeQuote : null}
@@ -819,7 +828,7 @@ function inPeriod(iso, p) {
   return d.getFullYear() === n.getFullYear() && d.getMonth() === n.getMonth();
 }
 
-function Dashboard({ me, isOwner, isManager, quotes, users, settings, onOpen, onPreview, onNew }) {
+function Dashboard({ me, isOwner, isManager, quotes, users, settings, onOpen, onPreview, onNew, onDelete }) {
   const [period, setPeriod] = useState("month");
   const [filter, setFilter] = useState("all");
 
@@ -905,6 +914,7 @@ function Dashboard({ me, isOwner, isManager, quotes, users, settings, onOpen, on
                     <Badge status={q.status} />
                     <Btn small kind="ghost" onClick={() => onPreview(q)}>Preview</Btn>
                     {(q.createdBy === me.id || isManager) && !isVoid(q) && <Btn small kind="ghost" onClick={() => onOpen(q)}>Open</Btn>}
+                    {isOwner && onDelete && <Btn small kind="danger" onClick={() => onDelete(q)}>Delete</Btn>}
                   </div>
                 </div>
               </Card>
@@ -1184,6 +1194,7 @@ function TeamView({ quotes, users, settings, me, onUpdateQuote, onSaveUsers, onD
   /* Void keeps the record but takes the quote out of circulation: no
      printing, no pipeline, no revenue. Reversible, unlike delete. */
   const voidQuote = async (q) => {
+    if (!window.confirm("Void quote " + q.quoteNo + " for " + (q.clientName || "this client") + "?\n\nVoiding is permanent. The quote is frozen for good — it can't be edited, printed, or brought back, and it stops counting toward any total. The record stays so you can always show what was quoted.\n\nOnly deleting it (owner only) removes it entirely.")) return;
     const reason = window.prompt("Why is quote " + q.quoteNo + " being voided?\n(e.g. duplicate, client cancelled, priced in error)");
     if (reason === null) return;
     const upd = Object.assign({}, q, {
@@ -1197,17 +1208,6 @@ function TeamView({ quotes, users, settings, me, onUpdateQuote, onSaveUsers, onD
     await onUpdateQuote(upd);
     logActivity(who, "Voided quote", q.quoteNo);
     notify(`Quote ${q.quoteNo} voided`);
-  };
-
-  const unvoidQuote = async (q) => {
-    const back = q.prevStatus && STATUS[q.prevStatus] && q.prevStatus !== "void" ? q.prevStatus : "draft";
-    const upd = Object.assign({}, q, {
-      status: back, voidReason: "", voidedAt: null, voidedBy: "",
-      history: (q.history || []).concat([{ at: new Date().toISOString(), by: who, action: "Restored to " + STATUS[back].label }]),
-    });
-    await onUpdateQuote(upd);
-    logActivity(who, "Restored voided quote", q.quoteNo);
-    notify(`Quote ${q.quoteNo} restored`);
   };
 
   /* Erases the quote outright. Owner only — assistants void instead. */
@@ -1459,7 +1459,7 @@ function TeamView({ quotes, users, settings, me, onUpdateQuote, onSaveUsers, onD
         </h2>
         {voided.length === 0 ? (
           <Card style={{ padding: 18 }}>
-            <div style={{ fontSize: 14, color: BRAND.sub }}>Nothing voided. Voided quotes drop out of every total but stay on record, so you can always show what was quoted and why it was pulled.</div>
+            <div style={{ fontSize: 14, color: BRAND.sub }}>Nothing voided. Voiding is permanent — a voided quote is frozen for good, drops out of every total, and can't be printed or reopened. The record stays so you can always show what was quoted and why it was pulled.</div>
           </Card>
         ) : (
           <div className="flex flex-col gap-2">
@@ -1472,8 +1472,8 @@ function TeamView({ quotes, users, settings, me, onUpdateQuote, onSaveUsers, onD
                       Voided by {q.voidedBy || "—"}{q.voidedAt ? " · " + fmtDate(q.voidedAt) : ""}{q.voidReason ? " · " + q.voidReason : ""}
                     </div>
                   </div>
-                  <div className="flex gap-2 flex-wrap">
-                    <Btn small kind="gold" onClick={() => unvoidQuote(q)}>Restore</Btn>
+                  <div className="flex gap-2 flex-wrap items-center">
+                    <span style={{ fontSize: 12, color: "#7A6A55", fontWeight: 600 }}>Permanently voided</span>
                     {iAmOwner && <Btn small kind="danger" onClick={() => removeQuote(q)}>Delete forever</Btn>}
                   </div>
                 </div>
