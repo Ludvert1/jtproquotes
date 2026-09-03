@@ -213,6 +213,7 @@ const STATUS = {
   changes:  { label: "Changes requested", color: BRAND.red, bg: "#F9E5E3" },
   approved: { label: "Approved", color: BRAND.green, bg: "#E2F2E9" },
   sent:     { label: "Sent to client", color: BRAND.navySoft, bg: "#E4EBF6" },
+  negotiating: { label: "In negotiation", color: BRAND.gold, bg: "#F6EDD4" },
   won:      { label: "Won", color: BRAND.green, bg: "#D7EEDF" },
   lost:     { label: "Declined", color: BRAND.sub, bg: "#ECEEF1" },
   void:     { label: "Void", color: "#7A6A55", bg: "#EDE7DC" },
@@ -221,6 +222,26 @@ const STATUS = {
 /* Voided quotes are ignored by every money figure and can never be printed,
    but the record stays so there is always proof of what was quoted. */
 const isVoid = (q) => q && q.status === "void";
+
+/* ---------- outcomes ----------
+   A quote is open once it has left the associate's hands and before the
+   client has decided. Everything here counts toward pipeline. */
+const OPEN_STATUSES = ["pending", "approved", "sent", "negotiating"];
+const DECIDED_STATUSES = ["won", "lost"];
+const isDecided = (q) => !!q && DECIDED_STATUSES.includes(q.status);
+
+/* What a won job is actually worth. If the price moved during negotiation and
+   the final figure was recorded, that is the real number — the quoted total
+   is only what we asked for, not what we agreed to. */
+const wonValue = (q, settings) =>
+  typeof q.finalAmount === "number" && isFinite(q.finalAmount) && q.finalAmount >= 0
+    ? q.finalAmount
+    : computeQuote(q, settings).total;
+
+/* Booked revenue belongs to the period the client signed, not the period the
+   quote was written — a June quote signed in September is September money.
+   Records made before outcome dates existed fall back to the quote date. */
+const decidedDate = (q) => (q && q.decidedAt) || (q && q.createdAt);
 
 /* ---------- roles ---------- */
 const ROLE_LABEL = { owner: "Owner", assistant: "Assistant", associate: "Associate" };
@@ -833,17 +854,23 @@ function Dashboard({ me, isOwner, isManager, quotes, users, settings, onOpen, on
   const [filter, setFilter] = useState("all");
 
   // Voided quotes never count toward any figure.
-  const periodQuotes = quotes.filter((q) => inPeriod(q.createdAt, period) && !isVoid(q));
   const totals = useMemo(() => {
-    let pipeline = 0, booked = 0, sentOut = 0, count = periodQuotes.length;
-    periodQuotes.forEach((q) => {
+    const live = quotes.filter((q) => !isVoid(q));
+    // Work written in this period: how much we quoted and how much is still open.
+    const written = live.filter((q) => inPeriod(q.createdAt, period));
+    let pipeline = 0, sentOut = 0;
+    written.forEach((q) => {
       const t = computeQuote(q, settings).total;
-      if (["pending", "approved", "sent"].includes(q.status)) pipeline += t;
-      if (["sent", "won"].includes(q.status)) sentOut += t;
-      if (q.status === "won") booked += t;
+      if (OPEN_STATUSES.includes(q.status)) pipeline += t;
+      if (["sent", "negotiating", "won"].includes(q.status)) sentOut += t;
     });
-    return { pipeline, booked, sentOut, count };
-  }, [periodQuotes, settings]);
+    // Money actually booked in this period — dated by when the client signed,
+    // not by when the quote was written, and valued at the agreed figure.
+    const booked = live
+      .filter((q) => q.status === "won" && inPeriod(decidedDate(q), period))
+      .reduce((sum, q) => sum + wonValue(q, settings), 0);
+    return { pipeline, booked, sentOut, count: written.length };
+  }, [quotes, period, settings]);
 
   /* Voided quotes are excluded from the money figures above, but they still
      belong in the list — otherwise a quote appears to vanish and nobody
@@ -870,9 +897,9 @@ function Dashboard({ me, isOwner, isManager, quotes, users, settings, onOpen, on
       <div className="grid grid-cols-2 md-grid-cols-4 gap-3 mb-6">
         {[
           ["Quotes created", totals.count, null],
-          ["Estimated pipeline", money(totals.pipeline), "Pending + approved + sent"],
-          ["Sent to clients", money(totals.sentOut), "Sent + won"],
-          ["Booked revenue", money(totals.booked), "Quotes marked Won"],
+          ["Estimated pipeline", money(totals.pipeline), "Pending + approved + sent + negotiating"],
+          ["Sent to clients", money(totals.sentOut), "Sent + negotiating + won"],
+          ["Booked revenue", money(totals.booked), "Won — counted when signed"],
         ].map(([l, v, h]) => (
           <Card key={l} style={{ borderTop: `3px solid ${BRAND.gold}` }}>
             <div style={{ fontSize: 12, textTransform: "uppercase", letterSpacing: "0.08em", color: BRAND.sub, fontWeight: 700 }}>{l}</div>
@@ -908,9 +935,17 @@ function Dashboard({ me, isOwner, isManager, quotes, users, settings, onOpen, on
                     <div style={{ fontSize: 13, color: BRAND.sub }}>{q.jobTitle || q.category} · {fmtDate(q.createdAt)}{isManager && users[q.createdBy] ? ` · by ${users[q.createdBy].name}` : ""}</div>
                     {q.reviewNote && q.status === "changes" && <div style={{ fontSize: 12, color: BRAND.red, marginTop: 3 }}>Owner note: {q.reviewNote}</div>}
                     {isVoid(q) && <div style={{ fontSize: 12, color: "#7A6A55", marginTop: 3, fontWeight: 600 }}>Voided{q.voidedBy ? " by " + q.voidedBy : ""}{q.voidReason ? " — " + q.voidReason : ""} · does not count toward any total</div>}
+                    {isDecided(q) && !isVoid(q) && (
+                      <div style={{ fontSize: 12, color: BRAND.sub, marginTop: 3 }}>
+                        {q.status === "won" ? "Won" : "Declined"} {fmtDate(decidedDate(q))}{q.decidedBy ? " · recorded by " + q.decidedBy : ""}
+                        {q.status === "won" && typeof q.finalAmount === "number" && q.finalAmount !== c.total
+                          ? " · agreed at " + money(q.finalAmount) + " (quoted " + money(c.total) + ")" : ""}
+                        {q.outcomeNote ? " — " + q.outcomeNote : ""}
+                      </div>
+                    )}
                   </div>
                   <div className="flex items-center gap-3 flex-wrap">
-                    <div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontSize: 22, fontWeight: 700, color: BRAND.navy, textDecoration: isVoid(q) ? "line-through" : "none" }}>{money(c.total)}</div>
+                    <div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontSize: 22, fontWeight: 700, color: BRAND.navy, textDecoration: isVoid(q) ? "line-through" : "none" }}>{money(q.status === "won" ? wonValue(q, settings) : c.total)}</div>
                     <Badge status={q.status} />
                     <Btn small kind="ghost" onClick={() => onPreview(q)}>Preview</Btn>
                     {(q.createdBy === me.id || isManager) && !isVoid(q) && <Btn small kind="ghost" onClick={() => onOpen(q)}>Open</Btn>}
@@ -943,7 +978,7 @@ function QuoteForm({ me, isOwner, isManager, settings, existing, onSave, onAutos
   const [dirty, setDirty] = useState(false);
   const [loggedStart, setLoggedStart] = useState(false);
   const set = (k, v) => { setDirty(true); setQ((p) => Object.assign({}, p, { [k]: v })); };
-  const locked = isVoid(q) || (!isManager && ["approved", "sent", "won", "lost"].includes(q.status));
+  const locked = isVoid(q) || (!isManager && ["approved", "sent", "negotiating", "won", "lost"].includes(q.status));
   useEffect(() => {
     if (!dirty) return;
     if (!existing && !loggedStart) { logActivity(me.name, "Started a new draft", q.quoteNo); setLoggedStart(true); }
@@ -1191,6 +1226,60 @@ function TeamView({ quotes, users, settings, me, onUpdateQuote, onSaveUsers, onD
     notify(`Quote ${q.quoteNo}: ${STATUS[status].label}`);
   };
 
+  /* ---- RECORDING AN OUTCOME ----
+     Won and Declined are the two figures the revenue account rests on, so both
+     are stamped with the date the client decided and with who recorded it.
+     Marking Won asks for the agreed amount, because a price that moved during
+     negotiation is the number that actually gets invoiced. */
+  const markWon = async (q) => {
+    const quoted = computeQuote(q, settings).total;
+    const current = typeof q.finalAmount === "number" ? q.finalAmount : quoted;
+    const raw = window.prompt(
+      "Quote " + q.quoteNo + " — " + (q.clientName || "client") + " accepted and signed.\n\n"
+      + "Quoted total: " + money(quoted) + "\n\n"
+      + "Enter the final agreed amount. Leave it as it is if the price didn't change.",
+      String(Math.round(current * 100) / 100)
+    );
+    if (raw === null) return;
+    const cleaned = String(raw).replace(/[^0-9.\-]/g, "");
+    const amount = parseFloat(cleaned);
+    if (!isFinite(amount) || amount < 0) return notify("That isn't a valid amount — nothing was changed.");
+    await act(q, "won", {
+      finalAmount: Math.round(amount * 100) / 100,
+      decidedAt: new Date().toISOString(),
+      decidedBy: who,
+      outcomeNote: "",
+    });
+    logActivity(who, "Marked won" + (amount !== quoted ? " at " + money(amount) : ""), q.quoteNo);
+  };
+
+  const markLost = async (q) => {
+    const reason = window.prompt(
+      "Quote " + q.quoteNo + " — " + (q.clientName || "client") + " declined.\n\n"
+      + "Why? (e.g. price, timing, went with another contractor)"
+    );
+    if (reason === null) return;
+    await act(q, "lost", {
+      decidedAt: new Date().toISOString(),
+      decidedBy: who,
+      outcomeNote: reason.trim(),
+      finalAmount: null,
+    });
+    logActivity(who, "Marked declined" + (reason.trim() ? " — " + reason.trim() : ""), q.quoteNo);
+  };
+
+  /* The client came back to the table, or the outcome was recorded in error.
+     Reopening clears the decision so it stops counting as booked revenue. */
+  const reopen = async (q, status) => {
+    if (isDecided(q) && !window.confirm(
+      "Reopen quote " + q.quoteNo + "?\n\nIt goes back to " + STATUS[status].label.toLowerCase()
+      + " and stops counting as " + (q.status === "won" ? "booked revenue" : "a loss")
+      + ". The change is stamped in the quote's history."
+    )) return;
+    await act(q, status, { decidedAt: null, decidedBy: null, finalAmount: null, outcomeNote: "" });
+    logActivity(who, "Reopened to " + STATUS[status].label.toLowerCase(), q.quoteNo);
+  };
+
   /* Void keeps the record but takes the quote out of circulation: no
      printing, no pipeline, no revenue. Reversible, unlike delete. */
   const voidQuote = async (q) => {
@@ -1251,18 +1340,28 @@ function TeamView({ quotes, users, settings, me, onUpdateQuote, onSaveUsers, onD
 
   const associates = Object.values(users);
   const perAssociate = associates.map((u) => {
-    const qs = quotes.filter((q) => q.createdBy === u.id && inPeriod(q.createdAt, period) && !isVoid(q));
-    let pipeline = 0, won = 0;
+    const mine = quotes.filter((q) => q.createdBy === u.id && !isVoid(q));
+    const qs = mine.filter((q) => inPeriod(q.createdAt, period));
+    let pipeline = 0;
     qs.forEach((q) => {
-      const t = computeQuote(q, settings).total;
-      if (["pending", "approved", "sent"].includes(q.status)) pipeline += t;
-      if (q.status === "won") won += t;
+      if (OPEN_STATUSES.includes(q.status)) pipeline += computeQuote(q, settings).total;
     });
+    // Credited in the period they closed it, at the amount actually agreed.
+    const won = mine
+      .filter((q) => q.status === "won" && inPeriod(decidedDate(q), period))
+      .reduce((sum, q) => sum + wonValue(q, settings), 0);
     return { u, count: qs.length, pipeline, won };
   });
 
   const h2Style = { fontFamily: "'Barlow Condensed', sans-serif", fontSize: 26, fontWeight: 700, color: BRAND.navy, letterSpacing: "0.03em", marginBottom: 12 };
-  const outcomeQuotes = quotes.filter((q) => ["approved", "sent"].includes(q.status));
+  /* Still waiting on the client — these are the ones needing a decision. */
+  const outcomeQuotes = quotes
+    .filter((q) => ["approved", "sent", "negotiating"].includes(q.status))
+    .sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
+  /* Already decided, newest first, so a wrong call can be corrected. */
+  const decided = quotes
+    .filter((q) => isDecided(q) && !isVoid(q))
+    .sort((a, b) => new Date(decidedDate(b)) - new Date(decidedDate(a)));
   const voided = quotes.filter(isVoid).sort((a, b) => new Date(b.voidedAt || 0) - new Date(a.voidedAt || 0));
 
   return (
@@ -1432,23 +1531,79 @@ function TeamView({ quotes, users, settings, me, onUpdateQuote, onSaveUsers, onD
       </div>
 
       <div>
-        <h2 style={h2Style}>MARK OUTCOMES</h2>
+        <h2 style={h2Style}>
+          AWAITING A DECISION
+          {outcomeQuotes.length > 0 && <span style={{ background: BRAND.gold, color: BRAND.navy, borderRadius: 99, padding: "2px 12px", fontSize: 16, marginLeft: 10 }}>{outcomeQuotes.length}</span>}
+        </h2>
         <div className="flex flex-col gap-2">
-          {outcomeQuotes.map((q) => (
-            <Card key={q.id} style={{ padding: 12 }}>
-              <div className="flex justify-between items-center flex-wrap gap-2">
-                <div style={{ fontSize: 14 }}><strong>{q.quoteNo}</strong> · {q.clientName} · {money(computeQuote(q, settings).total)} <Badge status={q.status} /></div>
-                <div className="flex gap-2">
-                  {q.status === "approved" && <Btn small onClick={() => act(q, "sent")}>Mark sent</Btn>}
-                  <Btn small kind="gold" onClick={() => act(q, "won")}>Won</Btn>
-                  <Btn small kind="ghost" onClick={() => act(q, "lost")}>Declined</Btn>
-                  <Btn small kind="ghost" onClick={() => voidQuote(q)}>Void</Btn>
+          {outcomeQuotes.map((q) => {
+            const age = Math.floor((Date.now() - new Date(q.createdAt)) / 864e5);
+            return (
+              <Card key={q.id} style={{ padding: 12 }}>
+                <div className="flex justify-between items-center flex-wrap gap-2">
+                  <div style={{ fontSize: 14 }}>
+                    <div><strong>{q.quoteNo}</strong> · {q.clientName} · {money(computeQuote(q, settings).total)} <Badge status={q.status} /></div>
+                    <div style={{ fontSize: 12, color: BRAND.sub, marginTop: 2 }}>
+                      Quoted {fmtDate(q.createdAt)}{age > 0 ? " · " + age + " day" + (age === 1 ? "" : "s") + " ago" : ""}
+                      {users[q.createdBy] ? " · by " + users[q.createdBy].name : ""}
+                    </div>
+                  </div>
+                  <div className="flex gap-2 flex-wrap justify-end">
+                    {q.status === "approved" && <Btn small onClick={() => act(q, "sent")}>Mark sent</Btn>}
+                    {q.status !== "negotiating" && <Btn small kind="ghost" onClick={() => act(q, "negotiating")}>Negotiating</Btn>}
+                    <Btn small kind="gold" onClick={() => markWon(q)}>Won</Btn>
+                    <Btn small kind="ghost" onClick={() => markLost(q)}>Declined</Btn>
+                    <Btn small kind="ghost" onClick={() => voidQuote(q)}>Void</Btn>
+                  </div>
                 </div>
-              </div>
-            </Card>
-          ))}
-          {outcomeQuotes.length === 0 && <Card><div style={{ color: BRAND.sub, fontSize: 14 }}>Approved and sent quotes will appear here so you can record whether the client accepted.</div></Card>}
+              </Card>
+            );
+          })}
+          {outcomeQuotes.length === 0 && <Card><div style={{ color: BRAND.sub, fontSize: 14 }}>Nothing waiting on a client. Approved, sent and in-negotiation quotes appear here until you record whether the job was won or declined.</div></Card>}
         </div>
+      </div>
+
+      {/* ---- RECORDED OUTCOMES ---- */}
+      <div>
+        <h2 style={h2Style}>RECORDED OUTCOMES</h2>
+        {decided.length === 0 ? (
+          <Card><div style={{ color: BRAND.sub, fontSize: 14 }}>Nothing decided yet. Once a job is marked Won it counts as booked revenue in the month the client signed — not the month the quote was written.</div></Card>
+        ) : (
+          <div className="flex flex-col gap-2">
+            {decided.slice(0, 25).map((q) => {
+              const quoted = computeQuote(q, settings).total;
+              const value = wonValue(q, settings);
+              const moved = q.status === "won" && typeof q.finalAmount === "number" && q.finalAmount !== quoted;
+              return (
+                <Card key={q.id} style={{ padding: 12, borderLeft: `4px solid ${q.status === "won" ? BRAND.green : BRAND.line}` }}>
+                  <div className="flex justify-between items-center flex-wrap gap-2">
+                    <div style={{ fontSize: 14 }}>
+                      <div>
+                        <strong>{q.quoteNo}</strong> · {q.clientName} · {money(q.status === "won" ? value : quoted)} <Badge status={q.status} />
+                      </div>
+                      <div style={{ fontSize: 12, color: BRAND.sub, marginTop: 2 }}>
+                        {q.status === "won" ? "Signed" : "Declined"} {fmtDate(decidedDate(q))}
+                        {q.decidedBy ? " · recorded by " + q.decidedBy : ""}
+                        {moved ? " · quoted " + money(quoted) : ""}
+                        {q.outcomeNote ? " — " + q.outcomeNote : ""}
+                      </div>
+                    </div>
+                    <div className="flex gap-2 flex-wrap justify-end">
+                      {q.status === "won" && <Btn small kind="ghost" onClick={() => markWon(q)}>Edit amount</Btn>}
+                      {q.status === "lost" && <Btn small kind="gold" onClick={() => markWon(q)}>Actually won</Btn>}
+                      <Btn small kind="ghost" onClick={() => reopen(q, "negotiating")}>Reopen</Btn>
+                    </div>
+                  </div>
+                </Card>
+              );
+            })}
+            {decided.length > 25 && (
+              <div style={{ fontSize: 12, color: BRAND.sub, padding: "4px 2px" }}>
+                Showing the 25 most recent. Everything else is in the quote list, filtered by Won or Declined.
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {/* ---- VOIDED QUOTES ---- */}
@@ -1543,7 +1698,7 @@ function PreviewModal({ quote, settings, users, me, onClose }) {
   const author = users[quote.createdBy];
   const isOwnerViewer = me && canManage(me);
   const voided = isVoid(quote);
-  const releasable = !voided && ["approved", "sent", "won"].includes(quote.status);
+  const releasable = !voided && ["approved", "sent", "negotiating", "won"].includes(quote.status);
   // A voided quote can never be printed or sent, by anyone.
   const canPrint = !voided && (isOwnerViewer || releasable);
   /* Stamped across every unapproved quote so a leaked screenshot identifies

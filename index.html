@@ -150,6 +150,11 @@ const STATUS = {
     color: BRAND.navySoft,
     bg: "#E4EBF6"
   },
+  negotiating: {
+    label: "In negotiation",
+    color: BRAND.gold,
+    bg: "#F6EDD4"
+  },
   won: {
     label: "Won",
     color: BRAND.green,
@@ -167,6 +172,11 @@ const STATUS = {
   }
 };
 const isVoid = q => q && q.status === "void";
+const OPEN_STATUSES = ["pending", "approved", "sent", "negotiating"];
+const DECIDED_STATUSES = ["won", "lost"];
+const isDecided = q => !!q && DECIDED_STATUSES.includes(q.status);
+const wonValue = (q, settings) => typeof q.finalAmount === "number" && isFinite(q.finalAmount) && q.finalAmount >= 0 ? q.finalAmount : computeQuote(q, settings).total;
+const decidedDate = q => q && q.decidedAt || q && q.createdAt;
 const ROLE_LABEL = {
   owner: "Owner",
   assistant: "Assistant",
@@ -1442,25 +1452,24 @@ function Dashboard({
 }) {
   const [period, setPeriod] = useState("month");
   const [filter, setFilter] = useState("all");
-  const periodQuotes = quotes.filter(q => inPeriod(q.createdAt, period) && !isVoid(q));
   const totals = useMemo(() => {
+    const live = quotes.filter(q => !isVoid(q));
+    const written = live.filter(q => inPeriod(q.createdAt, period));
     let pipeline = 0,
-      booked = 0,
-      sentOut = 0,
-      count = periodQuotes.length;
-    periodQuotes.forEach(q => {
+      sentOut = 0;
+    written.forEach(q => {
       const t = computeQuote(q, settings).total;
-      if (["pending", "approved", "sent"].includes(q.status)) pipeline += t;
-      if (["sent", "won"].includes(q.status)) sentOut += t;
-      if (q.status === "won") booked += t;
+      if (OPEN_STATUSES.includes(q.status)) pipeline += t;
+      if (["sent", "negotiating", "won"].includes(q.status)) sentOut += t;
     });
+    const booked = live.filter(q => q.status === "won" && inPeriod(decidedDate(q), period)).reduce((sum, q) => sum + wonValue(q, settings), 0);
     return {
       pipeline,
       booked,
       sentOut,
-      count
+      count: written.length
     };
-  }, [periodQuotes, settings]);
+  }, [quotes, period, settings]);
   const list = quotes.filter(q => inPeriod(q.createdAt, period)).filter(q => filter === "all" || q.status === filter).sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
   return React.createElement("div", null, React.createElement("div", {
     className: "flex items-center justify-between flex-wrap gap-3 mb-5"
@@ -1489,7 +1498,7 @@ function Dashboard({
     onClick: onNew
   }, "+ New quote"))), React.createElement("div", {
     className: "grid grid-cols-2 md-grid-cols-4 gap-3 mb-6"
-  }, [["Quotes created", totals.count, null], ["Estimated pipeline", money(totals.pipeline), "Pending + approved + sent"], ["Sent to clients", money(totals.sentOut), "Sent + won"], ["Booked revenue", money(totals.booked), "Quotes marked Won"]].map(([l, v, h]) => React.createElement(Card, {
+  }, [["Quotes created", totals.count, null], ["Estimated pipeline", money(totals.pipeline), "Pending + approved + sent + negotiating"], ["Sent to clients", money(totals.sentOut), "Sent + negotiating + won"], ["Booked revenue", money(totals.booked), "Won — counted when signed"]].map(([l, v, h]) => React.createElement(Card, {
     key: l,
     style: {
       borderTop: `3px solid ${BRAND.gold}`
@@ -1588,7 +1597,13 @@ function Dashboard({
         marginTop: 3,
         fontWeight: 600
       }
-    }, "Voided", q.voidedBy ? " by " + q.voidedBy : "", q.voidReason ? " — " + q.voidReason : "", " \xB7 does not count toward any total")), React.createElement("div", {
+    }, "Voided", q.voidedBy ? " by " + q.voidedBy : "", q.voidReason ? " — " + q.voidReason : "", " \xB7 does not count toward any total"), isDecided(q) && !isVoid(q) && React.createElement("div", {
+      style: {
+        fontSize: 12,
+        color: BRAND.sub,
+        marginTop: 3
+      }
+    }, q.status === "won" ? "Won" : "Declined", " ", fmtDate(decidedDate(q)), q.decidedBy ? " · recorded by " + q.decidedBy : "", q.status === "won" && typeof q.finalAmount === "number" && q.finalAmount !== c.total ? " · agreed at " + money(q.finalAmount) + " (quoted " + money(c.total) + ")" : "", q.outcomeNote ? " — " + q.outcomeNote : "")), React.createElement("div", {
       className: "flex items-center gap-3 flex-wrap"
     }, React.createElement("div", {
       style: {
@@ -1598,7 +1613,7 @@ function Dashboard({
         color: BRAND.navy,
         textDecoration: isVoid(q) ? "line-through" : "none"
       }
-    }, money(c.total)), React.createElement(Badge, {
+    }, money(q.status === "won" ? wonValue(q, settings) : c.total)), React.createElement(Badge, {
       status: q.status
     }), React.createElement(Btn, {
       small: true,
@@ -1666,7 +1681,7 @@ function QuoteForm({
       [k]: v
     }));
   };
-  const locked = isVoid(q) || !isManager && ["approved", "sent", "won", "lost"].includes(q.status);
+  const locked = isVoid(q) || !isManager && ["approved", "sent", "negotiating", "won", "lost"].includes(q.status);
   useEffect(() => {
     if (!dirty) return;
     if (!existing && !loggedStart) {
@@ -2333,6 +2348,43 @@ function TeamView({
     await onUpdateQuote(upd);
     notify(`Quote ${q.quoteNo}: ${STATUS[status].label}`);
   };
+  const markWon = async q => {
+    const quoted = computeQuote(q, settings).total;
+    const current = typeof q.finalAmount === "number" ? q.finalAmount : quoted;
+    const raw = window.prompt("Quote " + q.quoteNo + " — " + (q.clientName || "client") + " accepted and signed.\n\n" + "Quoted total: " + money(quoted) + "\n\n" + "Enter the final agreed amount. Leave it as it is if the price didn't change.", String(Math.round(current * 100) / 100));
+    if (raw === null) return;
+    const cleaned = String(raw).replace(/[^0-9.\-]/g, "");
+    const amount = parseFloat(cleaned);
+    if (!isFinite(amount) || amount < 0) return notify("That isn't a valid amount — nothing was changed.");
+    await act(q, "won", {
+      finalAmount: Math.round(amount * 100) / 100,
+      decidedAt: new Date().toISOString(),
+      decidedBy: who,
+      outcomeNote: ""
+    });
+    logActivity(who, "Marked won" + (amount !== quoted ? " at " + money(amount) : ""), q.quoteNo);
+  };
+  const markLost = async q => {
+    const reason = window.prompt("Quote " + q.quoteNo + " — " + (q.clientName || "client") + " declined.\n\n" + "Why? (e.g. price, timing, went with another contractor)");
+    if (reason === null) return;
+    await act(q, "lost", {
+      decidedAt: new Date().toISOString(),
+      decidedBy: who,
+      outcomeNote: reason.trim(),
+      finalAmount: null
+    });
+    logActivity(who, "Marked declined" + (reason.trim() ? " — " + reason.trim() : ""), q.quoteNo);
+  };
+  const reopen = async (q, status) => {
+    if (isDecided(q) && !window.confirm("Reopen quote " + q.quoteNo + "?\n\nIt goes back to " + STATUS[status].label.toLowerCase() + " and stops counting as " + (q.status === "won" ? "booked revenue" : "a loss") + ". The change is stamped in the quote's history.")) return;
+    await act(q, status, {
+      decidedAt: null,
+      decidedBy: null,
+      finalAmount: null,
+      outcomeNote: ""
+    });
+    logActivity(who, "Reopened to " + STATUS[status].label.toLowerCase(), q.quoteNo);
+  };
   const voidQuote = async q => {
     if (!window.confirm("Void quote " + q.quoteNo + " for " + (q.clientName || "this client") + "?\n\nVoiding is permanent. The quote is frozen for good — it can't be edited, printed, or brought back, and it stops counting toward any total. The record stays so you can always show what was quoted.\n\nOnly deleting it (owner only) removes it entirely.")) return;
     const reason = window.prompt("Why is quote " + q.quoteNo + " being voided?\n(e.g. duplicate, client cancelled, priced in error)");
@@ -2385,14 +2437,13 @@ function TeamView({
   const awaiting = Object.values(users).filter(u => u.role !== "owner" && u.active !== true && u.declined !== true).sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
   const associates = Object.values(users);
   const perAssociate = associates.map(u => {
-    const qs = quotes.filter(q => q.createdBy === u.id && inPeriod(q.createdAt, period) && !isVoid(q));
-    let pipeline = 0,
-      won = 0;
+    const mine = quotes.filter(q => q.createdBy === u.id && !isVoid(q));
+    const qs = mine.filter(q => inPeriod(q.createdAt, period));
+    let pipeline = 0;
     qs.forEach(q => {
-      const t = computeQuote(q, settings).total;
-      if (["pending", "approved", "sent"].includes(q.status)) pipeline += t;
-      if (q.status === "won") won += t;
+      if (OPEN_STATUSES.includes(q.status)) pipeline += computeQuote(q, settings).total;
     });
+    const won = mine.filter(q => q.status === "won" && inPeriod(decidedDate(q), period)).reduce((sum, q) => sum + wonValue(q, settings), 0);
     return {
       u,
       count: qs.length,
@@ -2408,7 +2459,8 @@ function TeamView({
     letterSpacing: "0.03em",
     marginBottom: 12
   };
-  const outcomeQuotes = quotes.filter(q => ["approved", "sent"].includes(q.status));
+  const outcomeQuotes = quotes.filter(q => ["approved", "sent", "negotiating"].includes(q.status)).sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
+  const decided = quotes.filter(q => isDecided(q) && !isVoid(q)).sort((a, b) => new Date(decidedDate(b)) - new Date(decidedDate(a)));
   const voided = quotes.filter(isVoid).sort((a, b) => new Date(b.voidedAt || 0) - new Date(a.voidedAt || 0));
   return React.createElement("div", {
     className: "flex flex-col gap-6"
@@ -2740,44 +2792,120 @@ function TeamView({
     }
   }, "Account deactivated \u2014 cannot sign in."))))), React.createElement("div", null, React.createElement("h2", {
     style: h2Style
-  }, "MARK OUTCOMES"), React.createElement("div", {
+  }, "AWAITING A DECISION", outcomeQuotes.length > 0 && React.createElement("span", {
+    style: {
+      background: BRAND.gold,
+      color: BRAND.navy,
+      borderRadius: 99,
+      padding: "2px 12px",
+      fontSize: 16,
+      marginLeft: 10
+    }
+  }, outcomeQuotes.length)), React.createElement("div", {
     className: "flex flex-col gap-2"
-  }, outcomeQuotes.map(q => React.createElement(Card, {
-    key: q.id,
-    style: {
-      padding: 12
-    }
-  }, React.createElement("div", {
-    className: "flex justify-between items-center flex-wrap gap-2"
-  }, React.createElement("div", {
-    style: {
-      fontSize: 14
-    }
-  }, React.createElement("strong", null, q.quoteNo), " \xB7 ", q.clientName, " \xB7 ", money(computeQuote(q, settings).total), " ", React.createElement(Badge, {
-    status: q.status
-  })), React.createElement("div", {
-    className: "flex gap-2"
-  }, q.status === "approved" && React.createElement(Btn, {
-    small: true,
-    onClick: () => act(q, "sent")
-  }, "Mark sent"), React.createElement(Btn, {
-    small: true,
-    kind: "gold",
-    onClick: () => act(q, "won")
-  }, "Won"), React.createElement(Btn, {
-    small: true,
-    kind: "ghost",
-    onClick: () => act(q, "lost")
-  }, "Declined"), React.createElement(Btn, {
-    small: true,
-    kind: "ghost",
-    onClick: () => voidQuote(q)
-  }, "Void"))))), outcomeQuotes.length === 0 && React.createElement(Card, null, React.createElement("div", {
+  }, outcomeQuotes.map(q => {
+    const age = Math.floor((Date.now() - new Date(q.createdAt)) / 864e5);
+    return React.createElement(Card, {
+      key: q.id,
+      style: {
+        padding: 12
+      }
+    }, React.createElement("div", {
+      className: "flex justify-between items-center flex-wrap gap-2"
+    }, React.createElement("div", {
+      style: {
+        fontSize: 14
+      }
+    }, React.createElement("div", null, React.createElement("strong", null, q.quoteNo), " \xB7 ", q.clientName, " \xB7 ", money(computeQuote(q, settings).total), " ", React.createElement(Badge, {
+      status: q.status
+    })), React.createElement("div", {
+      style: {
+        fontSize: 12,
+        color: BRAND.sub,
+        marginTop: 2
+      }
+    }, "Quoted ", fmtDate(q.createdAt), age > 0 ? " · " + age + " day" + (age === 1 ? "" : "s") + " ago" : "", users[q.createdBy] ? " · by " + users[q.createdBy].name : "")), React.createElement("div", {
+      className: "flex gap-2 flex-wrap justify-end"
+    }, q.status === "approved" && React.createElement(Btn, {
+      small: true,
+      onClick: () => act(q, "sent")
+    }, "Mark sent"), q.status !== "negotiating" && React.createElement(Btn, {
+      small: true,
+      kind: "ghost",
+      onClick: () => act(q, "negotiating")
+    }, "Negotiating"), React.createElement(Btn, {
+      small: true,
+      kind: "gold",
+      onClick: () => markWon(q)
+    }, "Won"), React.createElement(Btn, {
+      small: true,
+      kind: "ghost",
+      onClick: () => markLost(q)
+    }, "Declined"), React.createElement(Btn, {
+      small: true,
+      kind: "ghost",
+      onClick: () => voidQuote(q)
+    }, "Void"))));
+  }), outcomeQuotes.length === 0 && React.createElement(Card, null, React.createElement("div", {
     style: {
       color: BRAND.sub,
       fontSize: 14
     }
-  }, "Approved and sent quotes will appear here so you can record whether the client accepted.")))), React.createElement("div", null, React.createElement("h2", {
+  }, "Nothing waiting on a client. Approved, sent and in-negotiation quotes appear here until you record whether the job was won or declined.")))), React.createElement("div", null, React.createElement("h2", {
+    style: h2Style
+  }, "RECORDED OUTCOMES"), decided.length === 0 ? React.createElement(Card, null, React.createElement("div", {
+    style: {
+      color: BRAND.sub,
+      fontSize: 14
+    }
+  }, "Nothing decided yet. Once a job is marked Won it counts as booked revenue in the month the client signed \u2014 not the month the quote was written.")) : React.createElement("div", {
+    className: "flex flex-col gap-2"
+  }, decided.slice(0, 25).map(q => {
+    const quoted = computeQuote(q, settings).total;
+    const value = wonValue(q, settings);
+    const moved = q.status === "won" && typeof q.finalAmount === "number" && q.finalAmount !== quoted;
+    return React.createElement(Card, {
+      key: q.id,
+      style: {
+        padding: 12,
+        borderLeft: `4px solid ${q.status === "won" ? BRAND.green : BRAND.line}`
+      }
+    }, React.createElement("div", {
+      className: "flex justify-between items-center flex-wrap gap-2"
+    }, React.createElement("div", {
+      style: {
+        fontSize: 14
+      }
+    }, React.createElement("div", null, React.createElement("strong", null, q.quoteNo), " \xB7 ", q.clientName, " \xB7 ", money(q.status === "won" ? value : quoted), " ", React.createElement(Badge, {
+      status: q.status
+    })), React.createElement("div", {
+      style: {
+        fontSize: 12,
+        color: BRAND.sub,
+        marginTop: 2
+      }
+    }, q.status === "won" ? "Signed" : "Declined", " ", fmtDate(decidedDate(q)), q.decidedBy ? " · recorded by " + q.decidedBy : "", moved ? " · quoted " + money(quoted) : "", q.outcomeNote ? " — " + q.outcomeNote : "")), React.createElement("div", {
+      className: "flex gap-2 flex-wrap justify-end"
+    }, q.status === "won" && React.createElement(Btn, {
+      small: true,
+      kind: "ghost",
+      onClick: () => markWon(q)
+    }, "Edit amount"), q.status === "lost" && React.createElement(Btn, {
+      small: true,
+      kind: "gold",
+      onClick: () => markWon(q)
+    }, "Actually won"), React.createElement(Btn, {
+      small: true,
+      kind: "ghost",
+      onClick: () => reopen(q, "negotiating")
+    }, "Reopen"))));
+  }), decided.length > 25 && React.createElement("div", {
+    style: {
+      fontSize: 12,
+      color: BRAND.sub,
+      padding: "4px 2px"
+    }
+  }, "Showing the 25 most recent. Everything else is in the quote list, filtered by Won or Declined."))), React.createElement("div", null, React.createElement("h2", {
     style: h2Style
   }, "VOIDED QUOTES", voided.length > 0 && React.createElement("span", {
     style: {
@@ -2991,7 +3119,7 @@ function PreviewModal({
   const author = users[quote.createdBy];
   const isOwnerViewer = me && canManage(me);
   const voided = isVoid(quote);
-  const releasable = !voided && ["approved", "sent", "won"].includes(quote.status);
+  const releasable = !voided && ["approved", "sent", "negotiating", "won"].includes(quote.status);
   const canPrint = !voided && (isOwnerViewer || releasable);
   const viewerTag = useMemo(() => {
     const who = me ? me.name : "Unknown";
