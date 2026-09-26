@@ -1,0 +1,58 @@
+rules_version = '2';
+
+/* ============================================================
+   JTProQuotes — Firebase Storage rules
+
+   Paste these into Firebase Console > Storage > Rules and publish,
+   the same way firestore.rules is published.
+
+   These cover the lead screenshots attached to a quote. They hold
+   photographs of clients' homes and their written enquiries, so
+   nothing here is public — a signed-in team account is required for
+   every read and every write.
+
+   NOTE ON APPROVAL: Storage rules cannot read Firestore, so they
+   cannot check the `active` flag that gates the rest of the app.
+   That check is enforced where it can be — /api/read-lead verifies
+   the caller is approved before reading anything, and an unapproved
+   account cannot create or open a quote to attach a file to. The
+   worst an approved-but-pending signup could do here is upload an
+   orphan image under its own folder.
+============================================================ */
+
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function isAnImage() {
+      return request.resource.contentType.matches('image/.*');
+    }
+
+    // 8 MB is far above what the app uploads — screenshots are shrunk to
+    // roughly 1600px and re-encoded before they leave the browser.
+    function smallEnough() {
+      return request.resource.size < 8 * 1024 * 1024;
+    }
+
+    /* Lead screenshots, filed under the uid of whoever uploaded them.
+       Anyone on the team can look at them, because the owner and the
+       assistants have to review the quote they belong to. Writing is
+       restricted to your own folder so nobody can overwrite or plant a
+       file under someone else's name. */
+    match /leads/{uid}/{quoteId}/{fileName} {
+      allow read: if signedIn();
+      allow create: if signedIn() && request.auth.uid == uid && isAnImage() && smallEnough();
+      // Attachments are a record. Once uploaded they are not rewritten or
+      // removed from the app, the same principle as the activity log.
+      allow update, delete: if false;
+    }
+
+    // Anything not matched above is denied.
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}

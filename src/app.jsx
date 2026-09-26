@@ -1,4 +1,4 @@
-const { useState, useEffect, useMemo } = React;
+const { useState, useEffect, useMemo, useRef } = React;
 
 /* ================= JTProQuotes =================
    Quote platform for JTProconstruction LLC
@@ -263,13 +263,18 @@ const FIREBASE_CONFIG = (window.JTPQ_CONFIG && window.JTPQ_CONFIG.firebase) || {
 const OWNER_EMAIL = (window.JTPQ_CONFIG && window.JTPQ_CONFIG.ownerEmail) || "info@jtproconstruction.com";
 
 const CLOUD = !!FIREBASE_CONFIG.apiKey;
-let fbAuth = null, db = null;
+let fbAuth = null, db = null, fbStorage = null;
 let cloudInitError = null;
 if (CLOUD) {
   try {
     firebase.initializeApp(FIREBASE_CONFIG);
     fbAuth = firebase.auth();
     db = firebase.firestore();
+    /* Storage holds the lead screenshots attached to a quote. It is optional —
+       if the SDK or the bucket is missing, reading a lead still works and only
+       the "keep the screenshot" part is skipped. */
+    try { fbStorage = firebase.storage ? firebase.storage() : null; }
+    catch (e) { console.warn("[JTProQuotes] Storage unavailable:", e && e.message); }
   } catch (e) {
     cloudInitError = e.message || String(e);
     console.error("[JTProQuotes] Firebase failed to start:", e);
@@ -591,7 +596,7 @@ function App() {
           }} />}
 
         {(view === "new" || view === "edit") && (
-          <QuoteForm key={activeQuote ? activeQuote.id : "new"} me={me} isOwner={isOwner} isManager={isManager} settings={settings} existing={view === "edit" ? activeQuote : null}
+          <QuoteForm key={activeQuote ? activeQuote.id : "new"} me={me} isOwner={isOwner} isManager={isManager} settings={settings} notify={notify} existing={view === "edit" ? activeQuote : null}
             onAutosave={upsertQuote}
             onSave={async (q) => { await upsertQuote(q); notify(q.status === "draft" ? "Draft saved — visible to the owner" : q.status === "approved" ? "Quote saved & approved" : "Quote submitted for owner review"); setView("dashboard"); setActiveQuote(null); }}
             onPreview={setPreviewQuote} onCancel={() => { setView("dashboard"); setActiveQuote(null); }} />
@@ -961,8 +966,239 @@ function Dashboard({ me, isOwner, isManager, quotes, users, settings, onOpen, on
   );
 }
 
+/* ================= LEAD READER =================
+   Paste a screenshot of a Thumbtack / Facebook / text-message enquiry and it
+   fills the client and job fields, so nobody retypes what the customer
+   already wrote. The reading happens in /api/read-lead on the server, because
+   the API key must never be in this file — index.html is public.
+
+   Two deliberate limits:
+   - It only reports what is actually written. Blank beats a guessed phone number.
+   - It never estimates square footage from a picture. Measurements come from
+     the tape, or from the customer's own words. A quote priced off a guessed
+     area is a loss waiting to happen. */
+
+/* Phones produce 4 MB photos; the request body has to stay small and a
+   screenshot is perfectly readable at 1600px. */
+function shrinkImage(file, maxEdge) {
+  return new Promise((resolve, reject) => {
+    const fr = new FileReader();
+    fr.onerror = () => reject(new Error("Could not read that file."));
+    fr.onload = () => {
+      const img = new Image();
+      img.onerror = () => reject(new Error("That file isn't an image we can read."));
+      img.onload = () => {
+        const scale = Math.min(1, maxEdge / Math.max(img.width, img.height));
+        const w = Math.max(1, Math.round(img.width * scale));
+        const h = Math.max(1, Math.round(img.height * scale));
+        const cv = document.createElement("canvas");
+        cv.width = w; cv.height = h;
+        const ctx = cv.getContext("2d");
+        ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, w, h);
+        ctx.drawImage(img, 0, 0, w, h);
+        const dataUrl = cv.toDataURL("image/jpeg", 0.82);
+        resolve({ name: file.name || "screenshot.jpg", mediaType: "image/jpeg", data: dataUrl.split(",")[1], dataUrl });
+      };
+      img.src = fr.result;
+    };
+    fr.readAsDataURL(file);
+  });
+}
+
+const dataUrlToBlob = (dataUrl) => {
+  const [head, b64] = dataUrl.split(",");
+  const mime = (head.match(/:(.*?);/) || [null, "image/jpeg"])[1];
+  const bin = atob(b64);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return new Blob([bytes], { type: mime });
+};
+
+function LeadReader({ me, quoteId, disabled, onApply, onAttach }) {
+  const [open, setOpen] = useState(false);
+  const [text, setText] = useState("");
+  const [shots, setShots] = useState([]);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  const [result, setResult] = useState(null);
+  const [overwrite, setOverwrite] = useState(false);
+  const fileRef = useRef(null);
+
+  const addFiles = async (fileList) => {
+    setErr("");
+    const picked = Array.from(fileList || []).filter((f) => f && f.type && f.type.indexOf("image/") === 0);
+    if (!picked.length) return;
+    const room = 3 - shots.length;
+    if (room <= 0) return setErr("Three screenshots is the limit. Remove one first.");
+    try {
+      const shrunk = [];
+      for (const f of picked.slice(0, room)) shrunk.push(await shrinkImage(f, 1600));
+      setShots((p) => p.concat(shrunk));
+    } catch (e) { setErr(e.message || "Couldn't read that image."); }
+  };
+
+  /* Paste straight from the clipboard — the whole point on a phone or a
+     desktop where you just screenshotted the lead. */
+  const onPaste = (e) => {
+    const items = (e.clipboardData && e.clipboardData.items) || [];
+    const files = [];
+    for (const it of items) if (it.kind === "file") { const f = it.getAsFile(); if (f) files.push(f); }
+    if (files.length) { e.preventDefault(); addFiles(files); }
+  };
+
+  const read = async () => {
+    setErr(""); setResult(null);
+    if (!text.trim() && !shots.length) return setErr("Add a screenshot or paste the lead text first.");
+    if (!fbAuth || !fbAuth.currentUser) return setErr("Reading leads needs the cloud version. Sign in again.");
+    setBusy(true);
+    try {
+      const idToken = await fbAuth.currentUser.getIdToken();
+      const r = await fetch("/api/read-lead", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ idToken, text, images: shots.map((s) => ({ mediaType: s.mediaType, data: s.data })) }),
+      });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(data.error || "That didn't work. Try again.");
+      setResult(data.fields);
+      logActivity(me.name, "Read a lead from a screenshot", quoteId);
+    } catch (e) {
+      setErr(e.message || "That didn't work. Try again.");
+    }
+    setBusy(false);
+  };
+
+  const apply = async () => {
+    if (!result) return;
+    onApply(result, overwrite);
+    /* Keep the screenshots on the quote — they are the record of what the
+       customer actually asked for, which matters if the job is disputed. */
+    if (shots.length && onAttach) await onAttach(shots);
+    setOpen(false); setResult(null); setShots([]); setText("");
+  };
+
+  const rowLabel = { fontSize: 11, textTransform: "uppercase", letterSpacing: "0.06em", color: BRAND.sub, fontWeight: 700 };
+
+  if (!CLOUD) return null;
+
+  return (
+    <div style={{ border: `1.5px dashed ${BRAND.gold}`, borderRadius: 10, padding: 14, marginBottom: 16, background: "#FDFBF4" }}>
+      {!open ? (
+        <div className="flex items-center justify-between flex-wrap gap-2">
+          <div>
+            <div style={{ fontWeight: 700, color: BRAND.navy, fontSize: 14 }}>Read a lead from a screenshot</div>
+            <div style={{ fontSize: 12, color: BRAND.sub, marginTop: 2 }}>Paste a Thumbtack, Facebook or text-message enquiry and the client and job details fill themselves in.</div>
+          </div>
+          <Btn small kind="gold" onClick={() => setOpen(true)} disabled={disabled}>Start</Btn>
+        </div>
+      ) : (
+        <div onPaste={onPaste}>
+          <div className="flex items-center justify-between mb-3">
+            <div style={{ fontWeight: 700, color: BRAND.navy, fontSize: 14 }}>Read a lead</div>
+            <button onClick={() => { setOpen(false); setResult(null); setErr(""); }}
+              style={{ background: "none", border: "none", color: BRAND.sub, fontSize: 13, cursor: "pointer", textDecoration: "underline" }}>Close</button>
+          </div>
+
+          {!result && (
+            <div>
+              <Field label="Screenshots" hint="Up to three. Paste with the keyboard, or pick them below.">
+                <div className="flex gap-2 flex-wrap items-center">
+                  {shots.map((s, i) => (
+                    <div key={i} style={{ position: "relative" }}>
+                      <img src={s.dataUrl} alt="" style={{ width: 62, height: 62, objectFit: "cover", borderRadius: 6, border: `1px solid ${BRAND.line}` }} />
+                      <button onClick={() => setShots(shots.filter((_, j) => j !== i))}
+                        style={{ position: "absolute", top: -6, right: -6, width: 20, height: 20, borderRadius: 99, border: "none", background: BRAND.red, color: "#fff", fontSize: 12, cursor: "pointer", fontWeight: 700 }}>×</button>
+                    </div>
+                  ))}
+                  {shots.length < 3 && (
+                    <button onClick={() => fileRef.current && fileRef.current.click()}
+                      style={{ width: 62, height: 62, borderRadius: 6, border: `1.5px dashed ${BRAND.line}`, background: "#fff", color: BRAND.sub, fontSize: 22, cursor: "pointer" }}>+</button>
+                  )}
+                  <input ref={fileRef} type="file" accept="image/*" multiple style={{ display: "none" }}
+                    onChange={(e) => { addFiles(e.target.files); e.target.value = ""; }} />
+                </div>
+              </Field>
+
+              <Field label="Or paste the text" hint="Works on its own, or alongside a screenshot.">
+                <textarea style={Object.assign({}, inputStyle, { minHeight: 90, resize: "vertical" })} value={text}
+                  onChange={(e) => setText(e.target.value)} placeholder="Paste the customer's message here…" />
+              </Field>
+
+              {err && <div style={{ color: BRAND.red, fontSize: 13, fontWeight: 600, marginBottom: 10 }}>{err}</div>}
+              <Btn small kind="gold" onClick={read} disabled={busy}>{busy ? "Reading…" : "Read it"}</Btn>
+            </div>
+          )}
+
+          {result && (
+            <div>
+              <div style={{ background: "#fff", border: `1px solid ${BRAND.line}`, borderRadius: 8, padding: 12, marginBottom: 12 }}>
+                {[
+                  ["Client", result.clientName], ["Phone", result.clientPhone], ["Email", result.clientEmail],
+                  ["Address", result.clientAddress], ["Category", result.category], ["Job title", result.jobTitle],
+                  ["Timeline", result.timeline], ["Budget named", result.budgetMentioned], ["Source", result.sourcePlatform],
+                ].filter(([, v]) => v).map(([l, v]) => (
+                  <div key={l} className="flex gap-3" style={{ marginBottom: 5 }}>
+                    <div style={Object.assign({}, rowLabel, { minWidth: 96 })}>{l}</div>
+                    <div style={{ fontSize: 13.5, color: BRAND.ink, fontWeight: 600 }}>{v}</div>
+                  </div>
+                ))}
+                {result.description && (
+                  <div style={{ marginTop: 8 }}>
+                    <div style={rowLabel}>Description</div>
+                    <div style={{ fontSize: 13, color: BRAND.ink, marginTop: 2 }}>{result.description}</div>
+                  </div>
+                )}
+                {result.scopeSuggestions && result.scopeSuggestions.length > 0 && (
+                  <div style={{ marginTop: 8 }}>
+                    <div style={rowLabel}>Scope lines it suggests</div>
+                    <ul style={{ fontSize: 13, color: BRAND.ink, marginTop: 2, paddingLeft: 18 }}>
+                      {result.scopeSuggestions.map((s, i) => <li key={i} style={{ listStyle: "disc" }}>{s}</li>)}
+                    </ul>
+                  </div>
+                )}
+                {result.measurements && result.measurements.length > 0 && (
+                  <div style={{ marginTop: 8 }}>
+                    <div style={rowLabel}>Sizes the customer stated</div>
+                    <div style={{ fontSize: 13, color: BRAND.ink, marginTop: 2 }}>{result.measurements.join(" · ")}</div>
+                    <div style={{ fontSize: 11.5, color: BRAND.amber, marginTop: 3, fontWeight: 600 }}>The customer's words, not a measurement. Verify on site before pricing.</div>
+                  </div>
+                )}
+              </div>
+
+              {result.missing && result.missing.length > 0 && (
+                <div style={{ background: "#FBF3DE", color: BRAND.amber, borderRadius: 8, padding: "9px 12px", fontSize: 12.5, fontWeight: 600, marginBottom: 10 }}>
+                  Not in the screenshot — you'll need to fill these in: {result.missing.join(", ")}
+                </div>
+              )}
+              {result.notes && (
+                <div style={{ background: "#F9E5E3", color: BRAND.red, borderRadius: 8, padding: "9px 12px", fontSize: 12.5, fontWeight: 600, marginBottom: 10 }}>
+                  {result.notes}
+                </div>
+              )}
+
+              <label className="flex items-center gap-2" style={{ fontSize: 12.5, color: BRAND.sub, marginBottom: 12, cursor: "pointer" }}>
+                <input type="checkbox" checked={overwrite} onChange={(e) => setOverwrite(e.target.checked)} />
+                Replace what I've already typed (off: only empty fields get filled)
+              </label>
+
+              {err && <div style={{ color: BRAND.red, fontSize: 13, fontWeight: 600, marginBottom: 10 }}>{err}</div>}
+              <div className="flex gap-2 flex-wrap">
+                <Btn small kind="gold" onClick={apply}>Fill the form</Btn>
+                <Btn small kind="ghost" onClick={() => setResult(null)}>Read something else</Btn>
+              </div>
+              <div style={{ fontSize: 11.5, color: BRAND.sub, marginTop: 8 }}>
+                Nothing is priced from this. Check every line before you submit it.
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 /* ================= QUOTE FORM ================= */
-function QuoteForm({ me, isOwner, isManager, settings, existing, onSave, onAutosave, onPreview, onCancel }) {
+function QuoteForm({ me, isOwner, isManager, settings, notify, existing, onSave, onAutosave, onPreview, onCancel }) {
   const [q, setQ] = useState(existing || {
     id: uid(),
     quoteNo: "Q-" + new Date().getFullYear() + "-" + Math.floor(1000 + Math.random() * 9000),
@@ -1037,11 +1273,83 @@ function QuoteForm({ me, isOwner, isManager, settings, existing, onSave, onAutos
 
   const h3Style = { fontFamily: "'Barlow Condensed', sans-serif", fontSize: 20, fontWeight: 700, color: BRAND.navy, marginBottom: 14, letterSpacing: "0.04em" };
 
+  /* Fills the form from a read lead. By default it only touches fields that
+     are still empty, so a half-typed quote never gets clobbered. Scope lines
+     it suggests are added switched off — somebody has to agree to each one
+     before it reaches the client. */
+  const applyLead = (f, overwrite) => {
+    setDirty(true);
+    setQ((p) => {
+      const take = (key, val) => (val && (overwrite || !String(p[key] || "").trim()) ? val : p[key]);
+      const next = Object.assign({}, p, {
+        clientName: take("clientName", f.clientName),
+        clientPhone: take("clientPhone", f.clientPhone),
+        clientEmail: take("clientEmail", f.clientEmail),
+        clientAddress: take("clientAddress", f.clientAddress),
+        jobTitle: take("jobTitle", f.jobTitle),
+        description: take("description", f.description),
+      });
+      // Changing the category swaps in that trade's scope template.
+      if (f.category && (overwrite || p.category === CATEGORIES[0]) && f.category !== p.category) {
+        next.category = f.category;
+        if (!p.scopeEdited) { next.scopeItems = buildScope(f.category); next.scopeSource = f.category; }
+      }
+      const suggestions = (f.scopeSuggestions || []).map((t) => ({ id: uid(), text: t, on: false, fromLead: true }));
+      if (suggestions.length) next.scopeItems = (next.scopeItems || []).concat(suggestions);
+      // What the customer said about size, timing and budget belongs in the
+      // estimator's notes — never in the pricing.
+      const extra = [
+        f.measurements && f.measurements.length ? "Customer stated: " + f.measurements.join("; ") : "",
+        f.timeline ? "Timeline: " + f.timeline : "",
+        f.budgetMentioned ? "Budget named: " + f.budgetMentioned : "",
+        f.sourcePlatform ? "Lead source: " + f.sourcePlatform : "",
+      ].filter(Boolean).join("\n");
+      if (extra) next.notes = (p.notes ? p.notes.trim() + "\n\n" : "") + extra;
+      next.leadReadAt = new Date().toISOString();
+      return next;
+    });
+    notify("Form filled from the lead — check every field before submitting.");
+  };
+
+  /* Screenshots live with the quote as the record of what was asked for. */
+  const attachShots = async (shots) => {
+    if (!fbStorage) return notify("Details filled in, but the screenshots couldn't be saved — storage isn't set up.");
+    try {
+      const saved = [];
+      for (let i = 0; i < shots.length; i++) {
+        const path = `leads/${me.id}/${q.id}/${Date.now()}-${i}.jpg`;
+        const ref = fbStorage.ref().child(path);
+        await ref.put(dataUrlToBlob(shots[i].dataUrl), { contentType: "image/jpeg" });
+        saved.push({ path, url: await ref.getDownloadURL(), at: new Date().toISOString(), by: me.name });
+      }
+      setQ((p) => Object.assign({}, p, { attachments: (p.attachments || []).concat(saved) }));
+      setDirty(true);
+    } catch (e) {
+      warn("attach screenshots")(e);
+      notify("Details filled in, but the screenshots couldn't be uploaded.");
+    }
+  };
+
+  const attachments = q.attachments || [];
+
   return (
     <div className="grid md-grid-cols-3 gap-5">
       <div className="md-col-span-2 flex flex-col gap-5">
         <Card>
           <h3 style={h3Style}>1 · CLIENT</h3>
+          <LeadReader me={me} quoteId={q.quoteNo} disabled={locked} onApply={applyLead} onAttach={attachShots} />
+          {attachments.length > 0 && (
+            <div style={{ marginBottom: 14 }}>
+              <div style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: "0.06em", color: BRAND.sub, fontWeight: 700, marginBottom: 6 }}>Lead screenshots on file</div>
+              <div className="flex gap-2 flex-wrap">
+                {attachments.map((a, i) => (
+                  <a key={i} href={a.url} target="_blank" rel="noopener noreferrer" title={"Added by " + (a.by || "unknown") + " · " + fmtDate(a.at)}>
+                    <img src={a.url} alt="" style={{ width: 54, height: 54, objectFit: "cover", borderRadius: 6, border: `1px solid ${BRAND.line}` }} />
+                  </a>
+                ))}
+              </div>
+            </div>
+          )}
           <div className="grid md-grid-cols-2 gap-x-4">
             <Field label="Client name"><input style={inputStyle} disabled={locked} value={q.clientName} onChange={(e) => set("clientName", e.target.value)} placeholder="Full name" /></Field>
             <Field label="Phone"><input style={inputStyle} disabled={locked} value={q.clientPhone} onChange={(e) => set("clientPhone", e.target.value)} placeholder="(832) 000-0000" /></Field>

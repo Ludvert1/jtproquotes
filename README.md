@@ -29,6 +29,8 @@ It runs in one of two modes, decided by `config.js`:
 | `index.html` | The built app that Vercel serves. **Generated — do not edit by hand.** |
 | `config.js` | Firebase settings and the owner's email. The one file you edit to go live. |
 | `firestore.rules` | Database security rules. Paste these into Firebase. |
+| `storage.rules` | Rules for the lead screenshots. Paste these into Firebase Storage. |
+| `api/read-lead.js` | Server function that reads a lead screenshot. Holds no secrets — the key comes from the environment. |
 | `src/app.jsx` | The app source. Edit this, then run `npm run build`. |
 | `src/index.template.html` | Page shell (fonts, styles, script tags). |
 | `build.js` | Compiles `src/app.jsx` into `index.html`. |
@@ -44,6 +46,50 @@ It runs in one of two modes, decided by `config.js`:
 4. Deploy.
 
 Every push to `main` redeploys automatically.
+
+---
+
+## Reading a lead from a screenshot
+
+On a new quote there is a **Read a lead from a screenshot** panel above the
+client fields. Paste a Thumbtack, Facebook or text-message enquiry — as an
+image, as text, or both — and it fills in the client details, job title,
+description and a set of suggested scope lines, then keeps the screenshot on
+the quote as the record of what was asked for.
+
+It is deliberately narrow about two things:
+
+- **It reports only what is written.** A field that isn't in the screenshot is
+  left blank and listed under "you'll need to fill these in", rather than
+  guessed at.
+- **It never measures.** Square footage cannot be read off a photograph. Sizes
+  the customer stated in words are copied into the estimator's notes, marked as
+  the customer's words, and never touch the pricing. Measurements come from the
+  tape.
+
+Everything it produces is a draft that still goes through the normal approval.
+
+### Switching it on
+
+1. Get an API key from [console.anthropic.com](https://console.anthropic.com).
+2. In Vercel: **Project → Settings → Environment Variables**, add
+   `ANTHROPIC_API_KEY` with that key, for all environments. Redeploy.
+3. In Firebase Console → **Storage** → Get started (if you haven't already),
+   then **Rules** → paste `storage.rules` → Publish.
+
+Optional environment variables: `CLAUDE_MODEL` to change the model,
+`FIREBASE_API_KEY` and `FIREBASE_PROJECT_ID` if the project ever moves.
+
+Until `ANTHROPIC_API_KEY` is set, the panel is there but reading returns a
+message saying it isn't switched on. Everything else works as before.
+
+**The key never goes in `config.js` or anywhere under `src/`.** This repository
+is readable and anything in the app's JavaScript can be read by anyone and used
+to spend your credit. `api/read-lead.js` is the only code that sees the key, it
+runs on Vercel's server, and it refuses anyone who isn't a signed-in, approved
+team member — so an outsider cannot run up a bill on it.
+
+Rough cost: a fraction of a cent per lead read.
 
 ---
 
