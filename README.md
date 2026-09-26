@@ -30,7 +30,11 @@ It runs in one of two modes, decided by `config.js`:
 | `config.js` | Firebase settings and the owner's email. The one file you edit to go live. |
 | `firestore.rules` | Database security rules. Paste these into Firebase. |
 | `storage.rules` | Rules for the lead screenshots. Paste these into Firebase Storage. |
-| `api/read-lead.js` | Server function that reads a lead screenshot. Holds no secrets — the key comes from the environment. |
+| `api/_lib.js` | Shared server helpers. Not reachable from the web (Vercel ignores `_` files). |
+| `api/read-lead.js` | Reads a lead screenshot. Holds no secrets — keys come from the environment. |
+| `api/notify.js` | Emails the approvers when an associate submits a quote. |
+| `api/ingest-lead.js` | Turns a lead email into a draft quote. Called by the Gmail script. |
+| `integrations/gmail-thumbtack.gs` | Google Apps Script that watches Gmail for leads. Setup steps are in the file. |
 | `src/app.jsx` | The app source. Edit this, then run `npm run build`. |
 | `src/index.template.html` | Page shell (fonts, styles, script tags). |
 | `build.js` | Compiles `src/app.jsx` into `index.html`. |
@@ -90,6 +94,75 @@ runs on Vercel's server, and it refuses anyone who isn't a signed-in, approved
 team member — so an outsider cannot run up a bill on it.
 
 Rough cost: a fraction of a cent per lead read.
+
+---
+
+## Being told when a quote needs approving
+
+Three things happen the moment an associate submits:
+
+- **The tab title** shows the count — `(2) JTProQuotes` — so an open tab tells
+  you without being looked at.
+- **A toast** appears if you already have the app open, because the quote list
+  is a live listener.
+- **An email** goes to everyone who can approve, which is the part that reaches
+  you when the app is closed.
+
+Only a real submission sends mail. Saved drafts, autosaves, and a manager
+approving their own work do not. The email is composed on the server from the
+stored quote, not from anything the browser sends, and the total in it is
+calculated with the same formula the app uses — so it always matches the screen.
+
+### Switching the email on
+
+Web3Forms delivers to whatever address an access key belongs to, and copying in
+extra people is a paid feature there. So the free way to reach the assistants is
+**one access key per person**:
+
+1. At [web3forms.com](https://web3forms.com), create an access key for each
+   person who should be told — your address, then each assistant's.
+2. In Vercel, add `WEB3FORMS_KEYS` with the keys separated by commas:
+   `abc-123,def-456`. Redeploy.
+
+If you ever go PRO with Web3Forms you can instead set `WEB3FORMS_CC` to a
+comma-separated list of addresses and use a single key.
+
+With `WEB3FORMS_KEYS` unset, submitting works exactly as it always did and no
+email is attempted.
+
+---
+
+## Filing Thumbtack leads automatically
+
+`integrations/gmail-thumbtack.gs` is a Google Apps Script that checks your Gmail
+every 15 minutes for lead emails, reads each one, and files it in JTProQuotes as
+an **unpriced draft** under your account. It runs on Google's servers as you —
+no Google Cloud project, no OAuth app, and your password never goes anywhere.
+
+Drafts filed this way are tagged **FILED FROM A LEAD EMAIL — needs pricing** in
+the quote list. Nothing is priced and nothing is sent; you open it, put real
+numbers on it, and it goes through the same review as everything else.
+
+### Setting it up
+
+1. In Firebase Console → **Project settings → Service accounts → Generate new
+   private key**. You get a JSON file.
+2. In Vercel add these environment variables, then redeploy:
+   - `FIREBASE_SERVICE_ACCOUNT` — the whole contents of that JSON file, pasted
+     as one line.
+   - `INGEST_SECRET` — any long random string you invent.
+3. Open `integrations/gmail-thumbtack.gs`, follow the setup comment at the top
+   (paste into script.google.com, set `ENDPOINT` and `SECRET`, run `testOnce`,
+   add a 15-minute trigger).
+
+The service-account key is a **real secret** — unlike the Firebase web key, it
+bypasses your security rules. It belongs only in Vercel's environment
+variables. Never put it in `config.js`, anywhere under `src/`, or in this
+repository.
+
+Add more lead sources by editing the `SEARCHES` list in the script — Angi,
+Facebook, your website's form. They all get filed the same way. Processed
+emails are labelled `JTPQ-Filed` so nothing is filed twice.
 
 ---
 

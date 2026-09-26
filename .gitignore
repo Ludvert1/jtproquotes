@@ -13,3 +13,7 @@ npm-debug.log*
 .env
 .env.local
 fbconfig.txt*
+
+# Never commit a service-account key or any API key.
+*serviceAccount*.json
+*service-account*.json

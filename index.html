@@ -709,6 +709,25 @@ function App() {
   const isManager = canManage(me);
   const myQuotes = Object.values(quotes).filter(q => q.createdBy === me.id);
   const visibleQuotes = isManager ? Object.values(quotes) : myQuotes;
+  const pendingCount = isManager ? Object.values(quotes).filter(q => q.status === "pending").length : 0;
+  const seenPending = useRef(null);
+  useEffect(() => {
+    if (!me) {
+      document.title = "JTProQuotes";
+      return;
+    }
+    document.title = (pendingCount > 0 && isManager ? "(" + pendingCount + ") " : "") + "JTProQuotes";
+    if (!isManager) return;
+    if (seenPending.current === null) {
+      seenPending.current = pendingCount;
+      return;
+    }
+    if (pendingCount > seenPending.current) {
+      const n = pendingCount - seenPending.current;
+      notify(n === 1 ? "A quote was just submitted for your approval." : n + " quotes were just submitted for your approval.");
+    }
+    seenPending.current = pendingCount;
+  }, [pendingCount, isManager, me]);
   const upsertQuote = async q => {
     if (CLOUD) {
       await db.collection("quotes").doc(q.id).set(q);
@@ -1593,7 +1612,15 @@ function Dashboard({
         fontSize: 13,
         color: BRAND.sub
       }
-    }, q.jobTitle || q.category, " \xB7 ", fmtDate(q.createdAt), isManager && users[q.createdBy] ? ` · by ${users[q.createdBy].name}` : ""), q.reviewNote && q.status === "changes" && React.createElement("div", {
+    }, q.jobTitle || q.category, " \xB7 ", fmtDate(q.createdAt), isManager && users[q.createdBy] ? ` · by ${users[q.createdBy].name}` : ""), q.fromInbox && React.createElement("div", {
+      style: {
+        fontSize: 11.5,
+        color: BRAND.gold,
+        marginTop: 3,
+        fontWeight: 700,
+        letterSpacing: "0.04em"
+      }
+    }, "FILED FROM A LEAD EMAIL", q.leadSource ? " · " + q.leadSource : "", " \u2014 needs pricing"), q.reviewNote && q.status === "changes" && React.createElement("div", {
       style: {
         fontSize: 12,
         color: BRAND.red,
@@ -2171,7 +2198,7 @@ function QuoteForm({
     [k]: v
   }) : it));
   const rmItem = id => set("items", q.items.filter(it => it.id !== id));
-  const save = submit => {
+  const save = async submit => {
     if (!q.clientName.trim()) return alert("Enter the client's name.");
     const next = Object.assign({}, q, {
       updatedAt: new Date().toISOString()
@@ -2192,7 +2219,24 @@ function QuoteForm({
       }]);
       logActivity(me.name, "Saved draft", q.quoteNo);
     }
-    onSave(next);
+    await onSave(next);
+    if (submit && next.status === "pending" && CLOUD && fbAuth && fbAuth.currentUser) {
+      try {
+        const idToken = await fbAuth.currentUser.getIdToken();
+        await fetch("/api/notify", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            idToken,
+            quoteId: next.id
+          })
+        });
+      } catch (e) {
+        console.warn("[JTProQuotes] approval email not sent:", e && e.message);
+      }
+    }
   };
   const Stepper = ({
     label,

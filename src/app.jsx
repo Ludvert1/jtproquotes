@@ -539,6 +539,28 @@ function App() {
   const isManager = canManage(me);
   const myQuotes = Object.values(quotes).filter((q) => q.createdBy === me.id);
   const visibleQuotes = isManager ? Object.values(quotes) : myQuotes;
+
+  /* ---- WAITING-FOR-REVIEW ALERT ----
+     The quote list is a live Firestore listener, so a submission from an
+     associate arrives here the moment they send it. The count goes in the
+     browser tab title, which is what you notice when the app is open in
+     another tab, and a new arrival raises a toast. The email from
+     /api/notify is what reaches you when the app is closed. */
+  const pendingCount = isManager ? Object.values(quotes).filter((q) => q.status === "pending").length : 0;
+  const seenPending = useRef(null);
+  useEffect(() => {
+    if (!me) { document.title = "JTProQuotes"; return; }
+    document.title = (pendingCount > 0 && isManager ? "(" + pendingCount + ") " : "") + "JTProQuotes";
+    if (!isManager) return;
+    // The first pass after signing in only records where things stand — it
+    // must not announce quotes that were already waiting.
+    if (seenPending.current === null) { seenPending.current = pendingCount; return; }
+    if (pendingCount > seenPending.current) {
+      const n = pendingCount - seenPending.current;
+      notify(n === 1 ? "A quote was just submitted for your approval." : n + " quotes were just submitted for your approval.");
+    }
+    seenPending.current = pendingCount;
+  }, [pendingCount, isManager, me]);
   const upsertQuote = async (q) => {
     if (CLOUD) { await db.collection("quotes").doc(q.id).set(q); return; }
     const next = Object.assign({}, quotes); next[q.id] = q; await saveQuotes(next);
@@ -938,6 +960,7 @@ function Dashboard({ me, isOwner, isManager, quotes, users, settings, onOpen, on
                   <div style={{ minWidth: 200 }}>
                     <div style={{ fontWeight: 700, fontSize: 15, textDecoration: isVoid(q) ? "line-through" : "none" }}>{q.quoteNo} · {q.clientName || "Unnamed client"}</div>
                     <div style={{ fontSize: 13, color: BRAND.sub }}>{q.jobTitle || q.category} · {fmtDate(q.createdAt)}{isManager && users[q.createdBy] ? ` · by ${users[q.createdBy].name}` : ""}</div>
+                    {q.fromInbox && <div style={{ fontSize: 11.5, color: BRAND.gold, marginTop: 3, fontWeight: 700, letterSpacing: "0.04em" }}>FILED FROM A LEAD EMAIL{q.leadSource ? " · " + q.leadSource : ""} — needs pricing</div>}
                     {q.reviewNote && q.status === "changes" && <div style={{ fontSize: 12, color: BRAND.red, marginTop: 3 }}>Owner note: {q.reviewNote}</div>}
                     {isVoid(q) && <div style={{ fontSize: 12, color: "#7A6A55", marginTop: 3, fontWeight: 600 }}>Voided{q.voidedBy ? " by " + q.voidedBy : ""}{q.voidReason ? " — " + q.voidReason : ""} · does not count toward any total</div>}
                     {isDecided(q) && !isVoid(q) && (
@@ -1246,7 +1269,7 @@ function QuoteForm({ me, isOwner, isManager, settings, notify, existing, onSave,
   const addItem = () => set("items", q.items.concat([{ id: uid(), desc: "", qty: 1, price: 0 }]));  const setItem = (id, k, v) => set("items", q.items.map((it) => (it.id === id ? Object.assign({}, it, { [k]: v }) : it)));
   const rmItem = (id) => set("items", q.items.filter((it) => it.id !== id));
 
-  const save = (submit) => {
+  const save = async (submit) => {
     if (!q.clientName.trim()) return alert("Enter the client's name.");
     const next = Object.assign({}, q, { updatedAt: new Date().toISOString() });
     if (submit) {
@@ -1257,7 +1280,20 @@ function QuoteForm({ me, isOwner, isManager, settings, notify, existing, onSave,
       next.history = (q.history || []).concat([{ at: new Date().toISOString(), by: me.name, action: "Saved draft" }]);
       logActivity(me.name, "Saved draft", q.quoteNo);
     }
-    onSave(next);
+    await onSave(next);
+    /* Tell whoever can approve it. Fired after the save so the server reads
+       the real stored quote rather than trusting anything sent from here.
+       A failure is silent on purpose — the quote is already submitted, and
+       an email that didn't send is not the associate's problem to solve. */
+    if (submit && next.status === "pending" && CLOUD && fbAuth && fbAuth.currentUser) {
+      try {
+        const idToken = await fbAuth.currentUser.getIdToken();
+        await fetch("/api/notify", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ idToken, quoteId: next.id }),
+        });
+      } catch (e) { console.warn("[JTProQuotes] approval email not sent:", e && e.message); }
+    }
   };
 
   const Stepper = ({ label, value, min, onChange, unit }) => (
