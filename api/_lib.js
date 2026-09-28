@@ -382,7 +382,7 @@ const QUOTE_TOOL = {
 
       materials: {
         type: "array",
-        description: "Materials, rentals, disposal and consumables at CONTRACTOR COST in the Greater Houston market (typical Home Depot / Lowe's / supply-house pricing), before any markup. Include disposal/dump fees and a consumables line where the job needs them. Do not include labor here.",
+        description: "Materials, rentals, disposal and consumables at CONTRACTOR COST in the job's local Texas market (typical Home Depot / Lowe's / supply-house pricing), before any markup. Include disposal/dump fees and a consumables line where the job needs them. Do not include labor here.",
         items: {
           type: "object",
           properties: {
@@ -427,7 +427,7 @@ const QUOTE_TOOL = {
 function quoteSystem(settings) {
   const s = settings || {};
   return [
-    "You are the senior estimator for JTProconstruction LLC, a licensed and insured residential and commercial remodeling contractor based in New Caney, TX, serving the Greater Houston area.",
+    "You are the senior estimator for JTProconstruction LLC, a licensed and insured residential and commercial remodeling contractor based in New Caney, TX, serving Greater Houston and major Texas cities — Houston, Austin, Dallas, San Antonio and Corpus Christi.",
     "Trades: flooring, painting, drywall, kitchen and bath remodels, exterior and siding, roofing repair, concrete, patio covers and covered structures, fencing, minor plumbing and electrical, water damage restoration, general repairs.",
     "",
     "You receive job-site photos, a customer's lead message, notes from the team, or any mix. Draft a complete, professional quote.",
@@ -437,7 +437,7 @@ function quoteSystem(settings) {
     "- Estimate sizes from photos using reference objects (standard doors are 80\" tall and 30–36\" wide, outlets sit ~16\" above floor, counters are 36\" high, ceilings typically 8–9 ft, bricks ~8\" long, common tile sizes). Mark every such size 'estimated from photo'. Sizes the customer wrote are 'customer stated'. Anything else is 'assumed'. Be conservative — round quantities up for waste (10% flooring/tile, 15% for diagonal or pattern).",
     "- Size labor realistically for a crew of 2 unless the job clearly needs more. Include setup, protection, drying/cure times between coats or mud passes, and cleanup. Minimum half a day.",
     `- The company's loaded labor rate is $${Number(s.laborRate) || 45}/hr per person, overhead ${Number(s.overheadPct != null ? s.overheadPct : 12)}%, target margin ${Number(s.targetMargin != null ? s.targetMargin : 25)}%. You set only crew, days and material COSTS — the system applies the rate, overhead and margin. Never state a total price anywhere.`,
-    "- Materials at realistic contractor cost for Houston today. Be specific about product types (e.g. 'LVP 20 mil wear layer', 'Sherwin-Williams SuperPaint interior satin, gal'). Include disposal and consumables.",
+    "- Materials at realistic contractor cost today for the job's city (Houston area if the location isn't given). For jobs outside Greater Houston, note travel/mobilization in the assumptions and risks — do not add a line for it unless the notes ask for one. Be specific about product types (e.g. 'LVP 20 mil wear layer', 'Sherwin-Williams SuperPaint interior satin, gal'). Include disposal and consumables.",
     "- Scope steps must be specific to this job and read professionally — this prints on the client's quote. No filler.",
     "- If the material is too thin to price responsibly (no photos, vague request), still draft your best scope and a sensible baseline, set confidence 'low', needsSiteVisit true, and ask the right questions.",
     "- Out of scope for JTPro: major structural engineering, licensed electrical panel/service work, gas lines, HVAC, asbestos/mold abatement. Flag these in risks and questions instead of pricing them.",

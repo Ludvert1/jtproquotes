@@ -284,7 +284,8 @@ const BRAND = {
 const COMPANY = {
   name: "JTProconstruction LLC",
   tag: "Licensed & Insured · Residential & Commercial",
-  area: "New Caney, TX · Serving the Greater Houston Area",
+  area: "New Caney, TX · Serving Greater Houston & Texas",
+  cities: "Houston · Austin · Dallas · San Antonio · Corpus Christi",
   email: "info@jtproconstruction.com",
   site: "jtproconstruction.com"
 };
@@ -4952,6 +4953,12 @@ function PreviewModal({
       color: BRAND.sub
     }
   }, COMPANY.area), React.createElement("div", {
+    style: {
+      fontSize: 12,
+      color: BRAND.navy,
+      fontWeight: 600
+    }
+  }, COMPANY.cities), React.createElement("div", {
     style: {
       fontSize: 12,
       color: BRAND.sub

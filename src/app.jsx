@@ -16,7 +16,8 @@ const BRAND = {
 const COMPANY = {
   name: "JTProconstruction LLC",
   tag: "Licensed & Insured · Residential & Commercial",
-  area: "New Caney, TX · Serving the Greater Houston Area",
+  area: "New Caney, TX · Serving Greater Houston & Texas",
+  cities: "Houston · Austin · Dallas · San Antonio · Corpus Christi",
   email: "info@jtproconstruction.com",
   site: "jtproconstruction.com",
 };
@@ -2391,6 +2392,7 @@ function PreviewModal({ quote, settings, users, me, onClose }) {
               <div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontSize: 30, fontWeight: 700, color: BRAND.navy, letterSpacing: "0.04em" }}>{COMPANY.name.toUpperCase()}</div>
               <div style={{ fontSize: 12, color: BRAND.sub }}>{COMPANY.tag}</div>
               <div style={{ fontSize: 12, color: BRAND.sub }}>{COMPANY.area}</div>
+              <div style={{ fontSize: 12, color: BRAND.navy, fontWeight: 600 }}>{COMPANY.cities}</div>
               <div style={{ fontSize: 12, color: BRAND.sub }}>{COMPANY.email} · {COMPANY.site}</div>
             </div>
             <div style={{ textAlign: "right" }}>
