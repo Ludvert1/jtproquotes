@@ -512,6 +512,34 @@ function App() {
     setSettings(s); await sSet("jtpq:settings", s);
   };
 
+  /* ---- WAITING-FOR-REVIEW ALERT ----
+     The quote list is a live Firestore listener, so a submission from an
+     associate arrives here the moment they send it. The count goes in the
+     browser tab title, which is what you notice when the app is open in
+     another tab, and a new arrival raises a toast. The email from
+     /api/notify is what reaches you when the app is closed.
+
+     These hooks must sit ABOVE the early returns below: React needs the
+     same hooks called on every render, and the loading / sign-in screens
+     return early. Declared after them, the app crashed the moment the
+     data finished loading. */
+  const managerNow = !!me && canManage(me);
+  const pendingCount = managerNow && quotes ? Object.values(quotes).filter((q) => q.status === "pending").length : 0;
+  const seenPending = useRef(null);
+  useEffect(() => {
+    if (!me) { document.title = "JTProQuotes"; seenPending.current = null; return; }
+    document.title = (pendingCount > 0 && managerNow ? "(" + pendingCount + ") " : "") + "JTProQuotes";
+    if (!managerNow) return;
+    // The first pass after signing in only records where things stand — it
+    // must not announce quotes that were already waiting.
+    if (seenPending.current === null) { seenPending.current = pendingCount; return; }
+    if (pendingCount > seenPending.current) {
+      const n = pendingCount - seenPending.current;
+      notify(n === 1 ? "A quote was just submitted for your approval." : n + " quotes were just submitted for your approval.");
+    }
+    seenPending.current = pendingCount;
+  }, [pendingCount, managerNow, me]);
+
   if (cloudInitError) return (
     <div className="min-h-screen flex items-center justify-center px-4" style={{ background: BRAND.navy }}>
       <div style={{ background: "#fff", borderRadius: 14, padding: 26, maxWidth: 460 }}>
@@ -540,27 +568,6 @@ function App() {
   const myQuotes = Object.values(quotes).filter((q) => q.createdBy === me.id);
   const visibleQuotes = isManager ? Object.values(quotes) : myQuotes;
 
-  /* ---- WAITING-FOR-REVIEW ALERT ----
-     The quote list is a live Firestore listener, so a submission from an
-     associate arrives here the moment they send it. The count goes in the
-     browser tab title, which is what you notice when the app is open in
-     another tab, and a new arrival raises a toast. The email from
-     /api/notify is what reaches you when the app is closed. */
-  const pendingCount = isManager ? Object.values(quotes).filter((q) => q.status === "pending").length : 0;
-  const seenPending = useRef(null);
-  useEffect(() => {
-    if (!me) { document.title = "JTProQuotes"; return; }
-    document.title = (pendingCount > 0 && isManager ? "(" + pendingCount + ") " : "") + "JTProQuotes";
-    if (!isManager) return;
-    // The first pass after signing in only records where things stand — it
-    // must not announce quotes that were already waiting.
-    if (seenPending.current === null) { seenPending.current = pendingCount; return; }
-    if (pendingCount > seenPending.current) {
-      const n = pendingCount - seenPending.current;
-      notify(n === 1 ? "A quote was just submitted for your approval." : n + " quotes were just submitted for your approval.");
-    }
-    seenPending.current = pendingCount;
-  }, [pendingCount, isManager, me]);
   const upsertQuote = async (q) => {
     if (CLOUD) { await db.collection("quotes").doc(q.id).set(q); return; }
     const next = Object.assign({}, quotes); next[q.id] = q; await saveQuotes(next);
@@ -968,7 +975,8 @@ function Dashboard({ me, isOwner, isManager, quotes, users, settings, onOpen, on
                   <div style={{ minWidth: 200 }}>
                     <div style={{ fontWeight: 700, fontSize: 15, textDecoration: isVoid(q) ? "line-through" : "none" }}>{q.quoteNo} · {q.clientName || "Unnamed client"}</div>
                     <div style={{ fontSize: 13, color: BRAND.sub }}>{q.jobTitle || q.category} · {fmtDate(q.createdAt)}{isManager && users[q.createdBy] ? ` · by ${users[q.createdBy].name}` : ""}</div>
-                    {q.fromInbox && <div style={{ fontSize: 11.5, color: BRAND.gold, marginTop: 3, fontWeight: 700, letterSpacing: "0.04em" }}>FILED FROM A LEAD EMAIL{q.leadSource ? " · " + q.leadSource : ""} — needs pricing</div>}
+                    {q.fromInbox && <div style={{ fontSize: 11.5, color: BRAND.gold, marginTop: 3, fontWeight: 700, letterSpacing: "0.04em" }}>FROM A LEAD EMAIL{q.leadSource ? " · " + String(q.leadSource).toUpperCase() : ""} — {q.aiDrafted ? "AI-drafted, review & send reply" : "needs pricing"}</div>}
+                    {!q.fromInbox && q.aiDrafted && q.status === "draft" && <div style={{ fontSize: 11.5, color: BRAND.gold, marginTop: 3, fontWeight: 700, letterSpacing: "0.04em" }}>AI-DRAFTED{q.aiDraft ? " · " + String(q.aiDraft.confidence).toUpperCase() + " CONFIDENCE" : ""}</div>}
                     {q.reviewNote && q.status === "changes" && <div style={{ fontSize: 12, color: BRAND.red, marginTop: 3 }}>Owner note: {q.reviewNote}</div>}
                     {isVoid(q) && <div style={{ fontSize: 12, color: "#7A6A55", marginTop: 3, fontWeight: 600 }}>Voided{q.voidedBy ? " by " + q.voidedBy : ""}{q.voidReason ? " — " + q.voidReason : ""} · does not count toward any total</div>}
                     {isDecided(q) && !isVoid(q) && (
@@ -997,27 +1005,32 @@ function Dashboard({ me, isOwner, isManager, quotes, users, settings, onOpen, on
   );
 }
 
-/* ================= LEAD READER =================
-   Paste a screenshot of a Thumbtack / Facebook / text-message enquiry and it
-   fills the client and job fields, so nobody retypes what the customer
-   already wrote. The reading happens in /api/read-lead on the server, because
-   the API key must never be in this file — index.html is public.
+/* ================= AI QUOTE ASSISTANT =================
+   Take photos on site (or upload them), paste the customer's message, and it
+   drafts the whole quote: what needs doing, a detailed scope, crew and days,
+   materials at cost, questions for the client, and a first reply.
 
-   Two deliberate limits:
-   - It only reports what is actually written. Blank beats a guessed phone number.
-   - It never estimates square footage from a picture. Measurements come from
-     the tape, or from the customer's own words. A quote priced off a guessed
-     area is a loss waiting to happen. */
+   The drafting runs in /api/ai-quote on the server, because the API key must
+   never be in this file — index.html is public.
 
-/* Phones produce 4 MB photos; the request body has to stay small and a
-   screenshot is perfectly readable at 1600px. */
+   What keeps it honest:
+   - The AI never picks the price. It sizes the labor and lists materials at
+     cost; the company's own rate, overhead and margin make the price, the same
+     formula as a hand-built quote.
+   - Every size is labelled: the customer's words, estimated from a photo, or
+     assumed. Estimates from photos are for a first reply — verify with a tape
+     before the quote is approved.
+   - Everything lands as a draft and goes through the normal approval. */
+
+/* Phones produce 4 MB photos; the request body has to stay small, and a job
+   photo still shows everything that matters at ~1280px. */
 function shrinkImage(file, maxEdge) {
   return new Promise((resolve, reject) => {
     const fr = new FileReader();
     fr.onerror = () => reject(new Error("Could not read that file."));
     fr.onload = () => {
       const img = new Image();
-      img.onerror = () => reject(new Error("That file isn't an image we can read."));
+      img.onerror = () => reject(new Error("That file isn't an image we can read. (iPhone HEIC photos: set Camera → Formats → Most Compatible, or take the photo from here.)"));
       img.onload = () => {
         const scale = Math.min(1, maxEdge / Math.max(img.width, img.height));
         const w = Math.max(1, Math.round(img.width * scale));
@@ -1027,8 +1040,8 @@ function shrinkImage(file, maxEdge) {
         const ctx = cv.getContext("2d");
         ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, w, h);
         ctx.drawImage(img, 0, 0, w, h);
-        const dataUrl = cv.toDataURL("image/jpeg", 0.82);
-        resolve({ name: file.name || "screenshot.jpg", mediaType: "image/jpeg", data: dataUrl.split(",")[1], dataUrl });
+        const dataUrl = cv.toDataURL("image/jpeg", 0.8);
+        resolve({ name: file.name || "photo.jpg", mediaType: "image/jpeg", data: dataUrl.split(",")[1], dataUrl });
       };
       img.src = fr.result;
     };
@@ -1045,180 +1058,320 @@ const dataUrlToBlob = (dataUrl) => {
   return new Blob([bytes], { type: mime });
 };
 
-function LeadReader({ me, quoteId, disabled, onApply, onAttach }) {
+/* The reply never states one firm figure off a photo — it gives a range whose
+   width follows how sure the draft is. Mirrors priceRange in api/_lib.js. */
+const RANGE_BY_CONFIDENCE = { high: [0.95, 1.08], medium: [0.9, 1.15], low: [0.85, 1.3] };
+function priceRange(total, confidence) {
+  const [lo, hi] = RANGE_BY_CONFIDENCE[confidence] || RANGE_BY_CONFIDENCE.medium;
+  const r50 = (n) => Math.max(50, Math.round(n / 50) * 50);
+  const f = (n) => "$" + r50(n).toLocaleString("en-US");
+  return f(total * lo) + "–" + f(total * hi);
+}
+function renderReply(template, total, confidence) {
+  const t = String(template || "");
+  const range = priceRange(total, confidence);
+  return t.includes("{{PRICE_RANGE}}") ? t.split("{{PRICE_RANGE}}").join(range) : t;
+}
+
+const PRIORITY = {
+  urgent: { label: "Urgent", color: BRAND.red, bg: "#F9E5E3" },
+  recommended: { label: "Recommended", color: BRAND.amber, bg: "#FBF3DE" },
+  cosmetic: { label: "Cosmetic", color: BRAND.sub, bg: "#ECEEF1" },
+};
+const SOURCE_COLOR = { "customer stated": BRAND.green, "estimated from photo": BRAND.amber, "assumed": BRAND.red };
+
+const MAX_PHOTOS = 8;
+
+function AiAssistant({ me, q, settings, disabled, onApplyDraft, onApplyLead, notify }) {
   const [open, setOpen] = useState(false);
   const [text, setText] = useState("");
-  const [shots, setShots] = useState([]);
-  const [busy, setBusy] = useState(false);
+  const [photos, setPhotos] = useState([]);
+  const [busy, setBusy] = useState(null); // "draft" | "read" | "apply" | null
+  const [secs, setSecs] = useState(0);
   const [err, setErr] = useState("");
-  const [result, setResult] = useState(null);
-  const [overwrite, setOverwrite] = useState(false);
+  const [draft, setDraft] = useState(null);
+  const camRef = useRef(null);
   const fileRef = useRef(null);
+
+  useEffect(() => {
+    if (!busy || busy === "apply") return;
+    setSecs(0);
+    const t = setInterval(() => setSecs((s) => s + 1), 1000);
+    return () => clearInterval(t);
+  }, [busy]);
 
   const addFiles = async (fileList) => {
     setErr("");
-    const picked = Array.from(fileList || []).filter((f) => f && f.type && f.type.indexOf("image/") === 0);
+    const picked = Array.from(fileList || []).filter((f) => f && ((f.type && f.type.indexOf("image/") === 0) || /\.(jpe?g|png|webp|gif|heic)$/i.test(f.name || "")));
     if (!picked.length) return;
-    const room = 3 - shots.length;
-    if (room <= 0) return setErr("Three screenshots is the limit. Remove one first.");
+    const room = MAX_PHOTOS - photos.length;
+    if (room <= 0) return setErr(MAX_PHOTOS + " photos is the limit. Remove one first.");
     try {
       const shrunk = [];
-      for (const f of picked.slice(0, room)) shrunk.push(await shrinkImage(f, 1600));
-      setShots((p) => p.concat(shrunk));
+      for (const f of picked.slice(0, room)) shrunk.push(await shrinkImage(f, 1280));
+      setPhotos((p) => p.concat(shrunk));
+      if (picked.length > room) setErr("Only the first " + room + " were added — " + MAX_PHOTOS + " is the limit.");
     } catch (e) { setErr(e.message || "Couldn't read that image."); }
   };
 
-  /* Paste straight from the clipboard — the whole point on a phone or a
-     desktop where you just screenshotted the lead. */
   const onPaste = (e) => {
     const items = (e.clipboardData && e.clipboardData.items) || [];
     const files = [];
     for (const it of items) if (it.kind === "file") { const f = it.getAsFile(); if (f) files.push(f); }
     if (files.length) { e.preventDefault(); addFiles(files); }
   };
+  const onDrop = (e) => { e.preventDefault(); addFiles(e.dataTransfer && e.dataTransfer.files); };
 
-  const read = async () => {
-    setErr(""); setResult(null);
-    if (!text.trim() && !shots.length) return setErr("Add a screenshot or paste the lead text first.");
-    if (!fbAuth || !fbAuth.currentUser) return setErr("Reading leads needs the cloud version. Sign in again.");
-    setBusy(true);
+  const token = async () => {
+    if (!fbAuth || !fbAuth.currentUser) throw new Error("This needs the cloud version. Sign in again.");
+    return fbAuth.currentUser.getIdToken();
+  };
+
+  /* What's already typed on the quote helps the draft — a job title or a
+     description the estimator wrote on site is better than any guess. */
+  const context = () => {
+    const bits = [];
+    if (q.jobTitle) bits.push("Job title on the quote: " + q.jobTitle);
+    if (q.category && q.scopeEdited) bits.push("Category chosen: " + q.category);
+    if (q.description) bits.push("Description on the quote: " + q.description);
+    if (q.clientAddress) bits.push("Job address: " + q.clientAddress);
+    return bits.join("\n");
+  };
+
+  const runDraft = async () => {
+    setErr(""); setDraft(null);
+    if (!text.trim() && !photos.length && !context()) return setErr("Add at least one photo or describe the job first.");
+    setBusy("draft");
     try {
-      const idToken = await fbAuth.currentUser.getIdToken();
+      const idToken = await token();
+      const body = { idToken, text: [text.trim(), context()].filter(Boolean).join("\n\n"), images: photos.map((s) => ({ mediaType: s.mediaType, data: s.data })) };
+      const r = await fetch("/api/ai-quote", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(data.error || (r.status === 504 ? "That took too long. Try fewer photos." : r.status === 413 ? "Those photos are too large together. Send fewer." : "That didn't work. Try again."));
+      setDraft(data.draft);
+      logActivity(me.name, "Drafted a quote with AI (" + photos.length + " photo" + (photos.length === 1 ? "" : "s") + ")", q.quoteNo);
+    } catch (e) { setErr(e.message || "That didn't work. Try again."); }
+    setBusy(null);
+  };
+
+  /* The cheap path: just lift the client's details out of a lead screenshot. */
+  const runRead = async () => {
+    setErr("");
+    if (!text.trim() && !photos.length) return setErr("Add the lead screenshot or paste its text first.");
+    setBusy("read");
+    try {
+      const idToken = await token();
       const r = await fetch("/api/read-lead", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ idToken, text, images: shots.map((s) => ({ mediaType: s.mediaType, data: s.data })) }),
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ idToken, text, images: photos.slice(0, 3).map((s) => ({ mediaType: s.mediaType, data: s.data })) }),
       });
       const data = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(data.error || "That didn't work. Try again.");
-      setResult(data.fields);
-      logActivity(me.name, "Read a lead from a screenshot", quoteId);
-    } catch (e) {
-      setErr(e.message || "That didn't work. Try again.");
-    }
-    setBusy(false);
+      onApplyLead(data.fields, false, photos);
+      logActivity(me.name, "Read a lead from a screenshot", q.quoteNo);
+      reset();
+    } catch (e) { setErr(e.message || "That didn't work. Try again."); }
+    setBusy(null);
   };
+
+  const reset = () => { setOpen(false); setDraft(null); setPhotos([]); setText(""); setErr(""); };
 
   const apply = async () => {
-    if (!result) return;
-    onApply(result, overwrite);
-    /* Keep the screenshots on the quote — they are the record of what the
-       customer actually asked for, which matters if the job is disputed. */
-    if (shots.length && onAttach) await onAttach(shots);
-    setOpen(false); setResult(null); setShots([]); setText("");
+    if (!draft) return;
+    const hasWork = (q.items || []).length > 0 || (q.scopeEdited && (q.scopeItems || []).some((s) => s.on && s.text.trim() && !s.ai));
+    if (hasWork && !window.confirm("Replace the scope, materials and crew already on this quote with the AI draft?\n\nClient details you've typed are kept.")) return;
+    setBusy("apply");
+    try { await onApplyDraft(draft, photos); reset(); }
+    catch (e) { setErr(e.message || "Couldn't apply the draft."); }
+    setBusy(null);
   };
 
-  const rowLabel = { fontSize: 11, textTransform: "uppercase", letterSpacing: "0.06em", color: BRAND.sub, fontWeight: 700 };
-
   if (!CLOUD) return null;
+
+  const label = { fontSize: 11, textTransform: "uppercase", letterSpacing: "0.06em", color: BRAND.sub, fontWeight: 700, marginBottom: 4 };
+  const box = { background: "#fff", border: `1px solid ${BRAND.line}`, borderRadius: 8, padding: 12, marginBottom: 10 };
+
+  // Preview the price exactly as the quote will compute it.
+  const preview = draft ? computeQuote({
+    crew: draft.labor.crew, days: draft.labor.days, hoursPerDay: draft.labor.hoursPerDay,
+    laborRate: q.laborRate, overheadPct: q.overheadPct, marginPct: q.marginPct, discountPct: q.discountPct,
+    items: draft.materials.map((m) => ({ qty: m.qty, price: m.unitCost })),
+  }, settings) : null;
 
   return (
     <div style={{ border: `1.5px dashed ${BRAND.gold}`, borderRadius: 10, padding: 14, marginBottom: 16, background: "#FDFBF4" }}>
       {!open ? (
         <div className="flex items-center justify-between flex-wrap gap-2">
-          <div>
-            <div style={{ fontWeight: 700, color: BRAND.navy, fontSize: 14 }}>Read a lead from a screenshot</div>
-            <div style={{ fontSize: 12, color: BRAND.sub, marginTop: 2 }}>Paste a Thumbtack, Facebook or text-message enquiry and the client and job details fill themselves in.</div>
+          <div style={{ flex: "1 1 260px" }}>
+            <div style={{ fontWeight: 700, color: BRAND.navy, fontSize: 15 }}>AI quote from photos or a lead</div>
+            <div style={{ fontSize: 12.5, color: BRAND.sub, marginTop: 2 }}>Snap the job site or upload photos, paste the customer's Thumbtack message, and get the work detected, scoped and priced as a draft — with the questions to ask and a reply ready to send.</div>
           </div>
           <Btn small kind="gold" onClick={() => setOpen(true)} disabled={disabled}>Start</Btn>
         </div>
       ) : (
-        <div onPaste={onPaste}>
+        <div onPaste={onPaste} onDrop={onDrop} onDragOver={(e) => e.preventDefault()}>
           <div className="flex items-center justify-between mb-3">
-            <div style={{ fontWeight: 700, color: BRAND.navy, fontSize: 14 }}>Read a lead</div>
-            <button onClick={() => { setOpen(false); setResult(null); setErr(""); }}
+            <div style={{ fontWeight: 700, color: BRAND.navy, fontSize: 15 }}>AI quote assistant</div>
+            <button onClick={reset} disabled={!!busy}
               style={{ background: "none", border: "none", color: BRAND.sub, fontSize: 13, cursor: "pointer", textDecoration: "underline" }}>Close</button>
           </div>
 
-          {!result && (
+          {!draft && (
             <div>
-              <Field label="Screenshots" hint="Up to three. Paste with the keyboard, or pick them below.">
-                <div className="flex gap-2 flex-wrap items-center">
-                  {shots.map((s, i) => (
-                    <div key={i} style={{ position: "relative" }}>
-                      <img src={s.dataUrl} alt="" style={{ width: 62, height: 62, objectFit: "cover", borderRadius: 6, border: `1px solid ${BRAND.line}` }} />
-                      <button onClick={() => setShots(shots.filter((_, j) => j !== i))}
-                        style={{ position: "absolute", top: -6, right: -6, width: 20, height: 20, borderRadius: 99, border: "none", background: BRAND.red, color: "#fff", fontSize: 12, cursor: "pointer", fontWeight: 700 }}>×</button>
-                    </div>
-                  ))}
-                  {shots.length < 3 && (
-                    <button onClick={() => fileRef.current && fileRef.current.click()}
-                      style={{ width: 62, height: 62, borderRadius: 6, border: `1.5px dashed ${BRAND.line}`, background: "#fff", color: BRAND.sub, fontSize: 22, cursor: "pointer" }}>+</button>
-                  )}
-                  <input ref={fileRef} type="file" accept="image/*" multiple style={{ display: "none" }}
-                    onChange={(e) => { addFiles(e.target.files); e.target.value = ""; }} />
-                </div>
-              </Field>
+              <div style={label}>Job photos · lead screenshots ({photos.length}/{MAX_PHOTOS})</div>
+              <div className="flex gap-2 flex-wrap items-center mb-2">
+                {photos.map((s, i) => (
+                  <div key={i} style={{ position: "relative" }}>
+                    <img src={s.dataUrl} alt={"Photo " + (i + 1)} style={{ width: 72, height: 72, objectFit: "cover", borderRadius: 6, border: `1px solid ${BRAND.line}` }} />
+                    <span style={{ position: "absolute", left: 3, bottom: 3, background: "rgba(11,31,58,0.8)", color: "#fff", fontSize: 10, fontWeight: 700, borderRadius: 4, padding: "0 4px" }}>{i + 1}</span>
+                    <button onClick={() => setPhotos(photos.filter((_, j) => j !== i))} aria-label="Remove photo"
+                      style={{ position: "absolute", top: -6, right: -6, width: 22, height: 22, borderRadius: 99, border: "none", background: BRAND.red, color: "#fff", fontSize: 13, cursor: "pointer", fontWeight: 700 }}>×</button>
+                  </div>
+                ))}
+              </div>
+              <div className="flex gap-2 flex-wrap mb-2">
+                <Btn small kind="primary" onClick={() => camRef.current && camRef.current.click()} disabled={photos.length >= MAX_PHOTOS || !!busy}>📷 Take photo</Btn>
+                <Btn small kind="ghost" onClick={() => fileRef.current && fileRef.current.click()} disabled={photos.length >= MAX_PHOTOS || !!busy}>Upload photos</Btn>
+                <input ref={camRef} type="file" accept="image/*" capture="environment" style={{ display: "none" }}
+                  onChange={(e) => { addFiles(e.target.files); e.target.value = ""; }} />
+                <input ref={fileRef} type="file" accept="image/*" multiple style={{ display: "none" }}
+                  onChange={(e) => { addFiles(e.target.files); e.target.value = ""; }} />
+              </div>
+              <div style={{ fontSize: 11.5, color: BRAND.sub, marginBottom: 12 }}>
+                Wide shots for context, close-ups of the damage. Something of known size in frame (a door, an outlet, a tape measure) makes sizes far more accurate. You can also paste or drag images here.
+              </div>
 
-              <Field label="Or paste the text" hint="Works on its own, or alongside a screenshot.">
-                <textarea style={Object.assign({}, inputStyle, { minHeight: 90, resize: "vertical" })} value={text}
-                  onChange={(e) => setText(e.target.value)} placeholder="Paste the customer's message here…" />
+              <Field label="Customer's message and your notes" hint="Paste the Thumbtack request, and add anything you know — measurements, the finish they want, access, timing.">
+                <textarea style={Object.assign({}, inputStyle, { minHeight: 100, resize: "vertical" })} value={text}
+                  onChange={(e) => setText(e.target.value)} placeholder={"e.g. Thumbtack: \"Need the hallway ceiling fixed after a roof leak, about 10x4 ft stain…\"\nMy notes: roof already repaired, attic insulation wet."} />
               </Field>
 
               {err && <div style={{ color: BRAND.red, fontSize: 13, fontWeight: 600, marginBottom: 10 }}>{err}</div>}
-              <Btn small kind="gold" onClick={read} disabled={busy}>{busy ? "Reading…" : "Read it"}</Btn>
+              {busy === "draft" ? (
+                <div style={{ background: BRAND.navy, color: "#fff", borderRadius: 8, padding: "12px 14px", fontSize: 13.5 }}>
+                  <strong style={{ color: BRAND.goldBright }}>Drafting…</strong> {secs < 8 ? "Looking at the photos" : secs < 20 ? "Identifying the work and sizing it" : secs < 40 ? "Writing the scope and pricing materials" : "Almost there — detailed jobs take up to a minute or two"} · {secs}s
+                </div>
+              ) : (
+                <div className="flex gap-2 flex-wrap items-center">
+                  <Btn kind="gold" onClick={runDraft} disabled={!!busy}>Detect work & draft quote</Btn>
+                  <Btn small kind="ghost" onClick={runRead} disabled={!!busy}>{busy === "read" ? "Reading…" : "Just fill client details"}</Btn>
+                </div>
+              )}
             </div>
           )}
 
-          {result && (
+          {draft && (
             <div>
-              <div style={{ background: "#fff", border: `1px solid ${BRAND.line}`, borderRadius: 8, padding: 12, marginBottom: 12 }}>
-                {[
-                  ["Client", result.clientName], ["Phone", result.clientPhone], ["Email", result.clientEmail],
-                  ["Address", result.clientAddress], ["Category", result.category], ["Job title", result.jobTitle],
-                  ["Timeline", result.timeline], ["Budget named", result.budgetMentioned], ["Source", result.sourcePlatform],
-                ].filter(([, v]) => v).map(([l, v]) => (
-                  <div key={l} className="flex gap-3" style={{ marginBottom: 5 }}>
-                    <div style={Object.assign({}, rowLabel, { minWidth: 96 })}>{l}</div>
-                    <div style={{ fontSize: 13.5, color: BRAND.ink, fontWeight: 600 }}>{v}</div>
+              <div style={Object.assign({}, box, { borderLeft: `4px solid ${draft.confidence === "high" ? BRAND.green : draft.confidence === "medium" ? BRAND.amber : BRAND.red}` })}>
+                <div className="flex justify-between items-baseline flex-wrap gap-2">
+                  <div>
+                    <div style={{ fontWeight: 700, color: BRAND.navy, fontSize: 16 }}>{draft.jobTitle || draft.category}</div>
+                    <div style={{ fontSize: 12.5, color: BRAND.sub }}>{draft.category} · crew of {draft.labor.crew} · {draft.labor.days} day{draft.labor.days === 1 ? "" : "s"} · {draft.materials.length} material lines</div>
                   </div>
-                ))}
-                {result.description && (
-                  <div style={{ marginTop: 8 }}>
-                    <div style={rowLabel}>Description</div>
-                    <div style={{ fontSize: 13, color: BRAND.ink, marginTop: 2 }}>{result.description}</div>
+                  <div style={{ textAlign: "right" }}>
+                    <div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontSize: 28, fontWeight: 700, color: BRAND.navy }}>{money(preview.total)}</div>
+                    <div style={{ fontSize: 11.5, color: BRAND.sub }}>Reply range {priceRange(preview.total, draft.confidence)}</div>
                   </div>
-                )}
-                {result.scopeSuggestions && result.scopeSuggestions.length > 0 && (
-                  <div style={{ marginTop: 8 }}>
-                    <div style={rowLabel}>Scope lines it suggests</div>
-                    <ul style={{ fontSize: 13, color: BRAND.ink, marginTop: 2, paddingLeft: 18 }}>
-                      {result.scopeSuggestions.map((s, i) => <li key={i} style={{ listStyle: "disc" }}>{s}</li>)}
-                    </ul>
-                  </div>
-                )}
-                {result.measurements && result.measurements.length > 0 && (
-                  <div style={{ marginTop: 8 }}>
-                    <div style={rowLabel}>Sizes the customer stated</div>
-                    <div style={{ fontSize: 13, color: BRAND.ink, marginTop: 2 }}>{result.measurements.join(" · ")}</div>
-                    <div style={{ fontSize: 11.5, color: BRAND.amber, marginTop: 3, fontWeight: 600 }}>The customer's words, not a measurement. Verify on site before pricing.</div>
-                  </div>
-                )}
+                </div>
+                <div style={{ fontSize: 12.5, marginTop: 8, fontWeight: 600, color: draft.confidence === "high" ? BRAND.green : draft.confidence === "medium" ? BRAND.amber : BRAND.red }}>
+                  {draft.confidence.toUpperCase()} CONFIDENCE — {draft.confidenceReason}{draft.needsSiteVisit ? " · Site visit recommended before a firm price." : ""}
+                </div>
+                {draft.projectSummary && <div style={{ fontSize: 13, marginTop: 8, color: BRAND.ink }}>{draft.projectSummary}</div>}
               </div>
 
-              {result.missing && result.missing.length > 0 && (
-                <div style={{ background: "#FBF3DE", color: BRAND.amber, borderRadius: 8, padding: "9px 12px", fontSize: 12.5, fontWeight: 600, marginBottom: 10 }}>
-                  Not in the screenshot — you'll need to fill these in: {result.missing.join(", ")}
-                </div>
-              )}
-              {result.notes && (
-                <div style={{ background: "#F9E5E3", color: BRAND.red, borderRadius: 8, padding: "9px 12px", fontSize: 12.5, fontWeight: 600, marginBottom: 10 }}>
-                  {result.notes}
+              {draft.findings.length > 0 && (
+                <div style={box}>
+                  <div style={label}>What it found ({draft.findings.length})</div>
+                  {draft.findings.map((f, i) => (
+                    <div key={i} className="flex gap-2 items-start" style={{ marginBottom: 8 }}>
+                      {f.photo > 0 && photos[f.photo - 1]
+                        ? <img src={photos[f.photo - 1].dataUrl} alt="" style={{ width: 46, height: 46, objectFit: "cover", borderRadius: 5, flexShrink: 0 }} />
+                        : <div style={{ width: 46, height: 46, borderRadius: 5, background: BRAND.paper, flexShrink: 0 }} />}
+                      <div>
+                        <div style={{ fontSize: 13.5, fontWeight: 700 }}>
+                          {f.title} <span style={{ fontSize: 10.5, fontWeight: 700, color: PRIORITY[f.priority].color, background: PRIORITY[f.priority].bg, borderRadius: 99, padding: "1px 7px", marginLeft: 4 }}>{PRIORITY[f.priority].label}</span>
+                        </div>
+                        <div style={{ fontSize: 12.5, color: BRAND.sub }}>{f.detail}{f.photo > 0 ? " (photo " + f.photo + ")" : ""}</div>
+                      </div>
+                    </div>
+                  ))}
                 </div>
               )}
 
-              <label className="flex items-center gap-2" style={{ fontSize: 12.5, color: BRAND.sub, marginBottom: 12, cursor: "pointer" }}>
-                <input type="checkbox" checked={overwrite} onChange={(e) => setOverwrite(e.target.checked)} />
-                Replace what I've already typed (off: only empty fields get filled)
-              </label>
+              <div style={box}>
+                <div style={label}>Scope of work ({draft.scope.length} steps)</div>
+                <ol style={{ fontSize: 13, paddingLeft: 20, margin: 0, lineHeight: 1.55 }}>
+                  {draft.scope.map((s, i) => <li key={i}>{s}</li>)}
+                </ol>
+              </div>
+
+              <div style={box}>
+                <div style={label}>Labor</div>
+                <div style={{ fontSize: 13 }}>{draft.labor.crew} × {draft.labor.days} day{draft.labor.days === 1 ? "" : "s"} × {draft.labor.hoursPerDay} hrs × {money(q.laborRate)} = <strong>{money(preview.labor)}</strong></div>
+                {draft.labor.basis && <div style={{ fontSize: 12, color: BRAND.sub, marginTop: 2 }}>{draft.labor.basis}</div>}
+                <div style={Object.assign({}, label, { marginTop: 10 })}>Materials at cost</div>
+                <div style={{ overflowX: "auto" }}>
+                  <table style={{ width: "100%", fontSize: 12.5, borderCollapse: "collapse" }}>
+                    <tbody>
+                      {draft.materials.map((m, i) => (
+                        <tr key={i} style={{ borderBottom: `1px solid ${BRAND.line}` }}>
+                          <td style={{ padding: "4px 4px 4px 0" }}>{m.desc}</td>
+                          <td style={{ padding: 4, textAlign: "right", whiteSpace: "nowrap" }}>{m.qty} {m.unit}</td>
+                          <td style={{ padding: 4, textAlign: "right", whiteSpace: "nowrap" }}>{money(m.unitCost)}</td>
+                          <td style={{ padding: "4px 0 4px 4px", textAlign: "right", fontWeight: 600, whiteSpace: "nowrap" }}>{money(m.qty * m.unitCost)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <div style={{ fontSize: 12, color: BRAND.sub, marginTop: 6 }}>
+                  Materials {money(preview.materials)} + overhead {money(preview.overhead)} + your {q.marginPct}% margin = <strong style={{ color: BRAND.navy }}>{money(preview.total)}</strong>
+                </div>
+              </div>
+
+              {draft.measurements.length > 0 && (
+                <div style={box}>
+                  <div style={label}>Sizes the price rests on</div>
+                  {draft.measurements.map((m, i) => (
+                    <div key={i} style={{ fontSize: 12.5, marginBottom: 3 }}>
+                      {m.what}: <strong>{m.value}</strong> <span style={{ fontSize: 10.5, fontWeight: 700, color: SOURCE_COLOR[m.source] }}>· {m.source}</span>
+                    </div>
+                  ))}
+                  {draft.measurements.some((m) => m.source !== "customer stated") && (
+                    <div style={{ fontSize: 11.5, color: BRAND.amber, marginTop: 5, fontWeight: 600 }}>Sizes not from the customer are estimates. Fine for a first reply — verify with a tape before this quote is approved.</div>
+                  )}
+                </div>
+              )}
+
+              {draft.questions.length > 0 && (
+                <div style={box}>
+                  <div style={label}>Still need from the client</div>
+                  <ol style={{ fontSize: 13, paddingLeft: 20, margin: 0 }}>{draft.questions.map((x, i) => <li key={i}>{x}</li>)}</ol>
+                </div>
+              )}
+
+              {(draft.risks || draft.assumptions.length > 0) && (
+                <div style={Object.assign({}, box, { background: "#FBF3DE", borderColor: "#EAD9A8" })}>
+                  <div style={label}>Internal — assumptions & risks</div>
+                  {draft.assumptions.length > 0 && <ul style={{ fontSize: 12.5, paddingLeft: 18, margin: 0 }}>{draft.assumptions.map((x, i) => <li key={i} style={{ listStyle: "disc" }}>{x}</li>)}</ul>}
+                  {draft.risks && <div style={{ fontSize: 12.5, marginTop: 6, color: BRAND.red, fontWeight: 600 }}>{draft.risks}</div>}
+                </div>
+              )}
+
+              {draft.replyTemplate && (
+                <div style={box}>
+                  <div style={label}>First reply to the customer (saved on the quote)</div>
+                  <div style={{ fontSize: 13, whiteSpace: "pre-wrap", color: BRAND.ink }}>{renderReply(draft.replyTemplate, preview.total, draft.confidence)}</div>
+                </div>
+              )}
 
               {err && <div style={{ color: BRAND.red, fontSize: 13, fontWeight: 600, marginBottom: 10 }}>{err}</div>}
               <div className="flex gap-2 flex-wrap">
-                <Btn small kind="gold" onClick={apply}>Fill the form</Btn>
-                <Btn small kind="ghost" onClick={() => setResult(null)}>Read something else</Btn>
+                <Btn kind="gold" onClick={apply} disabled={!!busy}>{busy === "apply" ? "Applying…" : "Use this draft"}</Btn>
+                <Btn kind="ghost" onClick={() => setDraft(null)} disabled={!!busy}>Adjust photos / notes</Btn>
               </div>
               <div style={{ fontSize: 11.5, color: BRAND.sub, marginTop: 8 }}>
-                Nothing is priced from this. Check every line before you submit it.
+                Applying fills the scope, crew, materials, site assessment and client reply. Everything stays editable, and it still goes through approval.
               </div>
             </div>
           )}
@@ -1350,7 +1503,8 @@ function QuoteForm({ me, isOwner, isManager, settings, notify, existing, onSave,
      are still empty, so a half-typed quote never gets clobbered. Scope lines
      it suggests are added switched off — somebody has to agree to each one
      before it reaches the client. */
-  const applyLead = (f, overwrite) => {
+  const applyLead = (f, overwrite, shots) => {
+    if (shots && shots.length) attachShots(shots, "lead");
     setDirty(true);
     setQ((p) => {
       const take = (key, val) => (val && (overwrite || !String(p[key] || "").trim()) ? val : p[key]);
@@ -1384,23 +1538,90 @@ function QuoteForm({ me, isOwner, isManager, settings, notify, existing, onSave,
     notify("Form filled from the lead — check every field before submitting.");
   };
 
-  /* Screenshots live with the quote as the record of what was asked for. */
-  const attachShots = async (shots) => {
-    if (!fbStorage) return notify("Details filled in, but the screenshots couldn't be saved — storage isn't set up.");
-    try {
-      const saved = [];
-      for (let i = 0; i < shots.length; i++) {
+  /* Photos and lead screenshots live with the quote — the record of what the
+     site looked like and what the customer asked for. Returns what was saved,
+     in the same order, with null for any that failed. */
+  const uploadShots = async (shots, kind) => {
+    if (!fbStorage) { notify("The photos couldn't be saved — Firebase Storage isn't set up yet."); return shots.map(() => null); }
+    const out = [];
+    let failed = 0;
+    for (let i = 0; i < shots.length; i++) {
+      try {
         const path = `leads/${me.id}/${q.id}/${Date.now()}-${i}.jpg`;
         const ref = fbStorage.ref().child(path);
         await ref.put(dataUrlToBlob(shots[i].dataUrl), { contentType: "image/jpeg" });
-        saved.push({ path, url: await ref.getDownloadURL(), at: new Date().toISOString(), by: me.name });
-      }
-      setQ((p) => Object.assign({}, p, { attachments: (p.attachments || []).concat(saved) }));
-      setDirty(true);
-    } catch (e) {
-      warn("attach screenshots")(e);
-      notify("Details filled in, but the screenshots couldn't be uploaded.");
+        out.push({ path, url: await ref.getDownloadURL(), at: new Date().toISOString(), by: me.name, kind: kind || "photo", show: false });
+      } catch (e) { warn("upload photo")(e); failed++; out.push(null); }
     }
+    if (failed) notify(failed + " photo" + (failed === 1 ? "" : "s") + " couldn't be uploaded.");
+    return out;
+  };
+
+  const attachShots = async (shots, kind) => {
+    const saved = (await uploadShots(shots, kind)).filter(Boolean);
+    if (!saved.length) return;
+    setDirty(true);
+    setQ((p) => Object.assign({}, p, { attachments: (p.attachments || []).concat(saved) }));
+  };
+
+  /* Applies an AI draft to the quote. Client fields only fill blanks; the
+     work — scope, crew, materials, assessment — is replaced by the draft. */
+  const applyDraft = async (d, shots) => {
+    const saved = shots && shots.length ? await uploadShots(shots, "photo") : [];
+    const photoUrl = (n) => (n > 0 && saved[n - 1] ? saved[n - 1].url : "");
+    const referenced = new Set(d.findings.map((f) => f.photo).filter((n) => n > 0));
+    const newAtt = saved.map((a, i) => (a ? Object.assign(a, { show: referenced.has(i + 1) }) : null)).filter(Boolean);
+    setDirty(true);
+    setQ((p) => {
+      const blank = (k) => !String(p[k] || "").trim();
+      return Object.assign({}, p, {
+        clientName: blank("clientName") && d.clientName ? d.clientName : p.clientName,
+        clientPhone: blank("clientPhone") && d.clientPhone ? d.clientPhone : p.clientPhone,
+        clientEmail: blank("clientEmail") && d.clientEmail ? d.clientEmail : p.clientEmail,
+        clientAddress: blank("clientAddress") && d.clientAddress ? d.clientAddress : p.clientAddress,
+        category: d.category, jobTitle: d.jobTitle || p.jobTitle,
+        description: d.projectSummary || p.description,
+        scopeItems: d.scope.map((t) => ({ id: uid(), text: t, on: true, ai: true })),
+        scopeSource: d.category, scopeEdited: true,
+        crew: d.labor.crew, days: d.labor.days, hoursPerDay: d.labor.hoursPerDay,
+        items: d.materials.map((m) => ({ id: uid(), desc: m.desc, qty: m.qty, unit: m.unit, price: m.unitCost, ai: true })),
+        assessment: d.findings.map((f) => ({ id: uid(), title: f.title, detail: f.detail, priority: f.priority, photo: f.photo, photoUrl: photoUrl(f.photo), on: true })),
+        attachments: (p.attachments || []).concat(newAtt),
+        aiDraft: {
+          at: new Date().toISOString(), by: me.name, model: d.model, confidence: d.confidence, confidenceReason: d.confidenceReason,
+          needsSiteVisit: d.needsSiteVisit, measurements: d.measurements, assumptions: d.assumptions,
+          questions: d.questions, risks: d.risks, laborBasis: d.labor.basis, photoCount: d.photoCount,
+          timeline: d.timeline || "", budgetMentioned: d.budgetMentioned || "",
+        },
+        replyTemplate: d.replyTemplate || p.replyTemplate || "",
+        aiDrafted: true,
+        history: (p.history || []).concat([{ at: new Date().toISOString(), by: me.name, action: "Applied AI draft (" + d.confidence + " confidence, " + (d.photoCount || 0) + " photos)" }]),
+      });
+    });
+    notify("AI draft applied — check the sizes and prices, then submit.");
+  };
+
+  const assessment = q.assessment || [];
+  const setAssess = (id, patch) => { setDirty(true); setQ((p) => Object.assign({}, p, { assessment: (p.assessment || []).map((a) => (a.id === id ? Object.assign({}, a, patch) : a)) })); };
+  const rmAssess = (id) => { setDirty(true); setQ((p) => Object.assign({}, p, { assessment: (p.assessment || []).filter((a) => a.id !== id) })); };
+  const addAssess = () => { setDirty(true); setQ((p) => Object.assign({}, p, { assessment: (p.assessment || []).concat([{ id: uid(), title: "", detail: "", priority: "recommended", photo: 0, photoUrl: "", on: true }]) })); };
+  const togglePhoto = (i) => { setDirty(true); setQ((p) => Object.assign({}, p, { attachments: (p.attachments || []).map((a, j) => (j === i ? Object.assign({}, a, { show: !a.show }) : a)) })); };
+
+  /* The reply carries a price range, so for an associate it unlocks with
+     approval — same rule as printing the quote. */
+  const releasable = ["approved", "sent", "negotiating", "won"].includes(q.status);
+  const canSendReply = !isVoid(q) && (isManager || releasable);
+  const replyText = renderReply(q.replyTemplate, c.total, (q.aiDraft && q.aiDraft.confidence) || "medium");
+  const copyReply = async () => {
+    try { await navigator.clipboard.writeText(replyText); notify("Reply copied — paste it into Thumbtack."); }
+    catch { window.prompt("Copy the reply:", replyText); }
+    logActivity(me.name, "Copied the client reply", q.quoteNo);
+  };
+  const phoneDigits = String(q.clientPhone || "").replace(/[^0-9+]/g, "");
+  const startReply = () => {
+    setDirty(true);
+    const first = (q.clientName || "").split(" ")[0];
+    set("replyTemplate", "Hi" + (first ? " " + first : "") + ", thanks for reaching out to JTProconstruction about " + (q.jobTitle || "your project").toLowerCase() + ".\n\nBased on what you've described, the estimated investment is {{PRICE_RANGE}}, covering labor, materials, cleanup and haul-off, with a 90-day workmanship warranty.\n\nWould you be open to a quick call or a short site visit so we can confirm measurements and give you a firm price?\n\n— Joel, JTProconstruction LLC");
   };
 
   const attachments = q.attachments || [];
@@ -1410,17 +1631,25 @@ function QuoteForm({ me, isOwner, isManager, settings, notify, existing, onSave,
       <div className="md-col-span-2 flex flex-col gap-5">
         <Card>
           <h3 style={h3Style}>1 · CLIENT</h3>
-          <LeadReader me={me} quoteId={q.quoteNo} disabled={locked} onApply={applyLead} onAttach={attachShots} />
+          <AiAssistant me={me} q={q} settings={settings} disabled={locked} onApplyDraft={applyDraft} onApplyLead={applyLead} notify={notify} />
           {attachments.length > 0 && (
             <div style={{ marginBottom: 14 }}>
-              <div style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: "0.06em", color: BRAND.sub, fontWeight: 700, marginBottom: 6 }}>Lead screenshots on file</div>
+              <div style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: "0.06em", color: BRAND.sub, fontWeight: 700, marginBottom: 6 }}>Photos & screenshots on file ({attachments.length})</div>
               <div className="flex gap-2 flex-wrap">
                 {attachments.map((a, i) => (
-                  <a key={i} href={a.url} target="_blank" rel="noopener noreferrer" title={"Added by " + (a.by || "unknown") + " · " + fmtDate(a.at)}>
-                    <img src={a.url} alt="" style={{ width: 54, height: 54, objectFit: "cover", borderRadius: 6, border: `1px solid ${BRAND.line}` }} />
-                  </a>
+                  <div key={i} style={{ textAlign: "center" }}>
+                    <a href={a.url} target="_blank" rel="noopener noreferrer" title={"Added by " + (a.by || "unknown") + " · " + fmtDate(a.at)}>
+                      <img src={a.url} alt="" style={{ width: 64, height: 64, objectFit: "cover", borderRadius: 6, border: `2px solid ${a.show ? BRAND.gold : BRAND.line}` }} />
+                    </a>
+                    {!locked && (
+                      <label style={{ display: "block", fontSize: 10.5, color: a.show ? BRAND.navy : BRAND.sub, fontWeight: 700, cursor: "pointer", marginTop: 2 }}>
+                        <input type="checkbox" checked={!!a.show} onChange={() => togglePhoto(i)} style={{ marginRight: 3, verticalAlign: "middle" }} />On quote
+                      </label>
+                    )}
+                  </div>
                 ))}
               </div>
+              <div style={{ fontSize: 11.5, color: BRAND.sub, marginTop: 4 }}>Ticked photos print on the client's quote as a photo reference. Screenshots of the lead stay internal.</div>
             </div>
           )}
           <div className="grid md-grid-cols-2 gap-x-4">
@@ -1446,6 +1675,34 @@ function QuoteForm({ me, isOwner, isManager, settings, notify, existing, onSave,
           </Field>
         </Card>
 
+        {(assessment.length > 0 || q.aiDrafted) && (
+          <Card>
+            <div className="flex items-center justify-between flex-wrap gap-2 mb-2">
+              <h3 style={Object.assign({}, h3Style, { marginBottom: 0 })}>SITE ASSESSMENT</h3>
+              {!locked && <Btn small kind="ghost" onClick={addAssess}>+ Add finding</Btn>}
+            </div>
+            <div style={{ fontSize: 13, color: BRAND.sub, marginBottom: 12 }}>
+              What was found on site. Ticked findings print on the quote above the scope, so the client sees why each piece of work is needed.
+            </div>
+            {assessment.map((a) => (
+              <div key={a.id} className="flex gap-2 mb-3 items-start">
+                <input type="checkbox" disabled={locked} checked={a.on} onChange={() => setAssess(a.id, { on: !a.on })} style={{ width: 18, height: 18, flexShrink: 0, marginTop: 10, cursor: "pointer" }} />
+                {a.photoUrl ? <img src={a.photoUrl} alt="" style={{ width: 52, height: 52, objectFit: "cover", borderRadius: 6, flexShrink: 0 }} /> : null}
+                <div style={{ flex: 1, opacity: a.on ? 1 : 0.45 }}>
+                  <div className="flex gap-2 mb-1">
+                    <input style={Object.assign({}, inputStyle, { flex: 1, padding: "7px 10px", fontSize: 14, fontWeight: 600 })} disabled={locked} value={a.title} onChange={(e) => setAssess(a.id, { title: e.target.value })} placeholder="What was found" />
+                    <select style={Object.assign({}, inputStyle, { width: 128, padding: "7px 6px", fontSize: 13 })} disabled={locked} value={a.priority} onChange={(e) => setAssess(a.id, { priority: e.target.value })}>
+                      {Object.keys(PRIORITY).map((k) => <option key={k} value={k}>{PRIORITY[k].label}</option>)}
+                    </select>
+                  </div>
+                  <textarea style={Object.assign({}, inputStyle, { minHeight: 44, padding: "7px 10px", fontSize: 13 })} disabled={locked} value={a.detail} onChange={(e) => setAssess(a.id, { detail: e.target.value })} placeholder="Why it matters" />
+                </div>
+                {!locked && <button onClick={() => rmAssess(a.id)} style={{ background: "none", border: "none", color: BRAND.red, cursor: "pointer", fontSize: 18, flexShrink: 0 }}>×</button>}
+              </div>
+            ))}
+          </Card>
+        )}
+
         <Card>
           <div className="flex items-center justify-between flex-wrap gap-2 mb-2">
             <h3 style={Object.assign({}, h3Style, { marginBottom: 0 })}>3 · SCOPE OF WORK</h3>
@@ -1457,7 +1714,7 @@ function QuoteForm({ me, isOwner, isManager, settings, notify, existing, onSave,
             )}
           </div>
           <div style={{ fontSize: 13, color: BRAND.sub, marginBottom: 12 }}>
-            Standard {q.category} scope loaded. Untick anything the client doesn't need, edit the wording, or add your own steps. Only ticked items print on the quote.
+            {q.aiDrafted ? "Scope drafted for this job." : "Standard " + q.category + " scope loaded."} Untick anything the client doesn't need, edit the wording, or add your own steps. Only ticked items print on the quote.
           </div>
           {scopeItems.map((s) => (
             <div key={s.id} className="flex items-center gap-2 mb-2">
@@ -1511,6 +1768,7 @@ function QuoteForm({ me, isOwner, isManager, settings, notify, existing, onSave,
             <div key={it.id} className="flex gap-2 mb-2 items-center flex-wrap">
               <input style={Object.assign({}, inputStyle, { flex: "2 1 180px" })} disabled={locked} placeholder="Item — e.g. Porcelain tile 12x24" value={it.desc} onChange={(e) => setItem(it.id, "desc", e.target.value)} />
               <input style={Object.assign({}, inputStyle, { flex: "0 1 70px" })} disabled={locked} type="number" placeholder="Qty" value={it.qty} onChange={(e) => setItem(it.id, "qty", e.target.value)} />
+              <input style={Object.assign({}, inputStyle, { flex: "0 1 64px" })} disabled={locked} placeholder="unit" value={it.unit || ""} onChange={(e) => setItem(it.id, "unit", e.target.value)} />
               <input style={Object.assign({}, inputStyle, { flex: "0 1 110px" })} disabled={locked} type="number" placeholder="Unit $" value={it.price} onChange={(e) => setItem(it.id, "price", e.target.value)} />
               <div style={{ width: 90, textAlign: "right", fontWeight: 600, fontSize: 14 }}>{money((Number(it.qty) || 0) * (Number(it.price) || 0))}</div>
               {!locked && <button onClick={() => rmItem(it.id)} style={{ background: "none", border: "none", color: BRAND.red, cursor: "pointer", fontSize: 18 }}>×</button>}
@@ -1527,6 +1785,39 @@ function QuoteForm({ me, isOwner, isManager, settings, notify, existing, onSave,
           </div>
           <Field label="Notes for the client (optional)"><textarea style={Object.assign({}, inputStyle, { minHeight: 60 })} disabled={locked} value={q.notes} onChange={(e) => set("notes", e.target.value)} placeholder="Client to select tile color before start date…" /></Field>
         </Card>
+
+        <Card>
+          <div className="flex items-center justify-between flex-wrap gap-2 mb-2">
+            <h3 style={Object.assign({}, h3Style, { marginBottom: 0 })}>8 · REPLY TO THE CLIENT</h3>
+            {!q.replyTemplate && !locked && <Btn small kind="ghost" onClick={startReply}>Write a reply</Btn>}
+          </div>
+          {!q.replyTemplate ? (
+            <div style={{ fontSize: 13, color: BRAND.sub }}>A first message for Thumbtack, text or email — with the price range and your questions. The AI assistant writes one for you, or start from the standard reply.</div>
+          ) : (
+            <div>
+              {q.aiDraft && q.aiDraft.questions && q.aiDraft.questions.length > 0 && (
+                <div style={{ background: BRAND.paper, borderRadius: 8, padding: "9px 12px", fontSize: 12.5, marginBottom: 10 }}>
+                  <strong>Still to find out:</strong> {q.aiDraft.questions.join(" · ")}
+                </div>
+              )}
+              <Field label="Message" hint="{{PRICE_RANGE}} fills itself in from the quote total, so the reply always matches the numbers.">
+                <textarea style={Object.assign({}, inputStyle, { minHeight: 170, fontSize: 14 })} disabled={locked} value={q.replyTemplate} onChange={(e) => set("replyTemplate", e.target.value)} />
+              </Field>
+              <div style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: "0.06em", color: BRAND.sub, fontWeight: 700, marginBottom: 4 }}>What the client will read</div>
+              <div style={{ background: "#F4F7FB", border: `1px solid ${BRAND.line}`, borderRadius: 10, padding: 12, fontSize: 13.5, whiteSpace: "pre-wrap", marginBottom: 12 }}>{replyText}</div>
+              {canSendReply ? (
+                <div className="flex gap-2 flex-wrap">
+                  <Btn small kind="gold" onClick={copyReply}>Copy for Thumbtack</Btn>
+                  <a href="https://www.thumbtack.com/" target="_blank" rel="noopener noreferrer" style={{ textDecoration: "none" }}><Btn small kind="ghost">Open Thumbtack</Btn></a>
+                  {phoneDigits && <a href={"sms:" + phoneDigits + "?&body=" + encodeURIComponent(replyText)} style={{ textDecoration: "none" }}><Btn small kind="ghost">Text it</Btn></a>}
+                  {q.clientEmail && <a href={"mailto:" + q.clientEmail + "?subject=" + encodeURIComponent("Your project quote from JTProconstruction (" + q.quoteNo + ")") + "&body=" + encodeURIComponent(replyText)} style={{ textDecoration: "none" }}><Btn small kind="ghost">Email it</Btn></a>}
+                </div>
+              ) : (
+                <div style={{ background: "#FBF3DE", color: BRAND.amber, borderRadius: 8, padding: "8px 12px", fontSize: 12.5, fontWeight: 700 }}>Sending unlocks after owner approval — the reply carries a price.</div>
+              )}
+            </div>
+          )}
+        </Card>
       </div>
 
       {/* Sticky summary */}
@@ -1534,6 +1825,17 @@ function QuoteForm({ me, isOwner, isManager, settings, notify, existing, onSave,
         <div style={{ position: "sticky", top: 16 }}>
           <Card style={{ borderTop: `4px solid ${BRAND.gold}` }}>
             <h3 style={Object.assign({}, h3Style, { marginBottom: 12 })}>QUOTE SUMMARY</h3>
+            {q.aiDraft && (
+              <div style={{ background: q.aiDraft.confidence === "high" ? "#E2F2E9" : q.aiDraft.confidence === "medium" ? "#FBF3DE" : "#F9E5E3", borderRadius: 8, padding: "8px 10px", fontSize: 12, marginBottom: 12, color: BRAND.ink }}>
+                <strong>AI draft · {q.aiDraft.confidence} confidence.</strong> {q.aiDraft.needsSiteVisit ? "Site visit recommended. " : ""}
+                {(q.aiDraft.measurements || []).filter((m) => m.source !== "customer stated").length > 0
+                  ? "Verify: " + q.aiDraft.measurements.filter((m) => m.source !== "customer stated").map((m) => m.what + " " + m.value).join("; ") + "."
+                  : ""}
+                {q.aiDraft.timeline ? <div style={{ marginTop: 4 }}>Customer timing: {q.aiDraft.timeline}</div> : null}
+                {q.aiDraft.budgetMentioned ? <div style={{ marginTop: 2 }}>Customer budget: {q.aiDraft.budgetMentioned}</div> : null}
+                {q.aiDraft.risks ? <div style={{ color: BRAND.red, marginTop: 4, fontWeight: 600 }}>{q.aiDraft.risks}</div> : null}
+              </div>
+            )}
             {[["Labor", c.labor], ["Materials & extras", c.materials], ["Overhead", c.overhead]].map(([l, v]) => (
               <div key={l} className="flex justify-between text-sm mb-1"><span style={{ color: BRAND.sub }}>{l}</span><span>{money(v)}</span></div>
             ))}
@@ -2161,6 +2463,22 @@ function PreviewModal({ quote, settings, users, me, onClose }) {
             </div>
           </div>
 
+          {(quote.assessment || []).some((a) => a.on && a.title.trim()) ? (
+            <div style={{ marginBottom: 18 }}>
+              <div style={Object.assign({}, goldLabel, { marginBottom: 6 })}>SITE ASSESSMENT</div>
+              {(quote.assessment || []).filter((a) => a.on && a.title.trim()).map((a) => (
+                <div key={a.id} style={{ display: "flex", gap: 10, alignItems: "flex-start", marginBottom: 8, breakInside: "avoid" }}>
+                  {a.photoUrl ? <img src={a.photoUrl} alt="" style={{ width: 64, height: 64, objectFit: "cover", borderRadius: 4, flexShrink: 0 }} /> : null}
+                  <div style={{ fontSize: 13, lineHeight: 1.5 }}>
+                    <strong>{a.title}</strong>
+                    {PRIORITY[a.priority] ? <span style={{ fontSize: 10.5, fontWeight: 700, color: PRIORITY[a.priority].color, marginLeft: 6, letterSpacing: "0.04em" }}>{PRIORITY[a.priority].label.toUpperCase()}</span> : null}
+                    {a.detail ? <div style={{ color: BRAND.sub }}>{a.detail}</div> : null}
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : null}
+
           {(quote.description || (quote.scopeItems || []).some((s) => s.on && s.text.trim())) ? (
             <div style={{ marginBottom: 18 }}>
               <div style={Object.assign({}, goldLabel, { marginBottom: 4 })}>SCOPE OF WORK</div>
@@ -2195,7 +2513,7 @@ function PreviewModal({ quote, settings, users, me, onClose }) {
               {quote.items.map((it) => (
                 <tr key={it.id} style={{ borderBottom: `1px solid ${BRAND.line}` }}>
                   <td style={{ padding: "9px 12px" }}>{it.desc || "Item"}</td>
-                  <td style={{ textAlign: "right", padding: "9px 12px" }}>{it.qty}</td>
+                  <td style={{ textAlign: "right", padding: "9px 12px", whiteSpace: "nowrap" }}>{it.qty}{it.unit ? " " + it.unit : ""}</td>
                   <td style={{ textAlign: "right", padding: "9px 12px" }}>{money(Number(it.price))}</td>
                   <td style={{ textAlign: "right", padding: "9px 12px", fontWeight: 600 }}>{money((Number(it.qty) || 0) * (Number(it.price) || 0))}</td>
                 </tr>
@@ -2227,7 +2545,18 @@ function PreviewModal({ quote, settings, users, me, onClose }) {
             </div>
           </div>
 
-          {quote.notes ? <div style={{ fontSize: 13, marginTop: 10, background: BRAND.paper, padding: "10px 14px", borderRadius: 6 }}><strong>Note:</strong> {quote.notes}</div> : null}
+          {quote.notes ? <div style={{ fontSize: 13, marginTop: 10, background: BRAND.paper, padding: "10px 14px", borderRadius: 6, whiteSpace: "pre-wrap" }}><strong>Note:</strong> {quote.notes}</div> : null}
+
+          {(quote.attachments || []).some((a) => a.show) ? (
+            <div style={{ marginTop: 18, breakInside: "avoid" }}>
+              <div style={Object.assign({}, goldLabel, { marginBottom: 6 })}>PHOTO REFERENCE</div>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(140px, 1fr))", gap: 8 }}>
+                {(quote.attachments || []).filter((a) => a.show).map((a, i) => (
+                  <img key={i} src={a.url} alt={"Site photo " + (i + 1)} style={{ width: "100%", height: 110, objectFit: "cover", borderRadius: 4, border: `1px solid ${BRAND.line}` }} />
+                ))}
+              </div>
+            </div>
+          ) : null}
 
           {(quote.exclusions || []).some((s) => s.on) ? (
             <div style={{ marginTop: 18 }}>

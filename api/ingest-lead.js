@@ -91,25 +91,23 @@ module.exports = async (req, res) => {
 
   let quote;
   if (d) {
-    const attachments = [];
+    // Upload the customer's photos so they sit on the quote like any other.
+    const urls = [];
     for (let i = 0; i < images.length; i++) {
       try {
         const path = `leads/${ownerUid}/${id}/${Date.now()}-${i}.jpg`;
-        const url = await uploadImageAsServer(path, images[i].data, images[i].mediaType);
-        attachments.push({ path, url, at: now, by: "Lead inbox" });
-      } catch (e) { console.error("[ingest-lead] photo upload failed:", e.message); }
+        urls.push({ path, url: await uploadImageAsServer(path, images[i].data, images[i].mediaType) });
+      } catch (e) { console.error("[ingest-lead] photo upload failed:", e.message); urls.push(null); }
     }
-    const fields = draftToQuoteFields(d, settings, uid);
-    const notes = [
-      d.timeline ? "Timeline: " + d.timeline : "",
-      d.budgetMentioned ? "Budget named: " + d.budgetMentioned : "",
-    ].filter(Boolean).join("\n");
+    const referenced = new Set(d.findings.map((x) => x.photo).filter((n) => n > 0));
+    const attachments = urls.map((u, i) => (u ? { path: u.path, url: u.url, at: now, by: "Lead inbox", kind: "photo", show: referenced.has(i + 1) } : null)).filter(Boolean);
+    const fields = draftToQuoteFields(d, settings, uid, urls.map((u) => (u ? u.url : "")));
     quote = Object.assign({
       id, quoteNo, createdBy: ownerUid, createdAt: now, updatedAt: now, status: "draft",
       clientName: d.clientName || (subject ? subject.slice(0, 60) : "Unnamed lead"),
       clientPhone: d.clientPhone, clientEmail: d.clientEmail, clientAddress: d.clientAddress,
       exclusions: STANDARD_EXCLUSIONS.map((t) => ({ id: uid(), text: t, on: true })),
-      notes, attachments,
+      notes: "", attachments,
       fromInbox: true, leadSource: d.sourcePlatform || "email", leadMessageId: messageId, leadReadAt: now,
       leadText: leadText.slice(0, 8000),
       history: [{ at: now, by: "Lead inbox", action: "Filed from a lead email and drafted by AI" }],

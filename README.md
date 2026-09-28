@@ -31,6 +31,7 @@ It runs in one of two modes, decided by `config.js`:
 | `firestore.rules` | Database security rules. Paste these into Firebase. |
 | `storage.rules` | Rules for the lead screenshots. Paste these into Firebase Storage. |
 | `api/_lib.js` | Shared server helpers. Not reachable from the web (Vercel ignores `_` files). |
+| `api/ai-quote.js` | Drafts a full quote from job photos and/or a lead. Holds no secrets. |
 | `api/read-lead.js` | Reads a lead screenshot. Holds no secrets — keys come from the environment. |
 | `api/notify.js` | Emails the approvers when an associate submits a quote. |
 | `api/ingest-lead.js` | Turns a lead email into a draft quote. Called by the Gmail script. |
@@ -53,25 +54,38 @@ Every push to `main` redeploys automatically.
 
 ---
 
-## Reading a lead from a screenshot
+## AI quotes from photos and leads
 
-On a new quote there is a **Read a lead from a screenshot** panel above the
-client fields. Paste a Thumbtack, Facebook or text-message enquiry — as an
-image, as text, or both — and it fills in the client details, job title,
-description and a set of suggested scope lines, then keeps the screenshot on
-the quote as the record of what was asked for.
+On a new quote, the **AI quote from photos or a lead** panel sits above the
+client fields.
 
-It is deliberately narrow about two things:
+1. **📷 Take photo** opens the phone camera; **Upload photos** picks from the
+   gallery (up to 8). Paste or drag images on desktop.
+2. Paste the customer's Thumbtack message and add your own notes.
+3. **Detect work & draft quote.** In 20–60 seconds you get:
+   - **What it found** — each issue, tied to the photo that shows it, marked
+     urgent / recommended / cosmetic
+   - a detailed, job-specific **scope of work**
+   - **crew and days**, with the reasoning
+   - **materials at contractor cost**, itemised with quantities and units
+   - the **sizes the price rests on**, each labelled *customer stated*,
+     *estimated from photo* or *assumed*
+   - **questions to ask the client**, internal assumptions and risks
+   - a **first reply** to the customer with a price range
+4. **Use this draft** fills the quote. Photos are saved on it, and the ones
+   that show a finding are ticked to print as a photo reference.
 
-- **It reports only what is written.** A field that isn't in the screenshot is
-  left blank and listed under "you'll need to fill these in", rather than
-  guessed at.
-- **It never measures.** Square footage cannot be read off a photograph. Sizes
-  the customer stated in words are copied into the estimator's notes, marked as
-  the customer's words, and never touch the pricing. Measurements come from the
-  tape.
+**The AI never sets the price.** It sizes labor and lists materials at cost;
+the quote's own labor rate, overhead and margin produce the total, exactly
+as for a hand-built quote. The reply's `{{PRICE_RANGE}}` is filled from that
+total (±5–30% depending on confidence), so the reply always matches the quote.
 
-Everything it produces is a draft that still goes through the normal approval.
+Everything it produces is a draft and still goes through approval. For an
+associate, copying/sending the reply unlocks only after approval — it carries
+a price.
+
+**Just fill client details** is the cheaper, narrower path: it only copies the
+client's details out of a lead screenshot.
 
 ### Switching it on
 
@@ -81,10 +95,11 @@ Everything it produces is a draft that still goes through the normal approval.
 3. In Firebase Console → **Storage** → Get started (if you haven't already),
    then **Rules** → paste `storage.rules` → Publish.
 
-Optional environment variables: `CLAUDE_MODEL` to change the model,
+Optional environment variables: `QUOTE_MODEL` for the drafting model
+(default `claude-sonnet-5`), `CLAUDE_MODEL` for the lead reader,
 `FIREBASE_API_KEY` and `FIREBASE_PROJECT_ID` if the project ever moves.
 
-Until `ANTHROPIC_API_KEY` is set, the panel is there but reading returns a
+Until `ANTHROPIC_API_KEY` is set, the panel is there but returns a
 message saying it isn't switched on. Everything else works as before.
 
 **The key never goes in `config.js` or anywhere under `src/`.** This repository
@@ -93,7 +108,8 @@ to spend your credit. `api/read-lead.js` is the only code that sees the key, it
 runs on Vercel's server, and it refuses anyone who isn't a signed-in, approved
 team member — so an outsider cannot run up a bill on it.
 
-Rough cost: a fraction of a cent per lead read.
+Rough cost: a few cents per drafted quote with photos; a fraction of a cent
+per plain lead read.
 
 ---
 
@@ -132,16 +148,24 @@ email is attempted.
 
 ---
 
-## Filing Thumbtack leads automatically
+## Thumbtack leads, drafted and answered automatically
 
-`integrations/gmail-thumbtack.gs` is a Google Apps Script that checks your Gmail
-every 15 minutes for lead emails, reads each one, and files it in JTProQuotes as
-an **unpriced draft** under your account. It runs on Google's servers as you —
-no Google Cloud project, no OAuth app, and your password never goes anywhere.
+Thumbtack's own API is only open to approved software partners, so JTProQuotes
+connects through your Gmail instead: `integrations/gmail-thumbtack.gs` is a
+Google Apps Script that checks for Thumbtack lead emails every 15 minutes.
 
-Drafts filed this way are tagged **FILED FROM A LEAD EMAIL — needs pricing** in
-the quote list. Nothing is priced and nothing is sent; you open it, put real
-numbers on it, and it goes through the same review as everything else.
+For each lead it:
+
+- drafts a **full priced quote** — scope, crew, materials, findings, questions —
+  using any photos attached to the email, filed as a draft under your account
+  and tagged **FROM A LEAD EMAIL — AI-drafted** in the quote list
+- emails you (and assistants, via Web3Forms) the draft price range, the
+  questions to ask, and a **reply ready to paste into Thumbtack**
+- if the customer's email address is in the lead, leaves a **Gmail draft** to
+  them in your Drafts folder
+
+Nothing is ever sent to a customer automatically. If the AI draft fails for
+any reason, the lead is still filed as an unpriced draft so it is never lost.
 
 ### Setting it up
 

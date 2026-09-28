@@ -556,7 +556,7 @@ async function draftQuote({ text, images, settings }) {
     assumptions: arr(f.assumptions, 12), questions: arr(f.questions, 6),
     risks: str(f.risks, 1500), confidence: conf, confidenceReason: str(f.confidenceReason, 400),
     needsSiteVisit: f.needsSiteVisit === true,
-    replyTemplate: str(f.clientReply, 3000).replace(/\$\s?\d[\d,]*(\.\d+)?(\s?[-–]\s?\$?\s?\d[\d,]*(\.\d+)?)?/g, "{{PRICE_RANGE}}"),
+    replyTemplate: str(f.clientReply, 3000).replace(/\$\s?\d(?:[\d,]*\d)?(\.\d+)?(\s?(?:[-–]|to)\s?\$?\s?\d(?:[\d,]*\d)?(\.\d+)?)?/g, "{{PRICE_RANGE}}"),
     model: QUOTE_MODEL, photoCount: nPhotos,
   };
   return { draft, usage };
@@ -565,7 +565,7 @@ async function draftQuote({ text, images, settings }) {
 /* Turns a draft into the fields of a quote record, shaped exactly like the
    ones the app writes. Used by the Gmail ingest; the app does the same thing
    in the browser so the person can review before it's applied. */
-function draftToQuoteFields(d, settings, makeId) {
+function draftToQuoteFields(d, settings, makeId, photoUrls) {
   const s = settings || {};
   const id = makeId || uid;
   return {
@@ -578,11 +578,15 @@ function draftToQuoteFields(d, settings, makeId) {
     overheadPct: s.overheadPct != null ? Number(s.overheadPct) : 12,
     marginPct: s.targetMargin != null ? Number(s.targetMargin) : 25,
     discountPct: 0,
-    assessment: d.findings.map((f) => ({ id: id(), title: f.title, detail: f.detail, photo: f.photo, priority: f.priority, on: true })),
+    assessment: d.findings.map((f) => ({
+      id: id(), title: f.title, detail: f.detail, photo: f.photo, priority: f.priority, on: true,
+      photoUrl: (photoUrls && f.photo > 0 && photoUrls[f.photo - 1]) || "",
+    })),
     aiDraft: {
       at: new Date().toISOString(), model: d.model, confidence: d.confidence, confidenceReason: d.confidenceReason,
       needsSiteVisit: d.needsSiteVisit, measurements: d.measurements, assumptions: d.assumptions,
       questions: d.questions, risks: d.risks, laborBasis: d.labor.basis, photoCount: d.photoCount,
+      timeline: d.timeline || "", budgetMentioned: d.budgetMentioned || "",
     },
     replyTemplate: d.replyTemplate,
     aiDrafted: true,
