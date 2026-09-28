@@ -620,7 +620,15 @@ function App() {
         {(view === "new" || view === "edit") && (
           <QuoteForm key={activeQuote ? activeQuote.id : "new"} me={me} isOwner={isOwner} isManager={isManager} settings={settings} notify={notify} existing={view === "edit" ? activeQuote : null}
             onAutosave={upsertQuote}
-            onSave={async (q) => { await upsertQuote(q); notify(q.status === "draft" ? "Draft saved — visible to the owner" : q.status === "approved" ? "Quote saved & approved" : "Quote submitted for owner review"); setView("dashboard"); setActiveQuote(null); }}
+            onSave={async (q) => {
+              await upsertQuote(q);
+              notify(q.status === "draft" ? "Draft saved — visible to the owner"
+                : q.status === "approved" ? "Quote saved & approved"
+                : q.status === "changes" ? "Sent back to " + ((users[q.createdBy] && users[q.createdBy].name) || "the associate")
+                : q.status === "void" ? "Quote voided"
+                : "Quote submitted for review");
+              setView("dashboard"); setActiveQuote(null);
+            }}
             onPreview={setPreviewQuote} onCancel={() => { setView("dashboard"); setActiveQuote(null); }} />
         )}
 
@@ -1296,6 +1304,35 @@ function QuoteForm({ me, isOwner, isManager, settings, notify, existing, onSave,
     }
   };
 
+  /* A manager looking at someone else's submitted work can bounce it back
+     with a note, or void it, right here — no need to leave the editor. */
+  const canReview = isManager && existing && q.createdBy !== me.id
+    && ["pending", "changes", "draft"].includes(q.status);
+
+  const sendBack = () => {
+    const note = window.prompt("What should they change?\n(e.g. Margin too thin — raise to 22%)", q.reviewNote || "");
+    if (note === null) return;
+    onSave(Object.assign({}, q, {
+      status: "changes",
+      reviewNote: note.trim(),
+      updatedAt: new Date().toISOString(),
+      history: (q.history || []).concat([{ at: new Date().toISOString(), by: me.name, action: "Requested changes" + (note.trim() ? " — " + note.trim() : "") }]),
+    }));
+    logActivity(me.name, "Requested changes on quote", q.quoteNo);
+  };
+
+  const voidThis = () => {
+    if (!window.confirm("Void quote " + q.quoteNo + "?\n\nVoiding is permanent. The quote is frozen for good — it can't be edited, printed, or brought back, and it stops counting toward any total.")) return;
+    const reason = window.prompt("Why is this quote being voided?\n(e.g. duplicate, client cancelled, priced in error)");
+    if (reason === null) return;
+    onSave(Object.assign({}, q, {
+      status: "void", voidReason: reason.trim(), voidedAt: new Date().toISOString(),
+      voidedBy: me.name, prevStatus: q.status,
+      history: (q.history || []).concat([{ at: new Date().toISOString(), by: me.name, action: "Voided" + (reason.trim() ? " — " + reason.trim() : "") }]),
+    }));
+    logActivity(me.name, "Voided quote", q.quoteNo);
+  };
+
   const Stepper = ({ label, value, min, onChange, unit }) => (
     <div>
       <div style={{ fontSize: 12, textTransform: "uppercase", letterSpacing: "0.08em", color: BRAND.sub, fontWeight: 700, marginBottom: 6, fontFamily: "'Barlow Condensed', sans-serif" }}>{label}</div>
@@ -1521,6 +1558,10 @@ function QuoteForm({ me, isOwner, isManager, settings, notify, existing, onSave,
             <div className="flex flex-col gap-2 mt-4">
               <Btn kind="gold" onClick={() => onPreview(Object.assign({}, q))}>Preview client quote</Btn>
               {!locked && <Btn onClick={() => save(true)}>{isManager ? "Save & approve" : "Submit for review"}</Btn>}
+              {/* Reviewing someone else's work: send it back or kill it,
+                  without having to go to the Team & review tab. */}
+              {canReview && <Btn kind="danger" onClick={sendBack}>Request changes</Btn>}
+              {canReview && <Btn kind="ghost" onClick={voidThis}>Void quote</Btn>}
               {!locked && <Btn kind="ghost" onClick={() => save(false)}>Save as draft</Btn>}
               <Btn kind="ghost" onClick={onCancel}>Back</Btn>
             </div>
