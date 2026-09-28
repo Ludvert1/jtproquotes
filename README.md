@@ -30,6 +30,8 @@ It runs in one of two modes, decided by `config.js`:
 | `config.js` | Firebase settings and the owner's email. The one file you edit to go live. |
 | `firestore.rules` | Database security rules. Paste these into Firebase. |
 | `src/scope-templates.js` | Standard scope steps and exclusions — shared by the app and the AI. Edit here, then `npm run build`. |
+| `api/_push.js` | Phone notifications (Web Push). Key comes from the environment. |
+| `sw.js`, `manifest.webmanifest`, `icons/` | Make the app installable and receive phone alerts. |
 | `api/img.js` | Serves quote photos from this site so they can be drawn into PDFs. |
 | `storage.rules` | Rules for the lead screenshots. Paste these into Firebase Storage. |
 | `api/_lib.js` | Shared server helpers. Not reachable from the web (Vercel ignores `_` files). |
@@ -127,19 +129,28 @@ per plain lead read.
 
 ## Being told when a quote needs approving
 
-Three things happen the moment an associate submits:
+**Phone alerts** (sound, vibration, lock-screen banner, a number on the app
+icon — even with the app closed):
 
-- **The tab title** shows the count — `(2) JTProQuotes` — so an open tab tells
-  you without being looked at.
-- **A toast** appears if you already have the app open, because the quote list
-  is a live listener.
-- **An email** goes to everyone who can approve, which is the part that reaches
-  you when the app is closed.
+| Event | Who is alerted |
+| --- | --- |
+| Associate submits a quote | Owner + assistants (also by email) |
+| Quote approved / sent back | The associate who wrote it |
+| New Thumbtack lead drafted | Owner + assistants |
 
-Only a real submission sends mail. Saved drafts, autosaves, and a manager
-approving their own work do not. The email is composed on the server from the
-stored quote, not from anything the browser sends, and the total in it is
-calculated with the same formula the app uses — so it always matches the screen.
+Each person turns it on once per device with **🔔 Turn on alerts** in the top
+bar, then **Allow**. On **iPhone** Apple only allows this from the Home Screen
+app: Safari → Share → **Add to Home Screen**, open JTProQuotes from that icon,
+then tap Turn on alerts. Android (Chrome) and computers (Chrome/Edge) work
+straight from the browser. **Send test alert** checks it end to end.
+
+Switching it on (once): in Vercel add `VAPID_PRIVATE_KEY` (the value is in
+`VAPID-PRIVATE-KEY-for-Vercel.txt` in the project folder — never committed),
+redeploy, and paste the updated `firestore.rules` into Firebase → Firestore →
+Rules → Publish. The matching public key is in `config.js`; change both
+together. Built on standard Web Push, no extra service or package.
+
+While the app is open you also get a chime, the count in the tab title, and a toast.
 
 ### Switching the email on
 

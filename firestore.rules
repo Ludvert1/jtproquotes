@@ -149,6 +149,19 @@ service cloud.firestore {
       allow update, delete: if false;
     }
 
+    // ---- PHONE NOTIFICATION SUBSCRIPTIONS ----
+    // One document per person, holding the devices they switched alerts on
+    // for. Approved team members can read them so the server, acting as
+    // whoever triggered the alert, can reach the right phones. A push
+    // address alone cannot send anything — that takes the private key held
+    // only in Vercel. Only you can change your own devices.
+    match /pushSubs/{uid} {
+      allow read: if isApproved();
+      allow create, update: if isApproved() && request.auth.uid == uid
+        && request.resource.data.uid == uid;
+      allow delete: if signedIn() && request.auth.uid == uid;
+    }
+
     // Anything not matched above is denied.
     match /{document=**} {
       allow read, write: if false;

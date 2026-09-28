@@ -24,6 +24,7 @@ const {
   draftQuote, draftToQuoteFields, quoteTotal, renderReply, priceRange,
   uploadImageAsServer, checkImages,
 } = require("./_lib");
+const { sendToPeople } = require("./_push");
 
 const money = (n) => "$" + Math.round(Number(n) || 0).toLocaleString("en-US");
 
@@ -207,6 +208,17 @@ module.exports = async (req, res) => {
     ].filter((l) => l !== "").join("\n"),
     replyTo: quote.clientEmail || undefined,
   });
+
+  // Phone alert to the owner and assistants.
+  try {
+    const [users, subs] = await Promise.all([listDocsAsServer("users"), listDocsAsServer("pushSubs")]);
+    const managers = users.filter((u) => u && u.active === true && (u.role === "owner" || u.role === "assistant")).map((u) => u.id);
+    await sendToPeople(subs, managers, {
+      title: "New lead · " + (d ? priceRange(total, d.confidence) : quote.category),
+      body: `${quote.clientName} — ${quote.jobTitle || quote.category}. ${d ? "Quote drafted, reply ready to send." : "Filed as a draft, needs pricing."}`,
+      tag: "q-" + id, url: "/?quote=" + id,
+    });
+  } catch (e) { console.error("[ingest-lead] push failed:", e.message); }
 
   console.log("[ingest-lead] filed " + quoteNo + " from " + (quote.leadSource || from || "email") + (d ? " drafted " + d.confidence : " unpriced"));
   return res.status(200).json({

@@ -28,6 +28,10 @@ window.JTPQ_CONFIG = {
     appId: "1:994940793610:web:a69d8c47e38f657886c0f3",
   },
 
+  // Phone notifications (Web Push). This half of the key is public by design;
+  // the private half is VAPID_PRIVATE_KEY in Vercel. Change both together.
+  vapidPublicKey: "BHJZrgFysdU8GUtlP0FM04D_brRVTjfNOdYX-VBnEBzWewiM0g7tpksbZkKF0snEyVBHPxPcxAK31Frtap6bMSY",
+
   // This email address gets Owner rights. Everyone else is an associate.
   ownerEmail: "info@jtproconstruction.com",
 };

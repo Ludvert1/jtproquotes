@@ -17,3 +17,6 @@ fbconfig.txt*
 # Never commit a service-account key or any API key.
 *serviceAccount*.json
 *service-account*.json
+
+# The Web Push private key lives only in Vercel.
+VAPID-PRIVATE-KEY*

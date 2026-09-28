@@ -222,6 +222,161 @@ const Card = ({ children, style }) => (
   <div style={Object.assign({ background: "#fff", border: `1px solid ${BRAND.line}`, borderRadius: 12, padding: 20 }, style)}>{children}</div>
 );
 
+/* ================= PHONE ALERTS =================
+   Real notifications — sound, vibration, lock screen, a badge on the app
+   icon — through standard Web Push. The private key lives in Vercel; this
+   public half is safe to ship.
+
+   iPhone: Apple only allows this for web apps added to the Home Screen
+   (Share → Add to Home Screen), opened from that icon. Android and desktop
+   Chrome/Edge work straight from the browser. */
+const VAPID_PUBLIC = (window.JTPQ_CONFIG && window.JTPQ_CONFIG.vapidPublicKey)
+  || "BHJZrgFysdU8GUtlP0FM04D_brRVTjfNOdYX-VBnEBzWewiM0g7tpksbZkKF0snEyVBHPxPcxAK31Frtap6bMSY";
+
+const isIOS = () => /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+const isStandalone = () => (window.matchMedia && window.matchMedia("(display-mode: standalone)").matches) || window.navigator.standalone === true;
+const pushSupported = () => "serviceWorker" in navigator && "PushManager" in window && "Notification" in window;
+
+let swReg = null;
+async function getSW() {
+  if (swReg) return swReg;
+  if (!("serviceWorker" in navigator)) return null;
+  try { swReg = await navigator.serviceWorker.register("/sw.js", { scope: "/" }); await navigator.serviceWorker.ready; }
+  catch (e) { warn("service worker")(e); swReg = null; }
+  return swReg;
+}
+
+const b64uToBytes = (s) => {
+  const pad = "=".repeat((4 - (s.length % 4)) % 4);
+  const raw = atob((s + pad).replace(/-/g, "+").replace(/_/g, "/"));
+  return Uint8Array.from(raw, (c) => c.charCodeAt(0));
+};
+const deviceKey = (endpoint) => { let h = 5381; for (let i = 0; i < endpoint.length; i++) h = ((h << 5) + h + endpoint.charCodeAt(i)) >>> 0; return "d" + h.toString(36); };
+
+/* Subscribes this device and files it under your name. `ask` = allowed to
+   show the permission prompt (must come from a tap). */
+async function enablePush(me, ask) {
+  if (!CLOUD || !pushSupported()) return "unsupported";
+  if (isIOS() && !isStandalone()) return "needs-install";
+  let perm = Notification.permission;
+  if (perm === "default" && ask) perm = await Notification.requestPermission();
+  if (perm !== "granted") return perm === "denied" ? "denied" : "default";
+  const reg = await getSW();
+  if (!reg) return "unsupported";
+  let sub = await reg.pushManager.getSubscription();
+  if (!sub) sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64uToBytes(VAPID_PUBLIC) });
+  const j = sub.toJSON();
+  await db.collection("pushSubs").doc(me.id).set({
+    uid: me.id, name: me.name || "", updatedAt: new Date().toISOString(),
+    subs: { [deviceKey(j.endpoint)]: { endpoint: j.endpoint, keys: j.keys, ua: navigator.userAgent.slice(0, 160), at: new Date().toISOString() } },
+  }, { merge: true });
+  return "on";
+}
+
+async function tellServer(payload) {
+  if (!CLOUD || !fbAuth || !fbAuth.currentUser) return null;
+  try {
+    const idToken = await fbAuth.currentUser.getIdToken();
+    const r = await fetch("/api/notify", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(Object.assign({ idToken }, payload)) });
+    return { ok: r.ok, data: await r.json().catch(() => ({})) };
+  } catch (e) { warn("notify")(e); return null; }
+}
+
+/* A short two-tone chime + vibration for alerts that arrive while the app is
+   open (the phone's own notification covers it when the app is closed). */
+function chime() {
+  try { if (navigator.vibrate) navigator.vibrate([180, 90, 180]); } catch {}
+  try {
+    const AC = window.AudioContext || window.webkitAudioContext; if (!AC) return;
+    const ac = new AC(); const t = ac.currentTime;
+    [[880, 0], [1320, 0.16]].forEach(([f, d]) => {
+      const o = ac.createOscillator(), g = ac.createGain();
+      o.frequency.value = f; o.type = "sine";
+      g.gain.setValueAtTime(0.0001, t + d); g.gain.exponentialRampToValueAtTime(0.25, t + d + 0.02); g.gain.exponentialRampToValueAtTime(0.0001, t + d + 0.28);
+      o.connect(g); g.connect(ac.destination); o.start(t + d); o.stop(t + d + 0.3);
+    });
+    setTimeout(() => ac.close && ac.close(), 800);
+  } catch {}
+}
+
+function AlertsBell({ me }) {
+  const [state, setState] = useState("checking");
+  const [open, setOpen] = useState(false);
+  const [msg, setMsg] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      if (!CLOUD || !pushSupported()) { if (alive) setState(isIOS() && !isStandalone() ? "needs-install" : "unsupported"); return; }
+      if (isIOS() && !isStandalone()) { if (alive) setState("needs-install"); return; }
+      if (Notification.permission === "granted") {
+        // Quietly refresh this device's registration on every visit.
+        try { const s = await enablePush(me, false); if (alive) setState(s); } catch (e) { warn("push refresh")(e); if (alive) setState("default"); }
+      } else if (alive) setState(Notification.permission === "denied" ? "denied" : "default");
+    })();
+    return () => { alive = false; };
+  }, [me && me.id]);
+
+  const turnOn = async () => {
+    setBusy(true); setMsg("");
+    try {
+      const s = await enablePush(me, true);
+      setState(s);
+      if (s === "on") {
+        const r = await tellServer({ test: true });
+        setMsg(r && r.ok ? "Alerts are on — a test alert is on its way." : "Alerts are on for this device. " + ((r && r.data && r.data.error) || ""));
+        logActivity(me.name, "Turned on phone alerts");
+      }
+    } catch (e) { setMsg(e.message || "Couldn't turn alerts on."); }
+    setBusy(false);
+  };
+  const test = async () => {
+    setBusy(true); setMsg("");
+    const r = await tellServer({ test: true });
+    setMsg(r && r.ok ? "Test sent — it should arrive in a few seconds." : ((r && r.data && r.data.error) || "Couldn't send the test."));
+    setBusy(false);
+  };
+
+  if (!CLOUD) return null;
+  const on = state === "on";
+  const p = { fontSize: 13, color: BRAND.ink, lineHeight: 1.5, marginBottom: 8 };
+  return (
+    <div style={{ position: "relative" }}>
+      <button onClick={() => setOpen(!open)} title={on ? "Phone alerts are on" : "Turn on phone alerts"}
+        style={{ background: on ? "transparent" : BRAND.gold, color: on ? BRAND.goldBright : BRAND.navy, border: on ? "1px solid rgba(227,185,60,0.5)" : "none", padding: "6px 11px", borderRadius: 7, fontWeight: 700, fontSize: 13, cursor: "pointer" }}>
+        {on ? "🔔 Alerts on" : "🔔 Turn on alerts"}
+      </button>
+      {open && (
+        <div style={{ position: "fixed", left: "50%", transform: "translateX(-50%)", top: 72, width: 320, maxWidth: "calc(100vw - 32px)", background: "#fff", borderRadius: 12, boxShadow: "0 10px 30px rgba(0,0,0,0.25)", padding: 16, zIndex: 40 }}>
+          <div style={{ fontWeight: 700, color: BRAND.navy, marginBottom: 8 }}>Phone alerts</div>
+          {state === "on" && <div style={p}>This device will ring and vibrate for {canManage(me) ? "quotes waiting for your approval and new Thumbtack leads" : "quotes that are approved or sent back to you"} — even with the app closed.</div>}
+          {state === "default" && <div style={p}>Get a sound, vibration and a badge on your phone for {canManage(me) ? "quotes waiting for approval and new leads" : "approved and sent-back quotes"}. Tap below, then choose <strong>Allow</strong>.</div>}
+          {state === "needs-install" && (
+            <div style={p}>
+              On iPhone, alerts only work from the Home Screen app:
+              <ol style={{ paddingLeft: 18, margin: "6px 0" }}>
+                <li style={{ listStyle: "decimal" }}>Tap the <strong>Share</strong> button (square with an arrow) in Safari</li>
+                <li style={{ listStyle: "decimal" }}>Choose <strong>Add to Home Screen</strong> → Add</li>
+                <li style={{ listStyle: "decimal" }}>Open <strong>JTProQuotes</strong> from the new icon, sign in, and tap <strong>Turn on alerts</strong></li>
+              </ol>
+            </div>
+          )}
+          {state === "denied" && <div style={p}>Notifications are blocked for this site. Allow them in your phone's settings (Chrome: ⋮ → Settings → Site settings → Notifications; iPhone: Settings → Notifications → JTProQuotes), then reload.</div>}
+          {state === "unsupported" && <div style={p}>This browser can't receive alerts. Use Chrome on Android, Safari from the Home Screen on iPhone, or Chrome/Edge on a computer.</div>}
+          {state === "checking" && <div style={p}>Checking…</div>}
+          {msg && <div style={{ fontSize: 12.5, fontWeight: 600, color: msg.indexOf("on") >= 0 || msg.indexOf("sent") >= 0 ? BRAND.green : BRAND.red, marginBottom: 8 }}>{msg}</div>}
+          <div className="flex gap-2 flex-wrap">
+            {state === "default" && <Btn small kind="gold" onClick={turnOn} disabled={busy}>{busy ? "Turning on…" : "Turn on alerts"}</Btn>}
+            {state === "on" && <Btn small kind="ghost" onClick={test} disabled={busy}>{busy ? "Sending…" : "Send test alert"}</Btn>}
+            <Btn small kind="ghost" onClick={() => setOpen(false)}>Close</Btn>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 /* ================= ROOT ================= */
 function App() {
   const [users, setUsers] = useState(null);
@@ -370,9 +525,35 @@ function App() {
     if (seenPending.current === null) { seenPending.current = pendingCount; return; }
     if (pendingCount > seenPending.current) {
       const n = pendingCount - seenPending.current;
+      chime();
       notify(n === 1 ? "A quote was just submitted for your approval." : n + " quotes were just submitted for your approval.");
     }
     seenPending.current = pendingCount;
+  }, [pendingCount, managerNow, me]);
+
+  /* Tapping a notification opens the quote it was about (?quote=<id>). */
+  useEffect(() => {
+    if (!me || !quotes) return;
+    const id = new URLSearchParams(window.location.search).get("quote");
+    if (!id) return;
+    const target = quotes[id];
+    if (target) { setActiveQuote(target); setView("edit"); }
+    try { window.history.replaceState(null, "", window.location.pathname); } catch {}
+  }, [me && me.id, !!quotes]);
+  useEffect(() => {
+    if (!("serviceWorker" in navigator)) return;
+    const onMsg = (e) => { if (e.data && e.data.type === "open-url" && e.data.url) window.location.href = e.data.url; };
+    navigator.serviceWorker.addEventListener("message", onMsg);
+    return () => navigator.serviceWorker.removeEventListener("message", onMsg);
+  }, []);
+
+  // The number on the app icon: quotes waiting for you.
+  useEffect(() => {
+    try {
+      if (!navigator.setAppBadge) return;
+      if (me && managerNow && pendingCount > 0) navigator.setAppBadge(pendingCount);
+      else navigator.clearAppBadge && navigator.clearAppBadge();
+    } catch {}
   }, [pendingCount, managerNow, me]);
 
   if (cloudInitError) return (
@@ -404,7 +585,18 @@ function App() {
   const visibleQuotes = isManager ? Object.values(quotes) : myQuotes;
 
   const upsertQuote = async (q) => {
-    if (CLOUD) { await db.collection("quotes").doc(q.id).set(q); return; }
+    if (CLOUD) {
+      const before = quotes && quotes[q.id];
+      await db.collection("quotes").doc(q.id).set(q);
+      /* A quote changing hands tells the right people — submitted → the
+         approvers, approved or sent back → the associate. Fired after the
+         save so the server reads the real stored quote, never trusting what
+         the browser says. Autosaves don't change status, so they never ping. */
+      if ((!before || before.status !== q.status) && ["pending", "approved", "changes"].includes(q.status)) {
+        tellServer({ quoteId: q.id });
+      }
+      return;
+    }
     const next = Object.assign({}, quotes); next[q.id] = q; await saveQuotes(next);
   };
   /* Permanent erase. Owner only, and deliberately separate from voiding. */
@@ -437,6 +629,7 @@ function App() {
               <button key={k} onClick={() => { setView(k); setActiveQuote(null); }}
                 style={{ background: view === k ? BRAND.gold : "transparent", color: view === k ? BRAND.navy : "#D8DEE9", border: "none", padding: "7px 14px", borderRadius: 7, fontWeight: 600, fontSize: 14, cursor: "pointer" }}>{l}</button>
             ))}
+            <AlertsBell me={me} />
             <button onClick={logout} style={{ background: "transparent", color: "#8FA0B8", border: "none", padding: "7px 10px", fontSize: 13, cursor: "pointer" }}>Sign out</button>
           </nav>
         </div>
@@ -1316,19 +1509,7 @@ function QuoteForm({ me, isOwner, isManager, settings, notify, existing, onSave,
       logActivity(me.name, "Saved draft", q.quoteNo);
     }
     await onSave(next, opts);
-    /* Tell whoever can approve it. Fired after the save so the server reads
-       the real stored quote rather than trusting anything sent from here.
-       A failure is silent on purpose — the quote is already submitted, and
-       an email that didn't send is not the associate's problem to solve. */
-    if (submit && next.status === "pending" && CLOUD && fbAuth && fbAuth.currentUser) {
-      try {
-        const idToken = await fbAuth.currentUser.getIdToken();
-        await fetch("/api/notify", {
-          method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ idToken, quoteId: next.id }),
-        });
-      } catch (e) { console.warn("[JTProQuotes] approval email not sent:", e && e.message); }
-    }
+    // Who gets told (and how) is decided in upsertQuote, for every save path.
   };
 
   /* A manager looking at someone else's submitted work can bounce it back
