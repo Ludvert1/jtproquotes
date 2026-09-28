@@ -19,6 +19,9 @@ const jsxPath = path.join(root, "src", "app.jsx");
 const tplPath = path.join(root, "src", "index.template.html");
 const outPath = path.join(root, "index.html");
 
+// The scope templates are shared with the server (api/_lib.js), so they live
+// in their own plain-JS file and are placed ahead of the app code here.
+const shared = fs.readFileSync(path.join(root, "src", "scope-templates.js"), "utf8");
 const jsx = fs.readFileSync(jsxPath, "utf8");
 
 let result;
@@ -49,7 +52,7 @@ if (!template.includes("/*__APP__*/")) {
 }
 
 // A literal </script> inside the code would close the tag early.
-const safe = result.code.replace(/<\/script>/gi, "<\\/script>");
+const safe = (shared + "\n" + result.code).replace(/<\/script>/gi, "<\\/script>");
 
 const html = template.replace("/*__APP__*/", safe);
 fs.writeFileSync(outPath, html);

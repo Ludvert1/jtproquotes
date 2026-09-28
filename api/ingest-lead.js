@@ -100,14 +100,26 @@ module.exports = async (req, res) => {
       } catch (e) { console.error("[ingest-lead] photo upload failed:", e.message); urls.push(null); }
     }
     const referenced = new Set(d.findings.map((x) => x.photo).filter((n) => n > 0));
-    const attachments = urls.map((u, i) => (u ? { path: u.path, url: u.url, at: now, by: "Lead inbox", kind: "photo", show: referenced.has(i + 1) } : null)).filter(Boolean);
-    const fields = draftToQuoteFields(d, settings, uid, urls.map((u) => (u ? u.url : "")));
+    /* If Storage isn't set up, a photo small enough is kept inside the quote
+       instead (Firestore documents cap at 1 MB, so large ones are skipped). */
+    let inlineBudget = 600000;
+    const attachments = urls.map((u, i) => {
+      const base = { id: uid(), at: now, by: "Lead inbox", kind: "photo", show: referenced.has(i + 1) };
+      if (u) return Object.assign(base, { path: u.path, url: u.url, thumb: "" });
+      const size = images[i].data.length;
+      if (size <= 200000 && size <= inlineBudget) {
+        inlineBudget -= size;
+        return Object.assign(base, { path: "", url: "", thumb: "data:" + images[i].mediaType + ";base64," + images[i].data });
+      }
+      return null;
+    });
+    const fields = draftToQuoteFields(d, settings, uid, attachments.map((a) => (a ? a.url || a.thumb : "")));
     quote = Object.assign({
       id, quoteNo, createdBy: ownerUid, createdAt: now, updatedAt: now, status: "draft",
       clientName: d.clientName || (subject ? subject.slice(0, 60) : "Unnamed lead"),
       clientPhone: d.clientPhone, clientEmail: d.clientEmail, clientAddress: d.clientAddress,
       exclusions: STANDARD_EXCLUSIONS.map((t) => ({ id: uid(), text: t, on: true })),
-      notes: "", attachments,
+      notes: "", attachments: attachments.filter(Boolean),
       fromInbox: true, leadSource: d.sourcePlatform || "email", leadMessageId: messageId, leadReadAt: now,
       leadText: leadText.slice(0, 8000),
       history: [{ at: now, by: "Lead inbox", action: "Filed from a lead email and drafted by AI" }],

@@ -28,181 +28,8 @@ const CATEGORIES = [
   "Water Damage Restoration", "General Repair", "Other",
 ];
 
-const SCOPE_TEMPLATES = {
-  "Flooring": [
-    "Protect adjacent rooms, furnishings, and walkways; set dust containment at the work area",
-    "Remove and dispose of existing floor covering, shoe molding, and underlayment",
-    "Inspect subfloor; refasten loose boards, eliminate squeaks, and clean surface",
-    "Level subfloor with patching compound to manufacturer's flatness tolerance",
-    "Install moisture barrier and underlayment per flooring manufacturer specification",
-    "Install new flooring per manufacturer layout, with required expansion gaps at perimeter",
-    "Install new baseboard or reinstall shoe molding, plus transitions at doorways",
-    "Caulk and touch up trim, finish all transitions and thresholds",
-    "Final clean of installed area and haul away all debris",
-  ],
-  "Painting": [
-    "Protect floors, fixtures, and furnishings with drop cloths and masking",
-    "Wash and degloss surfaces; scrape and remove loose or peeling paint",
-    "Patch nail holes, cracks, and minor drywall damage; sand smooth",
-    "Caulk gaps at trim, corners, and penetrations",
-    "Spot-prime all patched, stained, and bare areas",
-    "Apply two finish coats to walls in client-selected color and sheen",
-    "Cut in ceilings, trim, doors, and casings as specified",
-    "Remove masking; reinstall hardware, switch plates, and outlet covers",
-    "Final walkthrough touch-up and site cleanup",
-  ],
-  "Drywall": [
-    "Protect adjacent finishes and set up dust containment",
-    "Remove damaged drywall back to sound framing",
-    "Inspect framing; add blocking or backing where required for support",
-    "Hang new drywall of matching thickness, fastened to code spacing",
-    "Tape, mud, and sand to a Level 4 finish",
-    "Match existing texture (orange peel, knockdown, or smooth)",
-    "Prime repaired areas ready for paint",
-    "Cleanup and debris haul-off",
-  ],
-  "Kitchen Remodel": [
-    "Protect adjacent rooms, floors, and pathways; set dust containment",
-    "Demolish existing cabinets, countertops, backsplash, and flooring as scoped",
-    "Coordinate disconnect and reconnect of plumbing, gas, and electrical with licensed trades",
-    "Rough-in modifications for new sink, appliance, and outlet locations",
-    "Install new base and wall cabinets — leveled, shimmed, and secured to framing",
-    "Template, fabricate, and install countertops with sink and cooktop cutouts",
-    "Install backsplash tile, grout, and seal",
-    "Install sink, faucet, disposal, and reconnect appliances",
-    "Install toe kick, crown molding, filler trim, and cabinet hardware",
-    "Paint walls and ceiling; final caulk at all seams",
-    "Final clean, punch list walkthrough, and debris removal",
-  ],
-  "Bath Remodel": [
-    "Protect adjacent areas; set containment and floor protection",
-    "Demolish existing tub or shower, vanity, flooring, and finishes as scoped",
-    "Inspect subfloor and wall framing; repair water damage or rot discovered",
-    "Plumbing rough-in adjustments performed by licensed plumber",
-    "Install cement board and waterproof membrane at all wet areas",
-    "Set tub or shower pan, install valve and surround",
-    "Tile, grout, and seal walls and floor",
-    "Install vanity, countertop, faucet, toilet, and accessories",
-    "Install exhaust fan, vanity lighting, and mirror as scoped",
-    "Paint, caulk, and install final trim",
-    "Final clean and client walkthrough",
-  ],
-  "Exterior / Siding": [
-    "Set staging and protect landscaping, windows, and walkways",
-    "Remove damaged siding, trim, and fasteners; dispose properly",
-    "Inspect sheathing and framing for rot; replace compromised material",
-    "Install weather-resistant barrier and flashing at all openings",
-    "Install new siding per manufacturer specification and course alignment",
-    "Install corner boards, trim, and channel",
-    "Caulk and seal all joints, penetrations, and transitions",
-    "Prime and paint new material as scoped",
-    "Site cleanup, magnet sweep for fasteners, and debris haul-off",
-  ],
-  "Concrete": [
-    "Layout, mark utilities, and verify grade and drainage slope",
-    "Excavate and remove existing concrete or soil to required depth",
-    "Install and compact base material",
-    "Set forms to specified elevation and slope",
-    "Install reinforcement (rebar or wire mesh) properly chaired and spaced",
-    "Place, screed, and float concrete at specified mix strength",
-    "Finish surface — broom, smooth, or stamped as specified",
-    "Cut control joints and apply curing compound",
-    "Strip forms, backfill edges, and clean the site",
-  ],
-  "Covered Structure / Patio": [
-    "Verify layout, setbacks, and permit requirements",
-    "Excavate and pour footings or piers to code depth",
-    "Set posts — plumbed, aligned, and anchored with approved hardware",
-    "Frame beams, rafters, and headers to span requirements",
-    "Install roof decking, underlayment, and roofing material",
-    "Install fascia, trim, and drip edge",
-    "Install gutters and downspouts as scoped",
-    "Stain, seal, or paint all exposed wood",
-    "Final cleanup and debris removal",
-  ],
-  "Fencing": [
-    "Verify property lines and locate underground utilities",
-    "Remove and dispose of existing fence",
-    "Dig post holes to required depth and diameter",
-    "Set posts in concrete — plumbed and aligned to string line",
-    "Install rails and pickets or panels at specified spacing",
-    "Build and hang gates with heavy-duty hinges and latch hardware",
-    "Cut top to level line or follow grade as specified",
-    "Apply stain or sealer",
-    "Site cleanup and haul-off",
-  ],
-  "Roofing Repair": [
-    "Inspect roof, flashing, and attic to identify the source of the leak",
-    "Set ladders and protect landscaping and gutters",
-    "Remove damaged shingles, underlayment, and decking as needed",
-    "Replace compromised decking with matching material",
-    "Install ice-and-water shield and underlayment at the repair area",
-    "Install new shingles blended to match existing",
-    "Reflash penetrations, valleys, and wall transitions",
-    "Seal exposed fasteners and inspect ridge and vents",
-    "Magnet sweep and debris removal",
-  ],
-  "Plumbing Repair": [
-    "Isolate water supply and protect surrounding finishes",
-    "Diagnose and locate the source of the leak or failure",
-    "Open access to affected piping or fixture",
-    "Replace failed pipe, valve, or fixture with code-approved material",
-    "Pressure test and verify no leaks under normal operation",
-    "Insulate and support piping as required",
-    "Patch and restore access opening",
-    "Verify drainage and clean the work area",
-  ],
-  "Electrical (minor)": [
-    "De-energize the circuit and verify with tester",
-    "Diagnose the fault or confirm scope of new device installation",
-    "Install or replace devices, fixtures, and covers with code-approved material",
-    "Verify grounding, polarity, and secure terminations",
-    "Label panel circuit where applicable",
-    "Test operation under load and restore power",
-    "Patch and clean any access openings",
-  ],
-  "Water Damage Restoration": [
-    "Assess moisture with meter and document all affected areas",
-    "Stop the source of water intrusion",
-    "Set containment and protect unaffected areas",
-    "Remove saturated drywall, insulation, flooring, and trim",
-    "Treat affected framing with antimicrobial",
-    "Set air movers and dehumidifiers; monitor readings daily",
-    "Verify dry standard is met before rebuild",
-    "Rebuild removed materials to match existing",
-    "Final clean and documentation for insurance if applicable",
-  ],
-  "General Repair": [
-    "Assess the condition and confirm scope with client on site",
-    "Protect surrounding finishes and set up the work area",
-    "Remove or disassemble damaged components",
-    "Repair or replace with matching material and finish",
-    "Fasten, seal, and caulk as appropriate",
-    "Touch up paint or finish to blend with existing",
-    "Test operation and confirm with client",
-    "Cleanup and haul away debris",
-  ],
-  "Other": [
-    "Assess site conditions and confirm scope with client",
-    "Protect surrounding areas and set up the work zone",
-    "Furnish all labor, materials, and equipment described in this quote",
-    "Perform work in accordance with manufacturer specifications and applicable code",
-    "Clean the work area at the end of each working day",
-    "Final walkthrough and debris removal",
-  ],
-};
-
-const STANDARD_EXCLUSIONS = [
-  "Permits and inspection fees, unless expressly listed in the scope above",
-  "Concealed damage discovered after demolition (rot, mold, termite, or code violations)",
-  "Relocation of plumbing, gas, or electrical lines not listed in the scope",
-  "Structural or engineering work, including load-bearing modifications",
-  "Asbestos, lead paint, or mold abatement",
-  "Moving furniture, appliance disposal, and storage of personal items",
-  "Defects or delays arising from client-supplied materials",
-  "Landscaping restoration and irrigation repair",
-  "Final detail cleaning beyond removal of construction debris",
-];
+/* SCOPE_TEMPLATES and STANDARD_EXCLUSIONS live in src/scope-templates.js,
+   shared with the server. build.js inlines that file above this one. */
 
 const buildScope = (cat) => (SCOPE_TEMPLATES[cat] || SCOPE_TEMPLATES["Other"]).map((t) => ({ id: uid(), text: t, on: true }));
 const buildExclusions = () => STANDARD_EXCLUSIONS.map((t) => ({ id: uid(), text: t, on: true }));
@@ -273,7 +100,13 @@ if (CLOUD) {
     /* Storage holds the lead screenshots attached to a quote. It is optional —
        if the SDK or the bucket is missing, reading a lead still works and only
        the "keep the screenshot" part is skipped. */
-    try { fbStorage = firebase.storage ? firebase.storage() : null; }
+    try {
+      fbStorage = firebase.storage ? firebase.storage() : null;
+      /* The SDK retries a failed upload for up to ten minutes by default. With
+         no bucket set up that looked like a frozen button, so give up fast. */
+      if (fbStorage && fbStorage.setMaxUploadRetryTime) fbStorage.setMaxUploadRetryTime(12000);
+      if (fbStorage && fbStorage.setMaxOperationRetryTime) fbStorage.setMaxOperationRetryTime(12000);
+    }
     catch (e) { console.warn("[JTProQuotes] Storage unavailable:", e && e.message); }
   } catch (e) {
     cloudInitError = e.message || String(e);
@@ -627,7 +460,7 @@ function App() {
         {(view === "new" || view === "edit") && (
           <QuoteForm key={activeQuote ? activeQuote.id : "new"} me={me} isOwner={isOwner} isManager={isManager} settings={settings} notify={notify} existing={view === "edit" ? activeQuote : null}
             onAutosave={upsertQuote}
-            onSave={async (q) => {
+            onSave={async (q, opts) => {
               await upsertQuote(q);
               notify(q.status === "draft" ? "Draft saved — visible to the owner"
                 : q.status === "approved" ? "Quote saved & approved"
@@ -635,6 +468,8 @@ function App() {
                 : q.status === "void" ? "Quote voided"
                 : "Quote submitted for review");
               setView("dashboard"); setActiveQuote(null);
+              // "Approve & create PDF" lands straight on the finished document.
+              if (opts && opts.preview) setPreviewQuote(q);
             }}
             onPreview={setPreviewQuote} onCancel={() => { setView("dashboard"); setActiveQuote(null); }} />
         )}
@@ -1041,7 +876,16 @@ function shrinkImage(file, maxEdge) {
         ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, w, h);
         ctx.drawImage(img, 0, 0, w, h);
         const dataUrl = cv.toDataURL("image/jpeg", 0.8);
-        resolve({ name: file.name || "photo.jpg", mediaType: "image/jpeg", data: dataUrl.split(",")[1], dataUrl });
+        /* A small copy is kept inside the quote itself. It means the photos show
+           on the quote and in the PDF even when Firebase Storage isn't set up,
+           and the PDF never has to fetch an image from another site. */
+        const ts = Math.min(1, 560 / Math.max(img.width, img.height));
+        const tc = document.createElement("canvas");
+        tc.width = Math.max(1, Math.round(img.width * ts)); tc.height = Math.max(1, Math.round(img.height * ts));
+        const tx = tc.getContext("2d"); tx.fillStyle = "#fff"; tx.fillRect(0, 0, tc.width, tc.height);
+        tx.drawImage(img, 0, 0, tc.width, tc.height);
+        const thumb = tc.toDataURL("image/jpeg", 0.68);
+        resolve({ name: file.name || "photo.jpg", mediaType: "image/jpeg", data: dataUrl.split(",")[1], dataUrl, thumb });
       };
       img.src = fr.result;
     };
@@ -1072,6 +916,31 @@ function renderReply(template, total, confidence) {
   const range = priceRange(total, confidence);
   return t.includes("{{PRICE_RANGE}}") ? t.split("{{PRICE_RANGE}}").join(range) : t;
 }
+
+/* A photo on a quote may have a full-size copy in Storage (url), a small copy
+   kept in the quote itself (thumb), or both. */
+/* Remote photos go through our own /api/img when a PDF is drawn, because the
+   PDF renderer can only paint images served from this site. */
+const pdfSrc = (u) => (/^https:\/\/firebasestorage\.googleapis\.com\//.test(u || "") ? "/api/img?u=" + encodeURIComponent(u) : u);
+
+/* The PDF library is ~900 KB, so it loads only the first time someone makes a PDF. */
+let html2pdfLoading = null;
+function loadHtml2pdf() {
+  if (window.html2pdf) return Promise.resolve(window.html2pdf);
+  if (!html2pdfLoading) {
+    html2pdfLoading = new Promise((resolve, reject) => {
+      const sc = document.createElement("script");
+      sc.src = "https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js";
+      sc.onload = () => resolve(window.html2pdf);
+      sc.onerror = () => { html2pdfLoading = null; reject(new Error("Couldn't load the PDF maker. Check your connection.")); };
+      document.head.appendChild(sc);
+    });
+  }
+  return html2pdfLoading;
+}
+
+const attSrc = (a) => (a && (a.url || a.thumb)) || "";
+const findingPhoto = (f, quote) => (f && f.photoUrl) || (f && f.attId ? attSrc(((quote && quote.attachments) || []).find((x) => x.id === f.attId)) : "");
 
 const PRIORITY = {
   urgent: { label: "Urgent", color: BRAND.red, bg: "#F9E5E3" },
@@ -1181,7 +1050,7 @@ function AiAssistant({ me, q, settings, disabled, onApplyDraft, onApplyLead, not
     const hasWork = (q.items || []).length > 0 || (q.scopeEdited && (q.scopeItems || []).some((s) => s.on && s.text.trim() && !s.ai));
     if (hasWork && !window.confirm("Replace the scope, materials and crew already on this quote with the AI draft?\n\nClient details you've typed are kept.")) return;
     setBusy("apply");
-    try { await onApplyDraft(draft, photos); reset(); }
+    try { onApplyDraft(draft, photos); reset(); }
     catch (e) { setErr(e.message || "Couldn't apply the draft."); }
     setBusy(null);
   };
@@ -1299,10 +1168,13 @@ function AiAssistant({ me, q, settings, disabled, onApplyDraft, onApplyLead, not
               )}
 
               <div style={box}>
-                <div style={label}>Scope of work ({draft.scope.length} steps)</div>
-                <ol style={{ fontSize: 13, paddingLeft: 20, margin: 0, lineHeight: 1.55 }}>
-                  {draft.scope.map((s, i) => <li key={i}>{s}</li>)}
-                </ol>
+                <div style={label}>Scope of work — {draft.scope.filter((x) => x.on).length} steps included, {draft.scope.filter((x) => !x.on).length} standard steps left unticked</div>
+                {draft.scope.map((x, i) => (
+                  <div key={i} className="flex gap-2 items-start" style={{ fontSize: 13, lineHeight: 1.5, marginBottom: 3, opacity: x.on ? 1 : 0.5 }}>
+                    <span style={{ flexShrink: 0, width: 16, color: x.on ? BRAND.green : BRAND.sub, fontWeight: 700 }}>{x.on ? "✓" : "–"}</span>
+                    <span style={{ textDecoration: x.on ? "none" : "line-through" }}>{x.text}{!x.standard && x.on ? <span style={{ fontSize: 10.5, color: BRAND.gold, fontWeight: 700, marginLeft: 6 }}>JOB-SPECIFIC</span> : null}</span>
+                  </div>
+                ))}
               </div>
 
               <div style={box}>
@@ -1371,7 +1243,7 @@ function AiAssistant({ me, q, settings, disabled, onApplyDraft, onApplyLead, not
                 <Btn kind="ghost" onClick={() => setDraft(null)} disabled={!!busy}>Adjust photos / notes</Btn>
               </div>
               <div style={{ fontSize: 11.5, color: BRAND.sub, marginTop: 8 }}>
-                Applying fills the scope, crew, materials, site assessment and client reply. Everything stays editable, and it still goes through approval.
+                Applying fills the quote and opens the client-ready preview. Everything stays editable, and it still goes through approval.
               </div>
             </div>
           )}
@@ -1430,7 +1302,7 @@ function QuoteForm({ me, isOwner, isManager, settings, notify, existing, onSave,
   const addItem = () => set("items", q.items.concat([{ id: uid(), desc: "", qty: 1, price: 0 }]));  const setItem = (id, k, v) => set("items", q.items.map((it) => (it.id === id ? Object.assign({}, it, { [k]: v }) : it)));
   const rmItem = (id) => set("items", q.items.filter((it) => it.id !== id));
 
-  const save = async (submit) => {
+  const save = async (submit, opts) => {
     if (!q.clientName.trim()) return alert("Enter the client's name.");
     const next = Object.assign({}, q, { updatedAt: new Date().toISOString() });
     if (submit) {
@@ -1441,7 +1313,7 @@ function QuoteForm({ me, isOwner, isManager, settings, notify, existing, onSave,
       next.history = (q.history || []).concat([{ at: new Date().toISOString(), by: me.name, action: "Saved draft" }]);
       logActivity(me.name, "Saved draft", q.quoteNo);
     }
-    await onSave(next);
+    await onSave(next, opts);
     /* Tell whoever can approve it. Fired after the save so the server reads
        the real stored quote rather than trusting anything sent from here.
        A failure is silent on purpose — the quote is already submitted, and
@@ -1539,66 +1411,91 @@ function QuoteForm({ me, isOwner, isManager, settings, notify, existing, onSave,
   };
 
   /* Photos and lead screenshots live with the quote — the record of what the
-     site looked like and what the customer asked for. Returns what was saved,
-     in the same order, with null for any that failed. */
-  const uploadShots = async (shots, kind) => {
-    if (!fbStorage) { notify("The photos couldn't be saved — Firebase Storage isn't set up yet."); return shots.map(() => null); }
-    const out = [];
-    let failed = 0;
-    for (let i = 0; i < shots.length; i++) {
+     site looked like and what the customer asked for.
+
+     Each photo is attached straight away as a small copy inside the quote, so
+     nothing waits on the network. The full-size original then uploads to
+     Firebase Storage in the background; if Storage isn't set up, or the upload
+     fails, the quote simply keeps the small copy. */
+  const attachFrom = (shots, kind, showSet) => shots.map((sh, i) => ({
+    id: uid(), thumb: sh.thumb || "", url: "", path: "", kind: kind || "photo",
+    show: !!(showSet && showSet.has(i + 1)), at: new Date().toISOString(), by: me.name,
+  }));
+
+  const withTimeout = (p, ms) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error("timed out")), ms))]);
+
+  const uploadInBackground = (shots, atts) => {
+    if (!fbStorage) return;
+    shots.forEach(async (sh, i) => {
+      const att = atts[i];
       try {
         const path = `leads/${me.id}/${q.id}/${Date.now()}-${i}.jpg`;
         const ref = fbStorage.ref().child(path);
-        await ref.put(dataUrlToBlob(shots[i].dataUrl), { contentType: "image/jpeg" });
-        out.push({ path, url: await ref.getDownloadURL(), at: new Date().toISOString(), by: me.name, kind: kind || "photo", show: false });
-      } catch (e) { warn("upload photo")(e); failed++; out.push(null); }
-    }
-    if (failed) notify(failed + " photo" + (failed === 1 ? "" : "s") + " couldn't be uploaded.");
-    return out;
-  };
-
-  const attachShots = async (shots, kind) => {
-    const saved = (await uploadShots(shots, kind)).filter(Boolean);
-    if (!saved.length) return;
-    setDirty(true);
-    setQ((p) => Object.assign({}, p, { attachments: (p.attachments || []).concat(saved) }));
-  };
-
-  /* Applies an AI draft to the quote. Client fields only fill blanks; the
-     work — scope, crew, materials, assessment — is replaced by the draft. */
-  const applyDraft = async (d, shots) => {
-    const saved = shots && shots.length ? await uploadShots(shots, "photo") : [];
-    const photoUrl = (n) => (n > 0 && saved[n - 1] ? saved[n - 1].url : "");
-    const referenced = new Set(d.findings.map((f) => f.photo).filter((n) => n > 0));
-    const newAtt = saved.map((a, i) => (a ? Object.assign(a, { show: referenced.has(i + 1) }) : null)).filter(Boolean);
-    setDirty(true);
-    setQ((p) => {
-      const blank = (k) => !String(p[k] || "").trim();
-      return Object.assign({}, p, {
-        clientName: blank("clientName") && d.clientName ? d.clientName : p.clientName,
-        clientPhone: blank("clientPhone") && d.clientPhone ? d.clientPhone : p.clientPhone,
-        clientEmail: blank("clientEmail") && d.clientEmail ? d.clientEmail : p.clientEmail,
-        clientAddress: blank("clientAddress") && d.clientAddress ? d.clientAddress : p.clientAddress,
-        category: d.category, jobTitle: d.jobTitle || p.jobTitle,
-        description: d.projectSummary || p.description,
-        scopeItems: d.scope.map((t) => ({ id: uid(), text: t, on: true, ai: true })),
-        scopeSource: d.category, scopeEdited: true,
-        crew: d.labor.crew, days: d.labor.days, hoursPerDay: d.labor.hoursPerDay,
-        items: d.materials.map((m) => ({ id: uid(), desc: m.desc, qty: m.qty, unit: m.unit, price: m.unitCost, ai: true })),
-        assessment: d.findings.map((f) => ({ id: uid(), title: f.title, detail: f.detail, priority: f.priority, photo: f.photo, photoUrl: photoUrl(f.photo), on: true })),
-        attachments: (p.attachments || []).concat(newAtt),
-        aiDraft: {
-          at: new Date().toISOString(), by: me.name, model: d.model, confidence: d.confidence, confidenceReason: d.confidenceReason,
-          needsSiteVisit: d.needsSiteVisit, measurements: d.measurements, assumptions: d.assumptions,
-          questions: d.questions, risks: d.risks, laborBasis: d.labor.basis, photoCount: d.photoCount,
-          timeline: d.timeline || "", budgetMentioned: d.budgetMentioned || "",
-        },
-        replyTemplate: d.replyTemplate || p.replyTemplate || "",
-        aiDrafted: true,
-        history: (p.history || []).concat([{ at: new Date().toISOString(), by: me.name, action: "Applied AI draft (" + d.confidence + " confidence, " + (d.photoCount || 0) + " photos)" }]),
-      });
+        await withTimeout(ref.put(dataUrlToBlob(sh.dataUrl), { contentType: "image/jpeg" }), 25000);
+        const url = await withTimeout(ref.getDownloadURL(), 10000);
+        setDirty(true);
+        setQ((p) => Object.assign({}, p, {
+          attachments: (p.attachments || []).map((a) => (a.id === att.id ? Object.assign({}, a, { url, path }) : a)),
+        }));
+      } catch (e) {
+        warn("full-size photo upload (the small copy is kept)")(e);
+      }
     });
-    notify("AI draft applied — check the sizes and prices, then submit.");
+  };
+
+  const attachShots = (shots, kind) => {
+    const atts = attachFrom(shots, kind);
+    setDirty(true);
+    setQ((p) => Object.assign({}, p, { attachments: (p.attachments || []).concat(atts) }));
+    uploadInBackground(shots, atts);
+  };
+
+  /* Applies an AI draft to the quote, then opens the client-ready preview.
+     Client fields only fill blanks; the work — scope, crew, materials,
+     assessment, exclusions — comes from the draft. */
+  const applyDraft = (d, shots) => {
+    const referenced = new Set(d.findings.map((f) => f.photo).filter((n) => n > 0));
+    const atts = attachFrom(shots || [], "photo", referenced);
+    const blank = (k) => !String(q[k] || "").trim();
+    const off = new Set(d.exclusionsOff || []);
+    const next = Object.assign({}, q, {
+      clientName: blank("clientName") && d.clientName ? d.clientName : q.clientName,
+      clientPhone: blank("clientPhone") && d.clientPhone ? d.clientPhone : q.clientPhone,
+      clientEmail: blank("clientEmail") && d.clientEmail ? d.clientEmail : q.clientEmail,
+      clientAddress: blank("clientAddress") && d.clientAddress ? d.clientAddress : q.clientAddress,
+      category: d.category, jobTitle: d.jobTitle || q.jobTitle,
+      description: d.projectSummary || q.description,
+      scopeItems: d.scope.map((x) => (typeof x === "string"
+        ? { id: uid(), text: x, on: true, ai: true, standard: 0 }
+        : { id: uid(), text: x.text, on: x.on !== false, ai: true, standard: x.standard || 0 })),
+      scopeSource: d.category, scopeEdited: true,
+      exclusions: STANDARD_EXCLUSIONS.map((t, i) => ({ id: uid(), text: t, on: !off.has(i + 1) })),
+      crew: d.labor.crew, days: d.labor.days, hoursPerDay: d.labor.hoursPerDay,
+      items: d.materials.map((m) => ({ id: uid(), desc: m.desc, qty: m.qty, unit: m.unit, price: m.unitCost, ai: true })),
+      assessment: d.findings.map((f) => ({
+        id: uid(), title: f.title, detail: f.detail, priority: f.priority, photo: f.photo,
+        attId: f.photo > 0 && atts[f.photo - 1] ? atts[f.photo - 1].id : "", photoUrl: "", on: true,
+      })),
+      attachments: (q.attachments || []).concat(atts),
+      aiDraft: {
+        at: new Date().toISOString(), by: me.name, model: d.model, confidence: d.confidence, confidenceReason: d.confidenceReason,
+        needsSiteVisit: d.needsSiteVisit, measurements: d.measurements, assumptions: d.assumptions,
+        questions: d.questions, risks: d.risks, laborBasis: d.labor.basis, photoCount: d.photoCount,
+        timeline: d.timeline || "", budgetMentioned: d.budgetMentioned || "",
+      },
+      replyTemplate: d.replyTemplate || q.replyTemplate || "",
+      aiDrafted: true,
+      updatedAt: new Date().toISOString(),
+      history: (q.history || []).concat([{ at: new Date().toISOString(), by: me.name, action: "Applied AI draft (" + d.confidence + " confidence, " + (d.photoCount || 0) + " photos)" }]),
+    });
+    setDirty(true);
+    setQ(next);
+    // Save it right away rather than waiting for the autosave tick.
+    if (!locked) onAutosave(next);
+    uploadInBackground(shots || [], atts);
+    try { window.scrollTo({ top: 0, behavior: "smooth" }); } catch {}
+    notify("AI draft applied — here's the client-ready quote.");
+    setTimeout(() => onPreview(next), 250);
   };
 
   const assessment = q.assessment || [];
@@ -1638,8 +1535,8 @@ function QuoteForm({ me, isOwner, isManager, settings, notify, existing, onSave,
               <div className="flex gap-2 flex-wrap">
                 {attachments.map((a, i) => (
                   <div key={i} style={{ textAlign: "center" }}>
-                    <a href={a.url} target="_blank" rel="noopener noreferrer" title={"Added by " + (a.by || "unknown") + " · " + fmtDate(a.at)}>
-                      <img src={a.url} alt="" style={{ width: 64, height: 64, objectFit: "cover", borderRadius: 6, border: `2px solid ${a.show ? BRAND.gold : BRAND.line}` }} />
+                    <a href={a.url || undefined} target="_blank" rel="noopener noreferrer" title={"Added by " + (a.by || "unknown") + " · " + fmtDate(a.at) + (a.url ? "" : " · small copy only")}>
+                      <img src={attSrc(a)} alt="" style={{ width: 64, height: 64, objectFit: "cover", borderRadius: 6, border: `2px solid ${a.show ? BRAND.gold : BRAND.line}` }} />
                     </a>
                     {!locked && (
                       <label style={{ display: "block", fontSize: 10.5, color: a.show ? BRAND.navy : BRAND.sub, fontWeight: 700, cursor: "pointer", marginTop: 2 }}>
@@ -1687,7 +1584,7 @@ function QuoteForm({ me, isOwner, isManager, settings, notify, existing, onSave,
             {assessment.map((a) => (
               <div key={a.id} className="flex gap-2 mb-3 items-start">
                 <input type="checkbox" disabled={locked} checked={a.on} onChange={() => setAssess(a.id, { on: !a.on })} style={{ width: 18, height: 18, flexShrink: 0, marginTop: 10, cursor: "pointer" }} />
-                {a.photoUrl ? <img src={a.photoUrl} alt="" style={{ width: 52, height: 52, objectFit: "cover", borderRadius: 6, flexShrink: 0 }} /> : null}
+                {findingPhoto(a, q) ? <img src={findingPhoto(a, q)} alt="" style={{ width: 52, height: 52, objectFit: "cover", borderRadius: 6, flexShrink: 0 }} /> : null}
                 <div style={{ flex: 1, opacity: a.on ? 1 : 0.45 }}>
                   <div className="flex gap-2 mb-1">
                     <input style={Object.assign({}, inputStyle, { flex: 1, padding: "7px 10px", fontSize: 14, fontWeight: 600 })} disabled={locked} value={a.title} onChange={(e) => setAssess(a.id, { title: e.target.value })} placeholder="What was found" />
@@ -1859,7 +1756,8 @@ function QuoteForm({ me, isOwner, isManager, settings, notify, existing, onSave,
 
             <div className="flex flex-col gap-2 mt-4">
               <Btn kind="gold" onClick={() => onPreview(Object.assign({}, q))}>Preview client quote</Btn>
-              {!locked && <Btn onClick={() => save(true)}>{isManager ? "Save & approve" : "Submit for review"}</Btn>}
+              {!locked && isManager && <Btn onClick={() => save(true, { preview: true })}>Approve & create PDF</Btn>}
+              {!locked && <Btn kind={isManager ? "ghost" : "primary"} onClick={() => save(true)}>{isManager ? "Save & approve" : "Submit for review"}</Btn>}
               {/* Reviewing someone else's work: send it back or kill it,
                   without having to go to the Team & review tab. */}
               {canReview && <Btn kind="danger" onClick={sendBack}>Request changes</Btn>}
@@ -2397,14 +2295,71 @@ function PreviewModal({ quote, settings, users, me, onClose }) {
   }, [quote.quoteNo, me]);
   useEffect(() => { logActivity(me ? me.name : "Unknown", "Previewed quote", quote.quoteNo); }, []);
   const doPrint = () => { logActivity(me ? me.name : "Unknown", "Printed / saved PDF", quote.quoteNo); window.print(); };
+
+  /* A real PDF file, ready to attach to a text, email or Thumbtack message. */
+  const [pdfBusy, setPdfBusy] = useState("");
+  const [pdfErr, setPdfErr] = useState("");
+  const fileName = (quote.quoteNo + " " + (quote.clientName || "Client") + " - JTProconstruction Quote").replace(/[^\w .\-]+/g, "").trim() + ".pdf";
+  const makePdf = async () => {
+    const lib = await loadHtml2pdf();
+    const el = document.getElementById("print-doc");
+    return lib().set({
+      margin: [6, 6, 8, 6],
+      filename: fileName,
+      image: { type: "jpeg", quality: 0.92 },
+      html2canvas: { scale: 2, useCORS: true, backgroundColor: "#ffffff" },
+      jsPDF: { unit: "mm", format: "letter", orientation: "portrait" },
+      pagebreak: { mode: ["css", "legacy"], avoid: ["tr", "li", ".keep-together"] },
+    }).from(el).outputPdf("blob");
+  };
+  const downloadPdf = async () => {
+    setPdfErr(""); setPdfBusy("download");
+    try {
+      const blob = await makePdf();
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob); a.download = fileName;
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+      logActivity(me ? me.name : "Unknown", "Downloaded PDF", quote.quoteNo);
+    } catch (e) { setPdfErr(e.message || "Couldn't make the PDF."); }
+    setPdfBusy("");
+  };
+  const canShareFiles = typeof navigator !== "undefined" && !!navigator.share && !!navigator.canShare;
+  const sharePdf = async () => {
+    setPdfErr(""); setPdfBusy("share");
+    try {
+      const blob = await makePdf();
+      const file = new File([blob], fileName, { type: "application/pdf" });
+      if (!navigator.canShare({ files: [file] })) throw new Error("This device can't share files — use Download PDF instead.");
+      const first = (quote.clientName || "").split(" ")[0];
+      await navigator.share({
+        files: [file], title: fileName,
+        text: "Hi" + (first ? " " + first : "") + ", here is your quote from JTProconstruction (" + quote.quoteNo + "). Let me know if you have any questions. — Joel",
+      });
+      logActivity(me ? me.name : "Unknown", "Shared PDF", quote.quoteNo);
+    } catch (e) {
+      if (e && e.name !== "AbortError") setPdfErr(e.message || "Couldn't share the PDF.");
+    }
+    setPdfBusy("");
+  };
   const validUntil = new Date(new Date(quote.createdAt).getTime() + 30 * 864e5);
   const goldLabel = { fontSize: 11, fontWeight: 700, letterSpacing: "0.1em", color: BRAND.gold };
   return (
     <div style={{ position: "fixed", inset: 0, background: "rgba(11,31,58,0.75)", zIndex: 50, overflowY: "auto", padding: "24px 12px" }} onClick={onClose}>
       <div style={{ maxWidth: 720, margin: "0 auto" }} onClick={(e) => e.stopPropagation()}>
-        <div className="flex justify-end gap-2 mb-2">
+        {pdfErr && <div style={{ background: "#F9E5E3", color: BRAND.red, borderRadius: 8, padding: "8px 12px", fontSize: 13, fontWeight: 600, marginBottom: 8 }}>{pdfErr}</div>}
+        {!releasable && !voided && isOwnerViewer && (
+          <div style={{ background: "#FBF3DE", color: BRAND.amber, borderRadius: 8, padding: "8px 12px", fontSize: 12.5, fontWeight: 700, marginBottom: 8 }}>
+            Not approved yet — a PDF made now carries the DRAFT watermark. Close this, click "Approve & create PDF", and you get a clean copy to send.
+          </div>
+        )}
+        <div className="flex justify-end gap-2 mb-2 flex-wrap">
           {canPrint
-            ? <Btn small kind="gold" onClick={doPrint}>Print / Save as PDF</Btn>
+            ? <React.Fragment>
+                {canShareFiles && <Btn small kind="gold" onClick={sharePdf} disabled={!!pdfBusy}>{pdfBusy === "share" ? "Making PDF…" : "Share PDF"}</Btn>}
+                <Btn small kind={canShareFiles ? "primary" : "gold"} onClick={downloadPdf} disabled={!!pdfBusy}>{pdfBusy === "download" ? "Making PDF…" : "Download PDF"}</Btn>
+                <button onClick={doPrint} style={{ background: "transparent", color: "#fff", border: "1.5px solid rgba(255,255,255,0.5)", padding: "6px 14px", borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: "pointer" }}>Print</button>
+              </React.Fragment>
             : <span style={{ background: voided ? "#EDE7DC" : "#FBF3DE", color: voided ? "#7A6A55" : BRAND.amber, padding: "7px 14px", borderRadius: 8, fontSize: 13, fontWeight: 700 }}>{voided ? "This quote is void and cannot be printed" : "Printing unlocks after owner approval"}</span>}
           <button onClick={onClose} style={{ background: "transparent", color: "#fff", border: "1.5px solid rgba(255,255,255,0.5)", padding: "6px 14px", borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: "pointer" }}>Close</button>
         </div>
@@ -2468,7 +2423,7 @@ function PreviewModal({ quote, settings, users, me, onClose }) {
               <div style={Object.assign({}, goldLabel, { marginBottom: 6 })}>SITE ASSESSMENT</div>
               {(quote.assessment || []).filter((a) => a.on && a.title.trim()).map((a) => (
                 <div key={a.id} style={{ display: "flex", gap: 10, alignItems: "flex-start", marginBottom: 8, breakInside: "avoid" }}>
-                  {a.photoUrl ? <img src={a.photoUrl} alt="" style={{ width: 64, height: 64, objectFit: "cover", borderRadius: 4, flexShrink: 0 }} /> : null}
+                  {findingPhoto(a, quote) ? <img src={pdfSrc(findingPhoto(a, quote))} alt="" style={{ width: 64, height: 64, objectFit: "cover", borderRadius: 4, flexShrink: 0 }} /> : null}
                   <div style={{ fontSize: 13, lineHeight: 1.5 }}>
                     <strong>{a.title}</strong>
                     {PRIORITY[a.priority] ? <span style={{ fontSize: 10.5, fontWeight: 700, color: PRIORITY[a.priority].color, marginLeft: 6, letterSpacing: "0.04em" }}>{PRIORITY[a.priority].label.toUpperCase()}</span> : null}
@@ -2551,8 +2506,8 @@ function PreviewModal({ quote, settings, users, me, onClose }) {
             <div style={{ marginTop: 18, breakInside: "avoid" }}>
               <div style={Object.assign({}, goldLabel, { marginBottom: 6 })}>PHOTO REFERENCE</div>
               <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(140px, 1fr))", gap: 8 }}>
-                {(quote.attachments || []).filter((a) => a.show).map((a, i) => (
-                  <img key={i} src={a.url} alt={"Site photo " + (i + 1)} style={{ width: "100%", height: 110, objectFit: "cover", borderRadius: 4, border: `1px solid ${BRAND.line}` }} />
+                {(quote.attachments || []).filter((a) => a.show && attSrc(a)).map((a, i) => (
+                  <img key={i} src={a.thumb || pdfSrc(a.url)} alt={"Site photo " + (i + 1)} style={{ width: "100%", height: 110, objectFit: "cover", borderRadius: 4, border: `1px solid ${BRAND.line}` }} />
                 ))}
               </div>
             </div>

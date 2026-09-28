@@ -59,6 +59,9 @@
     },
     "api/notify.js": {
       "maxDuration": 30
+    },
+    "api/img.js": {
+      "maxDuration": 20
     }
   }
 }

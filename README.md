@@ -29,6 +29,8 @@ It runs in one of two modes, decided by `config.js`:
 | `index.html` | The built app that Vercel serves. **Generated — do not edit by hand.** |
 | `config.js` | Firebase settings and the owner's email. The one file you edit to go live. |
 | `firestore.rules` | Database security rules. Paste these into Firebase. |
+| `src/scope-templates.js` | Standard scope steps and exclusions — shared by the app and the AI. Edit here, then `npm run build`. |
+| `api/img.js` | Serves quote photos from this site so they can be drawn into PDFs. |
 | `storage.rules` | Rules for the lead screenshots. Paste these into Firebase Storage. |
 | `api/_lib.js` | Shared server helpers. Not reachable from the web (Vercel ignores `_` files). |
 | `api/ai-quote.js` | Drafts a full quote from job photos and/or a lead. Holds no secrets. |
@@ -65,15 +67,23 @@ client fields.
 3. **Detect work & draft quote.** In 20–60 seconds you get:
    - **What it found** — each issue, tied to the photo that shows it, marked
      urgent / recommended / cosmetic
-   - a detailed, job-specific **scope of work**
+   - the **scope of work**: every standard step for that job type is ticked
+     (and tailored to this job) or unticked if it doesn't apply, plus
+     job-specific steps the template doesn't cover. Irrelevant "Not included"
+     lines are unticked too.
    - **crew and days**, with the reasoning
    - **materials at contractor cost**, itemised with quantities and units
    - the **sizes the price rests on**, each labelled *customer stated*,
      *estimated from photo* or *assumed*
    - **questions to ask the client**, internal assumptions and risks
    - a **first reply** to the customer with a price range
-4. **Use this draft** fills the quote. Photos are saved on it, and the ones
-   that show a finding are ticked to print as a photo reference.
+4. **Use this draft** fills the quote instantly and opens the client-ready
+   preview. Photos are kept on the quote as small copies straight away (so they
+   show even without Firebase Storage); full-size originals upload to Storage
+   in the background when it's set up.
+5. **Approve & create PDF** (owner/assistant) approves and opens the finished
+   quote. **Download PDF** saves a real PDF file; on a phone, **Share PDF** sends
+   it straight to Messages, WhatsApp, email or Thumbtack.
 
 **The AI never sets the price.** It sizes labor and lists materials at cost;
 the quote's own labor rate, overhead and margin produce the total, exactly
@@ -92,8 +102,10 @@ client's details out of a lead screenshot.
 1. Get an API key from [console.anthropic.com](https://console.anthropic.com).
 2. In Vercel: **Project → Settings → Environment Variables**, add
    `ANTHROPIC_API_KEY` with that key, for all environments. Redeploy.
-3. In Firebase Console → **Storage** → Get started (if you haven't already),
-   then **Rules** → paste `storage.rules` → Publish.
+3. Optional — full-size photo originals: Firebase Console → **Storage** → Get
+   started (new projects need the Blaze pay-as-you-go plan for this; usage at
+   this size is normally within the free tier), then **Rules** → paste
+   `storage.rules` → Publish. Without it, quotes keep small photo copies.
 
 Optional environment variables: `QUOTE_MODEL` for the drafting model
 (default `claude-sonnet-5`), `CLAUDE_MODEL` for the lead reader,
