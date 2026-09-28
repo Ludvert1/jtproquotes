@@ -2949,7 +2949,7 @@ function QuoteForm({
     scopeEdited: false,
     exclusions: buildExclusions(),
     crew: 2,
-    days: 1,
+    days: 0,
     hoursPerDay: 8,
     laborRate: settings.laborRate,
     items: [],
@@ -3059,6 +3059,7 @@ function QuoteForm({
   const rmItem = id => set("items", q.items.filter(it => it.id !== id));
   const save = async (submit, opts) => {
     if (!q.clientName.trim()) return alert("Enter the client's name.");
+    if (submit && !(Number(q.days) > 0) && !(q.items || []).length) return alert("Add the days on site (or materials) before submitting — the quote is still $0.");
     const next = Object.assign({}, q, {
       updatedAt: new Date().toISOString()
     });
@@ -3750,7 +3751,7 @@ function QuoteForm({
   }), React.createElement(Stepper, {
     label: "Days on site",
     value: q.days,
-    min: 1,
+    min: 0,
     unit: q.days === 1 ? "day" : "days",
     onChange: v => set("days", v)
   }), React.createElement(Stepper, {
@@ -3997,7 +3998,16 @@ function QuoteForm({
     style: Object.assign({}, h3Style, {
       marginBottom: 12
     })
-  }, "QUOTE SUMMARY"), q.aiDraft && React.createElement("div", {
+  }, "QUOTE SUMMARY"), c.total === 0 && !q.aiDraft && React.createElement("div", {
+    style: {
+      background: BRAND.paper,
+      borderRadius: 8,
+      padding: "8px 10px",
+      fontSize: 12.5,
+      color: BRAND.sub,
+      marginBottom: 12
+    }
+  }, "Nothing priced yet. Set the days on site and materials, or use the AI assistant at the top."), q.aiDraft && React.createElement("div", {
     style: {
       background: q.aiDraft.confidence === "high" ? "#E2F2E9" : q.aiDraft.confidence === "medium" ? "#FBF3DE" : "#F9E5E3",
       borderRadius: 8,
@@ -4055,7 +4065,7 @@ function QuoteForm({
     style: {
       color: BRAND.sub
     }
-  }, React.createElement("span", null, "Deposit due (50%)"), React.createElement("span", null, money(c.deposit))), React.createElement("div", {
+  }, React.createElement("span", null, "Deposit due (50%)"), React.createElement("span", null, money(c.deposit))), c.total > 0 && React.createElement("div", {
     style: {
       marginTop: 14,
       background: BRAND.paper,

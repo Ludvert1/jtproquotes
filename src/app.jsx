@@ -1458,7 +1458,8 @@ function QuoteForm({ me, isOwner, isManager, settings, notify, existing, onSave,
     category: CATEGORIES[0], jobTitle: "", description: "",
     scopeItems: buildScope(CATEGORIES[0]), scopeSource: CATEGORIES[0], scopeEdited: false,
     exclusions: buildExclusions(),
-    crew: 2, days: 1, hoursPerDay: 8, laborRate: settings.laborRate,
+    // No days yet: a blank quote shows $0 until the work is entered or drafted.
+    crew: 2, days: 0, hoursPerDay: 8, laborRate: settings.laborRate,
     items: [], overheadPct: settings.overheadPct, marginPct: settings.targetMargin,
     discountPct: 0, notes: "", history: [{ at: new Date().toISOString(), by: me.name, action: "Created" }],
   });
@@ -1499,6 +1500,7 @@ function QuoteForm({ me, isOwner, isManager, settings, notify, existing, onSave,
 
   const save = async (submit, opts) => {
     if (!q.clientName.trim()) return alert("Enter the client's name.");
+    if (submit && !(Number(q.days) > 0) && !(q.items || []).length) return alert("Add the days on site (or materials) before submitting — the quote is still $0.");
     const next = Object.assign({}, q, { updatedAt: new Date().toISOString() });
     if (submit) {
       next.status = isManager ? "approved" : "pending";
@@ -1827,7 +1829,7 @@ function QuoteForm({ me, isOwner, isManager, settings, notify, existing, onSave,
           <h3 style={h3Style}>5 · CREW & LABOR</h3>
           <div className="grid grid-cols-2 md-grid-cols-3 gap-4 mb-4">
             <Stepper label="Crew members" value={q.crew} min={1} unit={q.crew === 1 ? "person" : "people"} onChange={(v) => set("crew", v)} />
-            <Stepper label="Days on site" value={q.days} min={1} unit={q.days === 1 ? "day" : "days"} onChange={(v) => set("days", v)} />
+            <Stepper label="Days on site" value={q.days} min={0} unit={q.days === 1 ? "day" : "days"} onChange={(v) => set("days", v)} />
             <Stepper label="Hours per day" value={q.hoursPerDay} min={1} unit="hrs" onChange={(v) => set("hoursPerDay", v)} />
           </div>
           <div className="grid md-grid-cols-2 gap-x-4 items-end">
@@ -1905,6 +1907,11 @@ function QuoteForm({ me, isOwner, isManager, settings, notify, existing, onSave,
         <div style={{ position: "sticky", top: 16 }}>
           <Card style={{ borderTop: `4px solid ${BRAND.gold}` }}>
             <h3 style={Object.assign({}, h3Style, { marginBottom: 12 })}>QUOTE SUMMARY</h3>
+            {c.total === 0 && !q.aiDraft && (
+              <div style={{ background: BRAND.paper, borderRadius: 8, padding: "8px 10px", fontSize: 12.5, color: BRAND.sub, marginBottom: 12 }}>
+                Nothing priced yet. Set the days on site and materials, or use the AI assistant at the top.
+              </div>
+            )}
             {q.aiDraft && (
               <div style={{ background: q.aiDraft.confidence === "high" ? "#E2F2E9" : q.aiDraft.confidence === "medium" ? "#FBF3DE" : "#F9E5E3", borderRadius: 8, padding: "8px 10px", fontSize: 12, marginBottom: 12, color: BRAND.ink }}>
                 <strong>AI draft · {q.aiDraft.confidence} confidence.</strong> {q.aiDraft.needsSiteVisit ? "Site visit recommended. " : ""}
@@ -1927,7 +1934,7 @@ function QuoteForm({ me, isOwner, isManager, settings, notify, existing, onSave,
             </div>
             <div className="flex justify-between text-sm mt-1" style={{ color: BRAND.sub }}><span>Deposit due (50%)</span><span>{money(c.deposit)}</span></div>
 
-            <div style={{ marginTop: 14, background: BRAND.paper, borderRadius: 10, padding: 12 }}>
+            {c.total > 0 && <div style={{ marginTop: 14, background: BRAND.paper, borderRadius: 10, padding: 12 }}>
               <div className="flex justify-between text-sm"><span style={{ color: BRAND.sub }}>Your cost</span><span>{money(c.totalCost)}</span></div>
               <div className="flex justify-between text-sm"><span style={{ color: BRAND.sub }}>Profit</span><span style={{ fontWeight: 700 }}>{money(c.profit)}</span></div>
               <div style={{ marginTop: 8, height: 8, background: "#E6E2D8", borderRadius: 99, overflow: "hidden" }}>
@@ -1935,7 +1942,7 @@ function QuoteForm({ me, isOwner, isManager, settings, notify, existing, onSave,
               </div>
               <div style={{ fontSize: 12, marginTop: 6, fontWeight: 700, color: health.color }}>{c.realMargin.toFixed(1)}% margin — {health.label}</div>
               <div style={{ fontSize: 11, color: BRAND.sub, marginTop: 2 }}>Profit numbers are internal only — they never appear on the client's quote.</div>
-            </div>
+            </div>}
 
             <div className="flex flex-col gap-2 mt-4">
               <Btn kind="gold" onClick={() => onPreview(Object.assign({}, q))}>Preview client quote</Btn>
