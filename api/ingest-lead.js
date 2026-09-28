@@ -21,7 +21,11 @@ const crypto = require("crypto");
 const {
   bad, uid, parseBody, extractLead, sendEmail,
   STANDARD_EXCLUSIONS, createDocAsServer, listDocsAsServer,
+  draftQuote, draftToQuoteFields, quoteTotal, renderReply, priceRange,
+  uploadImageAsServer, checkImages,
 } = require("./_lib");
+
+const money = (n) => "$" + Math.round(Number(n) || 0).toLocaleString("en-US");
 
 /* Compared in constant time so the secret can't be guessed a character
    at a time by watching how long the comparison takes. */
@@ -47,6 +51,10 @@ module.exports = async (req, res) => {
   const text = typeof body.text === "string" ? body.text.slice(0, 20000) : "";
   const messageId = typeof body.messageId === "string" ? body.messageId.slice(0, 200) : "";
 
+  // Photos the customer attached to the lead, sent along by the Gmail script.
+  const checked = checkImages(body.images, 4, 3_500_000);
+  const images = checked.error ? [] : checked.images;
+
   if (!text.trim() && !subject.trim()) return bad(res, 400, "Nothing to read — the email had no text.");
 
   /* The draft has to belong to somebody. It goes to the owner, who can
@@ -66,53 +74,89 @@ module.exports = async (req, res) => {
     return bad(res, 503, "Couldn't reach the database. " + e.message);
   }
 
-  let read;
-  try {
-    read = await extractLead({ text: (subject ? "Subject: " + subject + "\n\n" : "") + text, images: [] });
-  } catch (e) {
-    return bad(res, e.code || 502, e.message || "Couldn't read that email.");
-  }
-  const f = read.fields;
-
+  const leadText = (subject ? "Subject: " + subject + "\n\n" : "") + text;
   const now = new Date().toISOString();
   const id = uid() + uid();
   const quoteNo = "Q-" + new Date().getFullYear() + "-" + Math.floor(1000 + Math.random() * 9000);
 
-  /* Sizes, timing and budget the customer mentioned go in the notes, marked as
-     the customer's own words. They never touch the pricing — a quote priced off
-     an unverified number is a loss waiting to happen. */
-  const notes = [
-    "— Filed automatically from a lead email —",
-    f.sourcePlatform ? "Source: " + f.sourcePlatform : (from ? "From: " + from : ""),
-    subject ? "Subject: " + subject : "",
-    f.measurements && f.measurements.length ? "Customer stated: " + f.measurements.join("; ") + " (their words — verify on site)" : "",
-    f.timeline ? "Timeline: " + f.timeline : "",
-    f.budgetMentioned ? "Budget named: " + f.budgetMentioned : "",
-    f.missing && f.missing.length ? "Not in the email, still to confirm: " + f.missing.join(", ") : "",
-    f.notes ? "Watch out: " + f.notes : "",
-  ].filter(Boolean).join("\n");
+  /* First choice: a full AI draft — scope, crew, materials, questions and a
+     reply ready to paste into Thumbtack. If that fails for any reason, fall
+     back to the plain read so the lead is never lost. */
+  let d = null;
+  try {
+    d = (await draftQuote({ text: leadText, images, settings })).draft;
+  } catch (e) {
+    console.error("[ingest-lead] draft failed, falling back to a plain read:", e.message);
+  }
 
-  const quote = {
-    id, quoteNo, createdBy: ownerUid, createdAt: now, updatedAt: now,
-    status: "draft",
-    clientName: f.clientName || (subject ? subject.slice(0, 60) : "Unnamed lead"),
-    clientPhone: f.clientPhone, clientEmail: f.clientEmail, clientAddress: f.clientAddress,
-    category: f.category, jobTitle: f.jobTitle, description: f.description,
-    // Suggested steps arrive switched off. Somebody agrees to each one before
-    // it can appear on a client's quote.
-    scopeItems: (f.scopeSuggestions || []).map((t) => ({ id: uid(), text: t, on: false, fromLead: true })),
-    scopeSource: "", scopeEdited: true,
-    exclusions: STANDARD_EXCLUSIONS.map((t) => ({ id: uid(), text: t, on: true })),
-    crew: 2, days: 1, hoursPerDay: 8,
-    laborRate: (settings && settings.laborRate) || 45,
-    items: [],
-    overheadPct: (settings && settings.overheadPct) != null ? settings.overheadPct : 12,
-    marginPct: (settings && settings.targetMargin) != null ? settings.targetMargin : 25,
-    discountPct: 0,
-    notes,
-    fromInbox: true, leadSource: f.sourcePlatform || "email", leadMessageId: messageId, leadReadAt: now,
-    history: [{ at: now, by: "Lead inbox", action: "Filed from a lead email" }],
-  };
+  let quote;
+  if (d) {
+    const attachments = [];
+    for (let i = 0; i < images.length; i++) {
+      try {
+        const path = `leads/${ownerUid}/${id}/${Date.now()}-${i}.jpg`;
+        const url = await uploadImageAsServer(path, images[i].data, images[i].mediaType);
+        attachments.push({ path, url, at: now, by: "Lead inbox" });
+      } catch (e) { console.error("[ingest-lead] photo upload failed:", e.message); }
+    }
+    const fields = draftToQuoteFields(d, settings, uid);
+    const notes = [
+      d.timeline ? "Timeline: " + d.timeline : "",
+      d.budgetMentioned ? "Budget named: " + d.budgetMentioned : "",
+    ].filter(Boolean).join("\n");
+    quote = Object.assign({
+      id, quoteNo, createdBy: ownerUid, createdAt: now, updatedAt: now, status: "draft",
+      clientName: d.clientName || (subject ? subject.slice(0, 60) : "Unnamed lead"),
+      clientPhone: d.clientPhone, clientEmail: d.clientEmail, clientAddress: d.clientAddress,
+      exclusions: STANDARD_EXCLUSIONS.map((t) => ({ id: uid(), text: t, on: true })),
+      notes, attachments,
+      fromInbox: true, leadSource: d.sourcePlatform || "email", leadMessageId: messageId, leadReadAt: now,
+      leadText: leadText.slice(0, 8000),
+      history: [{ at: now, by: "Lead inbox", action: "Filed from a lead email and drafted by AI" }],
+    }, fields);
+  } else {
+    let read;
+    try {
+      read = await extractLead({ text: leadText, images: [] });
+    } catch (e) {
+      return bad(res, e.code || 502, e.message || "Couldn't read that email.");
+    }
+    const f = read.fields;
+
+    /* Sizes, timing and budget the customer mentioned go in the notes, marked as
+       the customer's own words. */
+    const notes = [
+      "— Filed automatically from a lead email —",
+      f.sourcePlatform ? "Source: " + f.sourcePlatform : (from ? "From: " + from : ""),
+      subject ? "Subject: " + subject : "",
+      f.measurements && f.measurements.length ? "Customer stated: " + f.measurements.join("; ") + " (their words — verify on site)" : "",
+      f.timeline ? "Timeline: " + f.timeline : "",
+      f.budgetMentioned ? "Budget named: " + f.budgetMentioned : "",
+      f.missing && f.missing.length ? "Not in the email, still to confirm: " + f.missing.join(", ") : "",
+      f.notes ? "Watch out: " + f.notes : "",
+    ].filter(Boolean).join("\n");
+
+    quote = {
+      id, quoteNo, createdBy: ownerUid, createdAt: now, updatedAt: now,
+      status: "draft",
+      clientName: f.clientName || (subject ? subject.slice(0, 60) : "Unnamed lead"),
+      clientPhone: f.clientPhone, clientEmail: f.clientEmail, clientAddress: f.clientAddress,
+      category: f.category, jobTitle: f.jobTitle, description: f.description,
+      scopeItems: (f.scopeSuggestions || []).map((t) => ({ id: uid(), text: t, on: false, fromLead: true })),
+      scopeSource: "", scopeEdited: true,
+      exclusions: STANDARD_EXCLUSIONS.map((t) => ({ id: uid(), text: t, on: true })),
+      crew: 2, days: 1, hoursPerDay: 8,
+      laborRate: (settings && settings.laborRate) || 45,
+      items: [],
+      overheadPct: (settings && settings.overheadPct) != null ? settings.overheadPct : 12,
+      marginPct: (settings && settings.targetMargin) != null ? settings.targetMargin : 25,
+      discountPct: 0,
+      notes,
+      fromInbox: true, leadSource: f.sourcePlatform || "email", leadMessageId: messageId, leadReadAt: now,
+      leadText: leadText.slice(0, 8000),
+      history: [{ at: now, by: "Lead inbox", action: "Filed from a lead email" }],
+    };
+  }
 
   try {
     await createDocAsServer("quotes", id, quote);
@@ -127,24 +171,38 @@ module.exports = async (req, res) => {
     });
   } catch { /* the log is useful, not essential */ }
 
-  // Tell the team a lead landed, using the same mail route as approvals.
+  const total = d ? quoteTotal(quote, settings) : 0;
+  const reply = d ? renderReply(quote.replyTemplate, total, d.confidence) : "";
+
+  // Tell the team a lead landed, with the reply ready to paste into Thumbtack.
   await sendEmail({
-    subject: `New lead filed — ${quote.clientName} · ${quote.category}`,
+    subject: d
+      ? `New lead drafted — ${quote.clientName} · ${quote.category} · ${priceRange(total, d.confidence)}`
+      : `New lead filed — ${quote.clientName} · ${quote.category}`,
     message: [
-      `A lead email came in and is now a draft quote in JTProQuotes, waiting to be priced.`,
+      d ? "A lead came in and JTProQuotes has drafted a quote for it. Nothing has been sent to the customer."
+        : "A lead email came in and is now a draft quote in JTProQuotes, waiting to be priced.",
       "",
       `Quote:    ${quoteNo}`,
       `Client:   ${quote.clientName}`,
       `Phone:    ${quote.clientPhone || "(not in the email)"}`,
       `Address:  ${quote.clientAddress || "(not in the email)"}`,
       `Job:      ${quote.jobTitle || quote.category}`,
+      d ? `Draft:    ${money(total)} (${d.confidence} confidence${d.needsSiteVisit ? ", site visit recommended" : ""})` : "",
+      d ? `Crew:     ${quote.crew} for ${quote.days} day(s) · ${quote.items.length} material lines · ${images.length} photo(s)` : "",
       "",
-      quote.description ? "What they asked for:\n" + quote.description.slice(0, 800) + "\n" : "",
-      `Filed under ${ownerName}'s drafts. It has no price on it yet and nothing has been sent.`,
+      d && d.questions.length ? "Still need from the customer:\n" + d.questions.map((x, i) => `  ${i + 1}. ${x}`).join("\n") + "\n" : "",
+      d ? "──── Reply to paste into Thumbtack (review first) ────\n" + reply + "\n────────────────────────────────────\n" : "",
+      d ? "Open JTProQuotes to check the numbers and approve it." : `Filed under ${ownerName}'s drafts. It has no price on it yet and nothing has been sent.`,
     ].filter((l) => l !== "").join("\n"),
-    replyTo: f.clientEmail || undefined,
+    replyTo: quote.clientEmail || undefined,
   });
 
-  console.log("[ingest-lead] filed " + quoteNo + " from " + (f.sourcePlatform || from || "email"));
-  return res.status(200).json({ ok: true, quoteNo, id, missing: f.missing });
+  console.log("[ingest-lead] filed " + quoteNo + " from " + (quote.leadSource || from || "email") + (d ? " drafted " + d.confidence : " unpriced"));
+  return res.status(200).json({
+    ok: true, quoteNo, id, drafted: !!d,
+    total: Math.round(total), range: d ? priceRange(total, d.confidence) : "",
+    reply, clientName: quote.clientName, clientEmail: quote.clientEmail || "",
+    questions: d ? d.questions : [],
+  });
 };

@@ -1,9 +1,18 @@
 /* ============================================================
    JTProQuotes — Gmail lead watcher (Google Apps Script)
 
-   Checks your Gmail for new lead emails and files each one as a draft
-   quote in JTProQuotes. Runs on Google's servers as you, so it needs
-   no Google Cloud project, no OAuth app, and no password anywhere.
+   Checks your Gmail for new Thumbtack (and other) lead emails. For
+   each one, JTProQuotes drafts a full quote — scope, crew, materials,
+   price — plus a first reply to the customer that answers with a
+   price range and asks for whatever is missing.
+
+   Nothing is ever sent to a customer automatically. You get an
+   email with the reply ready to paste into Thumbtack, and if the
+   customer's own email address is in the lead, a Gmail DRAFT to
+   them is waiting in your Drafts folder for you to check and send.
+
+   Runs on Google's servers as you, so it needs no Google Cloud
+   project, no OAuth app, and no password anywhere.
 
    ── SETUP (about ten minutes, once) ──────────────────────────
    1. Go to script.google.com and click "New project".
@@ -33,7 +42,9 @@ var ENDPOINT = "https://jtproquotes.vercel.app/api/ingest-lead";
 var SECRET = "paste-the-same-value-as-INGEST_SECRET-in-vercel";
 
 var SEARCHES = [
-  'from:thumbtack.com newer_than:2d -label:JTPQ-Filed',
+  // Thumbtack sends new leads and direct requests from thumbtack.com.
+  // Skip its marketing and billing mail — only real customer requests.
+  'from:thumbtack.com newer_than:2d -label:JTPQ-Filed -subject:(receipt OR invoice OR "weekly" OR "tips" OR "budget" OR "payment")',
   // Add more as you need them, one per line, each in quotes and comma-ended:
   // 'from:angi.com newer_than:2d -label:JTPQ-Filed',
   // 'subject:"new quote request" newer_than:2d -label:JTPQ-Filed',
@@ -43,6 +54,15 @@ var SEARCHES = [
 var LABEL_DONE = "JTPQ-Filed";
 var LABEL_FAILED = "JTPQ-Failed";
 var MAX_PER_RUN = 10; // a safety net — a flooded inbox can't run up a bill
+
+// Create a Gmail draft to the customer when the lead includes their email.
+// It is only a draft — you still read it and press Send yourself.
+var DRAFT_CUSTOMER_EMAIL = true;
+
+// Photos the customer attached come along so the AI can see the job.
+var MAX_PHOTOS = 4;
+var MIN_PHOTO_BYTES = 15000;      // skips logos and tracking pixels
+var MAX_PHOTO_BYTES = 800000;     // one big phone photo is plenty per slot
 
 /* The trigger calls this. */
 function checkForLeads() {
@@ -79,7 +99,8 @@ function fileOneLead(msg) {
     from: msg.getFrom() || "",
     text: body.slice(0, 18000),
     messageId: msg.getId(),
-    receivedAt: msg.getDate().toISOString()
+    receivedAt: msg.getDate().toISOString(),
+    images: photosFrom(msg)
   };
 
   try {
@@ -96,12 +117,38 @@ function fileOneLead(msg) {
     if (code === 200) {
       var out = {};
       try { out = JSON.parse(text); } catch (e) {}
-      return { ok: true, line: "FILED  " + (out.quoteNo || "?") + "  —  " + subject.slice(0, 60) };
+      var extra = "";
+      if (DRAFT_CUSTOMER_EMAIL && out.reply && out.clientEmail) {
+        try {
+          GmailApp.createDraft(out.clientEmail,
+            "Your project quote from JTProconstruction" + (out.quoteNo ? " (" + out.quoteNo + ")" : ""),
+            out.reply);
+          extra = "  · draft reply waiting in Gmail Drafts";
+        } catch (e) { extra = "  · couldn't create the Gmail draft: " + e.message; }
+      }
+      return { ok: true, line: "FILED  " + (out.quoteNo || "?") + (out.range ? "  " + out.range : "") + "  —  " + subject.slice(0, 60) + extra };
     }
     return { ok: false, line: "FAILED (" + code + ")  " + subject.slice(0, 60) + "  —  " + text.slice(0, 160) };
   } catch (e) {
     return { ok: false, line: "FAILED (network)  " + subject.slice(0, 60) + "  —  " + e.message };
   }
+}
+
+/* Image attachments and inline photos on the lead, as base64. Small images
+   (logos, icons) are skipped by size. */
+function photosFrom(msg) {
+  var out = [];
+  var atts = [];
+  try { atts = msg.getAttachments({ includeInlineImages: true, includeAttachments: true }); } catch (e) { return out; }
+  for (var i = 0; i < atts.length && out.length < MAX_PHOTOS; i++) {
+    var a = atts[i];
+    var type = String(a.getContentType() || "").toLowerCase();
+    if (["image/jpeg", "image/png", "image/webp", "image/gif"].indexOf(type) < 0) continue;
+    var size = a.getSize();
+    if (size < MIN_PHOTO_BYTES || size > MAX_PHOTO_BYTES) continue;
+    out.push({ mediaType: type, data: Utilities.base64Encode(a.getBytes()) });
+  }
+  return out;
 }
 
 /* Creates the label the first time it is needed. */

@@ -14,29 +14,12 @@
    exactly as before and no email goes out.
 ============================================================ */
 
-const { bad, parseBody, verifyCaller, getDocAs, listDocsAs, sendEmail } = require("./_lib");
+const { bad, parseBody, verifyCaller, getDocAs, listDocsAs, sendEmail, quoteTotal } = require("./_lib");
 
 const money = (n) => "$" + Math.round(Number(n) || 0).toLocaleString("en-US");
 
-/* Recomputed here rather than trusted from the request — the same shape the
-   app uses, so the figure in the email matches the figure on the screen. */
-function quoteTotal(q, s) {
-  const settings = s || {};
-  /* Mirrors computeQuote in src/app.jsx line for line, including the fact that
-     the labor rate is taken off the quote only — a quote with no rate on it
-     prices at zero there, and this has to agree or the email would quote a
-     different figure than the screen. */
-  const hours = (Number(q.crew) || 0) * (Number(q.days) || 0) * (Number(q.hoursPerDay) || 0);
-  const labor = hours * (Number(q.laborRate) || 0);
-  const materials = (q.items || []).reduce((sum, it) => sum + (Number(it.qty) || 0) * (Number(it.price) || 0), 0);
-  const base = labor + materials;
-  const overhead = base * ((Number(q.overheadPct != null ? q.overheadPct : settings.overheadPct) || 0) / 100);
-  const cost = base + overhead;
-  const marginPct = Number(q.marginPct != null ? q.marginPct : settings.targetMargin) || 0;
-  const withMargin = marginPct >= 100 ? cost : cost / (1 - marginPct / 100);
-  const discount = withMargin * ((Number(q.discountPct) || 0) / 100);
-  return Math.max(withMargin - discount, 0);
-}
+/* The total is recomputed from the stored quote with the shared formula in
+   _lib.js, never trusted from the request. */
 
 module.exports = async (req, res) => {
   if (req.method !== "POST") return bad(res, 405, "POST only.");
