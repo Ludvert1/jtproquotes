@@ -112,6 +112,21 @@ async function getDocAs(idToken, path) {
   return d && d.fields ? fromFields(d.fields) : null;
 }
 
+/* Creates or overwrites a document as the caller — the security rules
+   still decide whether they may. */
+async function setDocAs(idToken, path, data) {
+  const r = await fetch(`${DOCS}/${path}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json", Authorization: "Bearer " + idToken },
+    body: JSON.stringify({ fields: toFields(data) }),
+  });
+  if (!r.ok) {
+    const t = await r.text().catch(() => "");
+    throw new Error("Firestore refused the write (" + r.status + ") " + t.slice(0, 160));
+  }
+  return true;
+}
+
 async function listDocsAs(idToken, collection) {
   const out = [];
   let pageToken = "";
@@ -665,7 +680,7 @@ function checkImages(images, maxCount, maxTotal) {
 module.exports = {
   CATEGORIES, STANDARD_EXCLUSIONS, FB_PROJECT, DOCS,
   bad, uid, parseBody, verifyCaller,
-  toFields, fromFields, getDocAs, listDocsAs,
+  toFields, fromFields, getDocAs, setDocAs, listDocsAs,
   adminToken, createDocAsServer, listDocsAsServer,
   extractLead, sendEmail,
   QUOTE_MODEL, draftQuote, draftToQuoteFields, quoteTotal, priceRange, renderReply,

@@ -2278,9 +2278,13 @@ function AiAssistant({
   disabled,
   onApplyDraft,
   onApplyLead,
+  onStartJob,
   notify
 }) {
   const [open, setOpen] = useState(false);
+  const [job, setJob] = useState(null);
+  const [found, setFound] = useState(null);
+  const wakeRef = useRef(null);
   const [text, setText] = useState("");
   const [photos, setPhotos] = useState([]);
   const [busy, setBusy] = useState(null);
@@ -2338,37 +2342,141 @@ function AiAssistant({
     if (q.clientAddress) bits.push("Job address: " + q.clientAddress);
     return bits.join("\n");
   };
+  const holdScreen = async () => {
+    try {
+      if (navigator.wakeLock && !wakeRef.current) wakeRef.current = await navigator.wakeLock.request("screen");
+    } catch {}
+  };
+  const releaseScreen = () => {
+    try {
+      wakeRef.current && wakeRef.current.release();
+    } catch {}
+    wakeRef.current = null;
+  };
+  const sendJob = async (j, body) => {
+    const r = await fetch("/api/ai-quote", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify(body)
+    });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) {
+      const e = new Error(data.error || (r.status === 413 ? "Those photos are too large together. Send fewer." : "That didn't work. Try again."));
+      e.server = true;
+      throw e;
+    }
+    return data;
+  };
   const runDraft = async () => {
     setErr("");
     setDraft(null);
+    setFound(null);
     if (!text.trim() && !photos.length && !context()) return setErr("Add at least one photo or describe the job first.");
     setBusy("draft");
+    holdScreen();
+    const j = {
+      id: uid() + uid(),
+      attIds: []
+    };
     try {
+      if (onStartJob) j.attIds = onStartJob(photos);
+      setJob(j);
       const idToken = await token();
       const body = {
         idToken,
+        jobId: j.id,
+        quoteId: q.id,
+        quoteNo: q.quoteNo,
+        attIds: j.attIds,
         text: [text.trim(), context()].filter(Boolean).join("\n\n"),
         images: photos.map(s => ({
           mediaType: s.mediaType,
           data: s.data
         }))
       };
-      const r = await fetch("/api/ai-quote", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify(body)
-      });
-      const data = await r.json().catch(() => ({}));
-      if (!r.ok) throw new Error(data.error || (r.status === 504 ? "That took too long. Try fewer photos." : r.status === 413 ? "Those photos are too large together. Send fewer." : "That didn't work. Try again."));
+      j.body = body;
+      const data = await sendJob(j, body);
       setDraft(data.draft);
+      setBusy(null);
+      releaseScreen();
       logActivity(me.name, "Drafted a quote with AI (" + photos.length + " photo" + (photos.length === 1 ? "" : "s") + ")", q.quoteNo);
     } catch (e) {
-      setErr(e.message || "That didn't work. Try again.");
+      if (e.server) {
+        setErr(e.message);
+        setBusy(null);
+        releaseScreen();
+        setJob(null);
+        return;
+      }
+      setBusy("waiting");
     }
-    setBusy(null);
   };
+  useEffect(() => {
+    if (!job || !CLOUD || !db) return;
+    let resent = false;
+    const unsub = db.collection("aiJobs").doc(job.id).onSnapshot(d => {
+      const x = d.exists ? d.data() : null;
+      if (!x) return;
+      if (x.status === "done" && x.draft) {
+        setDraft(cur => cur || x.draft);
+        setBusy(b => b === "draft" || b === "waiting" ? null : b);
+        releaseScreen();
+      } else if (x.status === "error") {
+        setErr(x.error || "The AI draft failed. Try again.");
+        setBusy(null);
+        releaseScreen();
+      }
+    }, warn("ai job"));
+    const retry = setTimeout(async () => {
+      if (resent || !job.body) return;
+      try {
+        const snap = await db.collection("aiJobs").doc(job.id).get();
+        if (!snap.exists && !document.hidden) {
+          resent = true;
+          job.body.idToken = await token();
+          const data = await sendJob(job, job.body);
+          setDraft(cur => cur || data.draft);
+          setBusy(null);
+        }
+      } catch (e) {
+        if (e.server) {
+          setErr(e.message);
+          setBusy(null);
+        }
+      }
+    }, 20000);
+    return () => {
+      unsub();
+      clearTimeout(retry);
+    };
+  }, [job && job.id]);
+  useEffect(() => {
+    if (!CLOUD || !db || !me || !q.id) return;
+    let alive = true;
+    db.collection("aiJobs").where("uid", "==", me.id).where("quoteId", "==", q.id).get().then(s => {
+      if (!alive) return;
+      const jobs = [];
+      s.forEach(d => jobs.push(Object.assign({
+        id: d.id
+      }, d.data())));
+      jobs.sort((a, b) => String(b.at || "").localeCompare(String(a.at || "")));
+      const latest = jobs[0];
+      if (!latest) return;
+      if (latest.status === "done" && latest.draft && !latest.applied) setFound(latest);else if (latest.status === "running" && Date.now() - new Date(latest.startedAt || latest.at).getTime() < 5 * 60000) {
+        setOpen(true);
+        setJob({
+          id: latest.id,
+          attIds: latest.attIds || []
+        });
+        setBusy("waiting");
+      }
+    }).catch(warn("ai jobs"));
+    return () => {
+      alive = false;
+    };
+  }, [q.id]);
   const runRead = async () => {
     setErr("");
     if (!text.trim() && !photos.length) return setErr("Add the lead screenshot or paste its text first.");
@@ -2405,14 +2513,22 @@ function AiAssistant({
     setPhotos([]);
     setText("");
     setErr("");
+    setJob(null);
+    setFound(null);
+    releaseScreen();
   };
   const apply = async () => {
     if (!draft) return;
     const hasWork = (q.items || []).length > 0 || q.scopeEdited && (q.scopeItems || []).some(s => s.on && s.text.trim() && !s.ai);
     if (hasWork && !window.confirm("Replace the scope, materials and crew already on this quote with the AI draft?\n\nClient details you've typed are kept.")) return;
     setBusy("apply");
+    const j = job;
     try {
-      onApplyDraft(draft, photos);
+      onApplyDraft(draft, j && j.attIds && j.attIds.length ? [] : photos, j ? j.attIds : []);
+      if (j && j.id) db.collection("aiJobs").doc(j.id).update({
+        applied: true,
+        appliedAt: new Date().toISOString()
+      }).catch(warn("mark applied"));
       reset();
     } catch (e) {
       setErr(e.message || "Couldn't apply the draft.");
@@ -2456,7 +2572,38 @@ function AiAssistant({
       marginBottom: 16,
       background: "#FDFBF4"
     }
-  }, !open ? React.createElement("div", {
+  }, !open && found ? React.createElement("div", {
+    className: "flex items-center justify-between flex-wrap gap-2"
+  }, React.createElement("div", {
+    style: {
+      flex: "1 1 240px"
+    }
+  }, React.createElement("div", {
+    style: {
+      fontWeight: 700,
+      color: BRAND.green,
+      fontSize: 15
+    }
+  }, "\u2705 Your AI draft is ready"), React.createElement("div", {
+    style: {
+      fontSize: 12.5,
+      color: BRAND.sub,
+      marginTop: 2
+    }
+  }, found.draft.jobTitle || found.draft.category, " \u2014 it finished while you were away.")), React.createElement(Btn, {
+    small: true,
+    kind: "gold",
+    disabled: disabled,
+    onClick: () => {
+      setOpen(true);
+      setJob({
+        id: found.id,
+        attIds: found.attIds || []
+      });
+      setDraft(found.draft);
+      setFound(null);
+    }
+  }, "Review draft")) : !open ? React.createElement("div", {
     className: "flex items-center justify-between flex-wrap gap-2"
   }, React.createElement("div", {
     style: {
@@ -2610,7 +2757,7 @@ function AiAssistant({
       fontWeight: 600,
       marginBottom: 10
     }
-  }, err), busy === "draft" ? React.createElement("div", {
+  }, err), busy === "waiting" ? React.createElement("div", {
     style: {
       background: BRAND.navy,
       color: "#fff",
@@ -2622,7 +2769,23 @@ function AiAssistant({
     style: {
       color: BRAND.goldBright
     }
-  }, "Drafting\u2026"), " ", secs < 8 ? "Looking at the photos" : secs < 20 ? "Identifying the work and sizing it" : secs < 40 ? "Writing the scope and pricing materials" : "Almost there — detailed jobs take up to a minute or two", " \xB7 ", secs, "s") : React.createElement("div", {
+  }, "Still drafting on our server\u2026"), " It keeps going even if your screen turns off or you switch apps. The draft will appear here as soon as it's ready, and you'll get a phone alert if alerts are on.") : busy === "draft" ? React.createElement("div", {
+    style: {
+      background: BRAND.navy,
+      color: "#fff",
+      borderRadius: 8,
+      padding: "12px 14px",
+      fontSize: 13.5
+    }
+  }, React.createElement("strong", {
+    style: {
+      color: BRAND.goldBright
+    }
+  }, "Drafting\u2026"), " ", React.createElement("span", {
+    style: {
+      opacity: 0.85
+    }
+  }, "(safe to lock your phone \u2014 it finishes on our server)"), " ", secs < 8 ? "Looking at the photos" : secs < 20 ? "Identifying the work and sizing it" : secs < 40 ? "Writing the scope and pricing materials" : "Almost there — detailed jobs take up to a minute or two", " \xB7 ", secs, "s") : React.createElement("div", {
     className: "flex gap-2 flex-wrap items-center"
   }, React.createElement(Btn, {
     kind: "gold",
@@ -3260,9 +3423,28 @@ function QuoteForm({
     }));
     uploadInBackground(shots, atts);
   };
-  const applyDraft = (d, shots) => {
+  const startJob = shots => {
+    if (!shots || !shots.length) {
+      if (!locked) onAutosave(Object.assign({}, q, {
+        updatedAt: new Date().toISOString()
+      }));
+      return [];
+    }
+    const atts = attachFrom(shots, "photo");
+    const next = Object.assign({}, q, {
+      attachments: (q.attachments || []).concat(atts),
+      updatedAt: new Date().toISOString()
+    });
+    setDirty(true);
+    setQ(next);
+    if (!locked) onAutosave(next);
+    uploadInBackground(shots, atts);
+    return atts.map(a => a.id);
+  };
+  const applyDraft = (d, shots, existingIds) => {
     const referenced = new Set(d.findings.map(f => f.photo).filter(n => n > 0));
-    const atts = attachFrom(shots || [], "photo", referenced);
+    const reuse = existingIds && existingIds.length ? existingIds : null;
+    const atts = reuse ? reuse.map(id => (q.attachments || []).find(a => a.id === id)).filter(Boolean) : attachFrom(shots || [], "photo", referenced);
     const blank = k => !String(q[k] || "").trim();
     const off = new Set(d.exclusionsOff || []);
     const next = Object.assign({}, q, {
@@ -3314,7 +3496,9 @@ function QuoteForm({
         photoUrl: "",
         on: true
       })),
-      attachments: (q.attachments || []).concat(atts),
+      attachments: reuse ? (q.attachments || []).map(a => reuse.includes(a.id) ? Object.assign({}, a, {
+        show: referenced.has(reuse.indexOf(a.id) + 1)
+      }) : a) : (q.attachments || []).concat(atts),
       aiDraft: {
         at: new Date().toISOString(),
         by: me.name,
@@ -3343,7 +3527,7 @@ function QuoteForm({
     setDirty(true);
     setQ(next);
     if (!locked) onAutosave(next);
-    uploadInBackground(shots || [], atts);
+    if (!reuse) uploadInBackground(shots || [], atts);
     try {
       window.scrollTo({
         top: 0,
@@ -3420,6 +3604,7 @@ function QuoteForm({
     disabled: locked,
     onApplyDraft: applyDraft,
     onApplyLead: applyLead,
+    onStartJob: startJob,
     notify: notify
   }), attachments.length > 0 && React.createElement("div", {
     style: {

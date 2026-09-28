@@ -1146,8 +1146,15 @@ const SOURCE_COLOR = { "customer stated": BRAND.green, "estimated from photo": B
 
 const MAX_PHOTOS = 8;
 
-function AiAssistant({ me, q, settings, disabled, onApplyDraft, onApplyLead, notify }) {
+function AiAssistant({ me, q, settings, disabled, onApplyDraft, onApplyLead, onStartJob, notify }) {
   const [open, setOpen] = useState(false);
+  /* The AI draft runs on the server and is saved to aiJobs/<id> as it goes,
+     so locking the phone or switching apps mid-draft loses nothing: the app
+     picks the result up from the database when it's back (and a phone alert
+     says it's ready). `job` is the one being waited on or reviewed. */
+  const [job, setJob] = useState(null); // { id, attIds }
+  const [found, setFound] = useState(null); // a finished draft from a previous visit
+  const wakeRef = useRef(null);
   const [text, setText] = useState("");
   const [photos, setPhotos] = useState([]);
   const [busy, setBusy] = useState(null); // "draft" | "read" | "apply" | null
@@ -1202,21 +1209,98 @@ function AiAssistant({ me, q, settings, disabled, onApplyDraft, onApplyLead, not
     return bits.join("\n");
   };
 
+  /* Keep the screen awake while drafting, where the phone allows it. */
+  const holdScreen = async () => {
+    try { if (navigator.wakeLock && !wakeRef.current) wakeRef.current = await navigator.wakeLock.request("screen"); } catch {}
+  };
+  const releaseScreen = () => { try { wakeRef.current && wakeRef.current.release(); } catch {} wakeRef.current = null; };
+
+  const sendJob = async (j, body) => {
+    const r = await fetch("/api/ai-quote", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) {
+      const e = new Error(data.error || (r.status === 413 ? "Those photos are too large together. Send fewer." : "That didn't work. Try again."));
+      e.server = true; throw e;
+    }
+    return data;
+  };
+
   const runDraft = async () => {
-    setErr(""); setDraft(null);
+    setErr(""); setDraft(null); setFound(null);
     if (!text.trim() && !photos.length && !context()) return setErr("Add at least one photo or describe the job first.");
     setBusy("draft");
+    holdScreen();
+    const j = { id: uid() + uid(), attIds: [] };
     try {
+      // Photos go onto the quote first, so they survive even a full reload.
+      if (onStartJob) j.attIds = onStartJob(photos);
+      setJob(j);
       const idToken = await token();
-      const body = { idToken, text: [text.trim(), context()].filter(Boolean).join("\n\n"), images: photos.map((s) => ({ mediaType: s.mediaType, data: s.data })) };
-      const r = await fetch("/api/ai-quote", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
-      const data = await r.json().catch(() => ({}));
-      if (!r.ok) throw new Error(data.error || (r.status === 504 ? "That took too long. Try fewer photos." : r.status === 413 ? "Those photos are too large together. Send fewer." : "That didn't work. Try again."));
-      setDraft(data.draft);
+      const body = {
+        idToken, jobId: j.id, quoteId: q.id, quoteNo: q.quoteNo, attIds: j.attIds,
+        text: [text.trim(), context()].filter(Boolean).join("\n\n"),
+        images: photos.map((s) => ({ mediaType: s.mediaType, data: s.data })),
+      };
+      j.body = body;
+      const data = await sendJob(j, body);
+      setDraft(data.draft); setBusy(null); releaseScreen();
       logActivity(me.name, "Drafted a quote with AI (" + photos.length + " photo" + (photos.length === 1 ? "" : "s") + ")", q.quoteNo);
-    } catch (e) { setErr(e.message || "That didn't work. Try again."); }
-    setBusy(null);
+    } catch (e) {
+      if (e.server) { setErr(e.message); setBusy(null); releaseScreen(); setJob(null); return; }
+      /* The connection dropped — usually the screen locked or the app went
+         to the background. The server keeps working; wait for its result. */
+      setBusy("waiting");
+    }
   };
+
+  /* While a job is out, listen for its result in the database. */
+  useEffect(() => {
+    if (!job || !CLOUD || !db) return;
+    let resent = false;
+    const unsub = db.collection("aiJobs").doc(job.id).onSnapshot((d) => {
+      const x = d.exists ? d.data() : null;
+      if (!x) return;
+      if (x.status === "done" && x.draft) {
+        setDraft((cur) => cur || x.draft); setBusy((b) => (b === "draft" || b === "waiting" ? null : b)); releaseScreen();
+      } else if (x.status === "error") {
+        setErr(x.error || "The AI draft failed. Try again."); setBusy(null); releaseScreen();
+      }
+    }, warn("ai job"));
+    /* If the request never reached the server (the phone locked while still
+       uploading), send it again once we're back on screen. */
+    const retry = setTimeout(async () => {
+      if (resent || !job.body) return;
+      try {
+        const snap = await db.collection("aiJobs").doc(job.id).get();
+        if (!snap.exists && !document.hidden) {
+          resent = true;
+          job.body.idToken = await token();
+          const data = await sendJob(job, job.body);
+          setDraft((cur) => cur || data.draft); setBusy(null);
+        }
+      } catch (e) { if (e.server) { setErr(e.message); setBusy(null); } }
+    }, 20000);
+    return () => { unsub(); clearTimeout(retry); };
+  }, [job && job.id]);
+
+  /* Back on this quote later? Offer any draft that finished while away. */
+  useEffect(() => {
+    if (!CLOUD || !db || !me || !q.id) return;
+    let alive = true;
+    db.collection("aiJobs").where("uid", "==", me.id).where("quoteId", "==", q.id).get().then((s) => {
+      if (!alive) return;
+      const jobs = [];
+      s.forEach((d) => jobs.push(Object.assign({ id: d.id }, d.data())));
+      jobs.sort((a, b) => String(b.at || "").localeCompare(String(a.at || "")));
+      const latest = jobs[0];
+      if (!latest) return;
+      if (latest.status === "done" && latest.draft && !latest.applied) setFound(latest);
+      else if (latest.status === "running" && Date.now() - new Date(latest.startedAt || latest.at).getTime() < 5 * 60000) {
+        setOpen(true); setJob({ id: latest.id, attIds: latest.attIds || [] }); setBusy("waiting");
+      }
+    }).catch(warn("ai jobs"));
+    return () => { alive = false; };
+  }, [q.id]);
 
   /* The cheap path: just lift the client's details out of a lead screenshot. */
   const runRead = async () => {
@@ -1238,14 +1322,19 @@ function AiAssistant({ me, q, settings, disabled, onApplyDraft, onApplyLead, not
     setBusy(null);
   };
 
-  const reset = () => { setOpen(false); setDraft(null); setPhotos([]); setText(""); setErr(""); };
+  const reset = () => { setOpen(false); setDraft(null); setPhotos([]); setText(""); setErr(""); setJob(null); setFound(null); releaseScreen(); };
 
   const apply = async () => {
     if (!draft) return;
     const hasWork = (q.items || []).length > 0 || (q.scopeEdited && (q.scopeItems || []).some((s) => s.on && s.text.trim() && !s.ai));
     if (hasWork && !window.confirm("Replace the scope, materials and crew already on this quote with the AI draft?\n\nClient details you've typed are kept.")) return;
     setBusy("apply");
-    try { onApplyDraft(draft, photos); reset(); }
+    const j = job;
+    try {
+      onApplyDraft(draft, j && j.attIds && j.attIds.length ? [] : photos, j ? j.attIds : []);
+      if (j && j.id) db.collection("aiJobs").doc(j.id).update({ applied: true, appliedAt: new Date().toISOString() }).catch(warn("mark applied"));
+      reset();
+    }
     catch (e) { setErr(e.message || "Couldn't apply the draft."); }
     setBusy(null);
   };
@@ -1264,7 +1353,15 @@ function AiAssistant({ me, q, settings, disabled, onApplyDraft, onApplyLead, not
 
   return (
     <div style={{ border: `1.5px dashed ${BRAND.gold}`, borderRadius: 10, padding: 14, marginBottom: 16, background: "#FDFBF4" }}>
-      {!open ? (
+      {!open && found ? (
+        <div className="flex items-center justify-between flex-wrap gap-2">
+          <div style={{ flex: "1 1 240px" }}>
+            <div style={{ fontWeight: 700, color: BRAND.green, fontSize: 15 }}>✅ Your AI draft is ready</div>
+            <div style={{ fontSize: 12.5, color: BRAND.sub, marginTop: 2 }}>{found.draft.jobTitle || found.draft.category} — it finished while you were away.</div>
+          </div>
+          <Btn small kind="gold" disabled={disabled} onClick={() => { setOpen(true); setJob({ id: found.id, attIds: found.attIds || [] }); setDraft(found.draft); setFound(null); }}>Review draft</Btn>
+        </div>
+      ) : !open ? (
         <div className="flex items-center justify-between flex-wrap gap-2">
           <div style={{ flex: "1 1 260px" }}>
             <div style={{ fontWeight: 700, color: BRAND.navy, fontSize: 15 }}>AI quote from photos or a lead</div>
@@ -1311,9 +1408,13 @@ function AiAssistant({ me, q, settings, disabled, onApplyDraft, onApplyLead, not
               </Field>
 
               {err && <div style={{ color: BRAND.red, fontSize: 13, fontWeight: 600, marginBottom: 10 }}>{err}</div>}
-              {busy === "draft" ? (
+              {busy === "waiting" ? (
                 <div style={{ background: BRAND.navy, color: "#fff", borderRadius: 8, padding: "12px 14px", fontSize: 13.5 }}>
-                  <strong style={{ color: BRAND.goldBright }}>Drafting…</strong> {secs < 8 ? "Looking at the photos" : secs < 20 ? "Identifying the work and sizing it" : secs < 40 ? "Writing the scope and pricing materials" : "Almost there — detailed jobs take up to a minute or two"} · {secs}s
+                  <strong style={{ color: BRAND.goldBright }}>Still drafting on our server…</strong> It keeps going even if your screen turns off or you switch apps. The draft will appear here as soon as it's ready, and you'll get a phone alert if alerts are on.
+                </div>
+              ) : busy === "draft" ? (
+                <div style={{ background: BRAND.navy, color: "#fff", borderRadius: 8, padding: "12px 14px", fontSize: 13.5 }}>
+                  <strong style={{ color: BRAND.goldBright }}>Drafting…</strong> <span style={{ opacity: 0.85 }}>(safe to lock your phone — it finishes on our server)</span> {secs < 8 ? "Looking at the photos" : secs < 20 ? "Identifying the work and sizing it" : secs < 40 ? "Writing the scope and pricing materials" : "Almost there — detailed jobs take up to a minute or two"} · {secs}s
                 </div>
               ) : (
                 <div className="flex gap-2 flex-wrap items-center">
@@ -1638,9 +1739,24 @@ function QuoteForm({ me, isOwner, isManager, settings, notify, existing, onSave,
   /* Applies an AI draft to the quote, then opens the client-ready preview.
      Client fields only fill blanks; the work — scope, crew, materials,
      assessment, exclusions — comes from the draft. */
-  const applyDraft = (d, shots) => {
+  /* Starting an AI draft: the photos go onto the quote and the quote is saved
+     straight away, so the job and its photos survive the phone locking. */
+  const startJob = (shots) => {
+    if (!shots || !shots.length) { if (!locked) onAutosave(Object.assign({}, q, { updatedAt: new Date().toISOString() })); return []; }
+    const atts = attachFrom(shots, "photo");
+    const next = Object.assign({}, q, { attachments: (q.attachments || []).concat(atts), updatedAt: new Date().toISOString() });
+    setDirty(true); setQ(next);
+    if (!locked) onAutosave(next);
+    uploadInBackground(shots, atts);
+    return atts.map((a) => a.id);
+  };
+
+  const applyDraft = (d, shots, existingIds) => {
     const referenced = new Set(d.findings.map((f) => f.photo).filter((n) => n > 0));
-    const atts = attachFrom(shots || [], "photo", referenced);
+    const reuse = existingIds && existingIds.length ? existingIds : null;
+    const atts = reuse
+      ? reuse.map((id) => (q.attachments || []).find((a) => a.id === id)).filter(Boolean)
+      : attachFrom(shots || [], "photo", referenced);
     const blank = (k) => !String(q[k] || "").trim();
     const off = new Set(d.exclusionsOff || []);
     const next = Object.assign({}, q, {
@@ -1661,7 +1777,9 @@ function QuoteForm({ me, isOwner, isManager, settings, notify, existing, onSave,
         id: uid(), title: f.title, detail: f.detail, priority: f.priority, photo: f.photo,
         attId: f.photo > 0 && atts[f.photo - 1] ? atts[f.photo - 1].id : "", photoUrl: "", on: true,
       })),
-      attachments: (q.attachments || []).concat(atts),
+      attachments: reuse
+        ? (q.attachments || []).map((a) => (reuse.includes(a.id) ? Object.assign({}, a, { show: referenced.has(reuse.indexOf(a.id) + 1) }) : a))
+        : (q.attachments || []).concat(atts),
       aiDraft: {
         at: new Date().toISOString(), by: me.name, model: d.model, confidence: d.confidence, confidenceReason: d.confidenceReason,
         needsSiteVisit: d.needsSiteVisit, measurements: d.measurements, assumptions: d.assumptions,
@@ -1677,7 +1795,7 @@ function QuoteForm({ me, isOwner, isManager, settings, notify, existing, onSave,
     setQ(next);
     // Save it right away rather than waiting for the autosave tick.
     if (!locked) onAutosave(next);
-    uploadInBackground(shots || [], atts);
+    if (!reuse) uploadInBackground(shots || [], atts);
     try { window.scrollTo({ top: 0, behavior: "smooth" }); } catch {}
     notify("AI draft applied — here's the client-ready quote.");
     setTimeout(() => onPreview(next), 250);
@@ -1713,7 +1831,7 @@ function QuoteForm({ me, isOwner, isManager, settings, notify, existing, onSave,
       <div className="md-col-span-2 flex flex-col gap-5">
         <Card>
           <h3 style={h3Style}>1 · CLIENT</h3>
-          <AiAssistant me={me} q={q} settings={settings} disabled={locked} onApplyDraft={applyDraft} onApplyLead={applyLead} notify={notify} />
+          <AiAssistant me={me} q={q} settings={settings} disabled={locked} onApplyDraft={applyDraft} onApplyLead={applyLead} onStartJob={startJob} notify={notify} />
           {attachments.length > 0 && (
             <div style={{ marginBottom: 14 }}>
               <div style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: "0.06em", color: BRAND.sub, fontWeight: 700, marginBottom: 6 }}>Photos & screenshots on file ({attachments.length})</div>
