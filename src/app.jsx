@@ -18,6 +18,7 @@ const COMPANY = {
   tag: "Licensed & Insured · Residential & Commercial",
   area: "New Caney, TX · Serving Greater Houston & Texas",
   cities: "Houston · Austin · Dallas · San Antonio · Corpus Christi",
+  phone: "(713) 835-8245",
   email: "info@jtproconstruction.com",
   site: "jtproconstruction.com",
 };
@@ -2393,7 +2394,7 @@ function PreviewModal({ quote, settings, users, me, onClose }) {
               <div style={{ fontSize: 12, color: BRAND.sub }}>{COMPANY.tag}</div>
               <div style={{ fontSize: 12, color: BRAND.sub }}>{COMPANY.area}</div>
               <div style={{ fontSize: 12, color: BRAND.navy, fontWeight: 600 }}>{COMPANY.cities}</div>
-              <div style={{ fontSize: 12, color: BRAND.sub }}>{COMPANY.email} · {COMPANY.site}</div>
+              <div style={{ fontSize: 12, color: BRAND.sub }}>{COMPANY.phone} · {COMPANY.email} · {COMPANY.site}</div>
             </div>
             <div style={{ textAlign: "right" }}>
               <div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontSize: 24, fontWeight: 700, color: BRAND.gold, letterSpacing: "0.1em" }}>QUOTE</div>
