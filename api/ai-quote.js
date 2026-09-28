@@ -18,7 +18,7 @@
    the moment it's back, even after a full reload.
 ============================================================ */
 
-const { bad, parseBody, verifyCaller, getDocAs, setDocAs, listDocsAs, draftQuote, checkImages } = require("./_lib");
+const { bad, parseBody, verifyCaller, getDocAs, setDocAs, setDocAsServer, listDocsAs, draftQuote, checkImages } = require("./_lib");
 const { sendToPeople } = require("./_push");
 
 const MAX_PHOTOS = 8;
@@ -61,8 +61,13 @@ module.exports = async (req, res) => {
   const attIds = Array.isArray(body.attIds) ? body.attIds.filter((x) => typeof x === "string").slice(0, 8) : [];
   const saveJob = async (fields) => {
     if (!jobId) return;
+    // The server's own key when it has one (no database rule needed),
+    // otherwise as the caller.
+    const write = process.env.FIREBASE_SERVICE_ACCOUNT
+      ? (path, data) => setDocAsServer(path, data)
+      : (path, data) => setDocAs(idToken, path, data);
     try {
-      await setDocAs(idToken, "aiJobs/" + jobId, Object.assign({
+      await write("aiJobs/" + jobId, Object.assign({
         uid: caller.uid, quoteId, quoteNo, attIds, photoCount: images.length, startedAt: new Date().toISOString(),
       }, fields));
     } catch (e) { console.error("[ai-quote] couldn't save job " + jobId + ":", e.message); }

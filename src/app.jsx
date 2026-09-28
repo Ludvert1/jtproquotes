@@ -1253,47 +1253,52 @@ function AiAssistant({ me, q, settings, disabled, onApplyDraft, onApplyLead, onS
     }
   };
 
-  /* While a job is out, listen for its result in the database. */
+  /* Asks the server about a draft job (it keeps the results, so nothing
+     depends on this phone having stayed connected). */
+  const jobApi = async (payload) => {
+    const idToken = await token();
+    const r = await fetch("/api/ai-job", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(Object.assign({ idToken }, payload)) });
+    return r.ok ? r.json().catch(() => ({})) : {};
+  };
+
+  /* While a job is out, check on it every few seconds and the moment the
+     app comes back on screen. */
   useEffect(() => {
-    if (!job || !CLOUD || !db) return;
-    let resent = false;
-    const unsub = db.collection("aiJobs").doc(job.id).onSnapshot((d) => {
-      const x = d.exists ? d.data() : null;
-      if (!x) return;
-      if (x.status === "done" && x.draft) {
-        setDraft((cur) => cur || x.draft); setBusy((b) => (b === "draft" || b === "waiting" ? null : b)); releaseScreen();
-      } else if (x.status === "error") {
-        setErr(x.error || "The AI draft failed. Try again."); setBusy(null); releaseScreen();
-      }
-    }, warn("ai job"));
-    /* If the request never reached the server (the phone locked while still
-       uploading), send it again once we're back on screen. */
-    const retry = setTimeout(async () => {
-      if (resent || !job.body) return;
+    if (!job || !CLOUD) return;
+    let stop = false, resent = false;
+    const started = Date.now();
+    const check = async () => {
+      if (stop || document.hidden) return;
       try {
-        const snap = await db.collection("aiJobs").doc(job.id).get();
-        if (!snap.exists && !document.hidden) {
+        const { job: x } = await jobApi({ jobId: job.id });
+        if (stop) return;
+        if (x && x.status === "done" && x.draft) {
+          setDraft((cur) => cur || x.draft); setBusy((b) => (b === "draft" || b === "waiting" ? null : b)); releaseScreen(); stop = true;
+        } else if (x && x.status === "error") {
+          setErr(x.error || "The AI draft failed. Try again."); setBusy(null); releaseScreen(); stop = true;
+        } else if (!x && !resent && job.body && Date.now() - started > 20000) {
+          /* The request never reached the server (the phone locked while it
+             was still uploading) — send it again now we're back. */
           resent = true;
           job.body.idToken = await token();
           const data = await sendJob(job, job.body);
-          setDraft((cur) => cur || data.draft); setBusy(null);
+          setDraft((cur) => cur || data.draft); setBusy(null); stop = true;
         }
-      } catch (e) { if (e.server) { setErr(e.message); setBusy(null); } }
-    }, 20000);
-    return () => { unsub(); clearTimeout(retry); };
+      } catch (e) { if (e && e.server) { setErr(e.message); setBusy(null); stop = true; } }
+    };
+    const t = setInterval(check, 4000);
+    const onVis = () => { if (!document.hidden) check(); };
+    document.addEventListener("visibilitychange", onVis);
+    return () => { stop = true; clearInterval(t); document.removeEventListener("visibilitychange", onVis); };
   }, [job && job.id]);
 
   /* Back on this quote later? Offer any draft that finished while away. */
   useEffect(() => {
-    if (!CLOUD || !db || !me || !q.id) return;
+    if (!CLOUD || !me || !q.id) return;
     let alive = true;
-    db.collection("aiJobs").where("uid", "==", me.id).where("quoteId", "==", q.id).get().then((s) => {
-      if (!alive) return;
-      const jobs = [];
-      s.forEach((d) => jobs.push(Object.assign({ id: d.id }, d.data())));
-      jobs.sort((a, b) => String(b.at || "").localeCompare(String(a.at || "")));
-      const latest = jobs[0];
-      if (!latest) return;
+    jobApi({ quoteId: q.id }).then((res) => {
+      const latest = res && res.job;
+      if (!alive || !latest) return;
       if (latest.status === "done" && latest.draft && !latest.applied) setFound(latest);
       else if (latest.status === "running" && Date.now() - new Date(latest.startedAt || latest.at).getTime() < 5 * 60000) {
         setOpen(true); setJob({ id: latest.id, attIds: latest.attIds || [] }); setBusy("waiting");
@@ -1332,7 +1337,7 @@ function AiAssistant({ me, q, settings, disabled, onApplyDraft, onApplyLead, onS
     const j = job;
     try {
       onApplyDraft(draft, j && j.attIds && j.attIds.length ? [] : photos, j ? j.attIds : []);
-      if (j && j.id) db.collection("aiJobs").doc(j.id).update({ applied: true, appliedAt: new Date().toISOString() }).catch(warn("mark applied"));
+      if (j && j.id) jobApi({ jobId: j.id, applied: true }).catch(warn("mark applied"));
       reset();
     }
     catch (e) { setErr(e.message || "Couldn't apply the draft."); }

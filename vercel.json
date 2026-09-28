@@ -84,6 +84,9 @@
     },
     "api/img.js": {
       "maxDuration": 20
+    },
+    "api/ai-job.js": {
+      "maxDuration": 20
     }
   }
 }

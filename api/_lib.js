@@ -193,6 +193,41 @@ async function createDocAsServer(collection, docId, data) {
   return true;
 }
 
+/* Create-or-overwrite / read / query as the server (service account). */
+async function setDocAsServer(path, data) {
+  const token = await adminToken();
+  const r = await fetch(`${DOCS}/${path}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json", Authorization: "Bearer " + token },
+    body: JSON.stringify({ fields: toFields(data) }),
+  });
+  if (!r.ok) throw new Error("Firestore refused the write (" + r.status + ")");
+  return true;
+}
+async function getDocAsServer(path) {
+  const token = await adminToken();
+  const r = await fetch(`${DOCS}/${path}`, { headers: { Authorization: "Bearer " + token } });
+  if (!r.ok) return null;
+  const d = await r.json();
+  return d && d.fields ? fromFields(d.fields) : null;
+}
+async function queryAsServer(collection, equals) {
+  const token = await adminToken();
+  const filters = Object.keys(equals).map((k) => ({ fieldFilter: { field: { fieldPath: k }, op: "EQUAL", value: toValue(equals[k]) } }));
+  const r = await fetch(`${DOCS}:runQuery`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: "Bearer " + token },
+    body: JSON.stringify({ structuredQuery: {
+      from: [{ collectionId: collection }],
+      where: filters.length === 1 ? filters[0] : { compositeFilter: { op: "AND", filters } },
+      limit: 50,
+    } }),
+  });
+  if (!r.ok) return [];
+  const rows = await r.json();
+  return (rows || []).filter((x) => x.document).map((x) => Object.assign({ id: x.document.name.split("/").pop() }, fromFields(x.document.fields || {})));
+}
+
 async function listDocsAsServer(collection) {
   const token = await adminToken();
   const r = await fetch(`${DOCS}/${collection}?pageSize=300`, { headers: { Authorization: "Bearer " + token } });
@@ -681,7 +716,7 @@ module.exports = {
   CATEGORIES, STANDARD_EXCLUSIONS, FB_PROJECT, DOCS,
   bad, uid, parseBody, verifyCaller,
   toFields, fromFields, getDocAs, setDocAs, listDocsAs,
-  adminToken, createDocAsServer, listDocsAsServer,
+  adminToken, createDocAsServer, listDocsAsServer, setDocAsServer, getDocAsServer, queryAsServer,
   extractLead, sendEmail,
   QUOTE_MODEL, draftQuote, draftToQuoteFields, quoteTotal, priceRange, renderReply,
   uploadImageAsServer, checkImages,
