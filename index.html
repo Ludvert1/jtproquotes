@@ -2223,10 +2223,13 @@ function priceRange(total, confidence) {
   const f = n => "$" + r50(n).toLocaleString("en-US");
   return f(total * lo) + "–" + f(total * hi);
 }
+function priceFrom(total, confidence) {
+  const [lo] = RANGE_BY_CONFIDENCE[confidence] || RANGE_BY_CONFIDENCE.medium;
+  return "$" + Math.max(50, Math.round(total * lo / 50) * 50).toLocaleString("en-US");
+}
 function renderReply(template, total, confidence) {
   const t = String(template || "");
-  const range = priceRange(total, confidence);
-  return t.includes("{{PRICE_RANGE}}") ? t.split("{{PRICE_RANGE}}").join(range) : t;
+  return t.split("{{PRICE_RANGE}}").join(priceRange(total, confidence)).split("{{PRICE_FROM}}").join(priceFrom(total, confidence));
 }
 const pdfSrc = u => /^https:\/\/firebasestorage\.googleapis\.com\//.test(u || "") ? "/api/img?u=" + encodeURIComponent(u) : u;
 let html2pdfLoading = null;
@@ -2850,7 +2853,7 @@ function AiAssistant({
       fontSize: 11.5,
       color: BRAND.sub
     }
-  }, "Reply range ", priceRange(preview.total, draft.confidence)))), React.createElement("div", {
+  }, "Reply says \"starts at ", priceFrom(preview.total, draft.confidence), "\""))), React.createElement("div", {
     style: {
       fontSize: 12.5,
       marginTop: 8,
@@ -3609,7 +3612,7 @@ function QuoteForm({
   const startReply = () => {
     setDirty(true);
     const first = (q.clientName || "").split(" ")[0];
-    set("replyTemplate", "Hi" + (first ? " " + first : "") + ", thanks for reaching out to JTProconstruction about " + (q.jobTitle || "your project").toLowerCase() + ".\n\nBased on what you've described, the estimated investment is {{PRICE_RANGE}}, covering labor, materials, cleanup and haul-off, with a 90-day workmanship warranty.\n\nWould you be open to a quick call or a short site visit so we can confirm measurements and give you a firm price?\n\n— Joel, JTProconstruction LLC");
+    set("replyTemplate", "Hi" + (first ? " " + first : "") + "! Joel here with JTProconstruction — your " + (q.jobTitle || "project").toLowerCase() + " is right in our wheelhouse.\n\n" + "Projects like yours start at {{PRICE_FROM}}. I'll confirm the final price after a quick on-site look — it can go up depending on size, condition and anything hidden we find.\n\n" + "Licensed & insured · itemized written quote · 90-day workmanship warranty · clean job site.\n\n" + "What day works best for a quick walk-through?\n— Joel, JTProconstruction LLC");
   };
   const attachments = q.attachments || [];
   return React.createElement("div", {
@@ -4122,7 +4125,7 @@ function QuoteForm({
     }
   }, React.createElement("strong", null, "Still to find out:"), " ", q.aiDraft.questions.join(" · ")), React.createElement(Field, {
     label: "Message",
-    hint: "{{PRICE_RANGE}} fills itself in from the quote total, so the reply always matches the numbers."
+    hint: "{{PRICE_FROM}} becomes the starting price (and {{PRICE_RANGE}} a range) from the quote total, so the reply always matches the numbers."
   }, React.createElement("textarea", {
     style: Object.assign({}, inputStyle, {
       minHeight: 170,
@@ -4155,18 +4158,15 @@ function QuoteForm({
   }, React.createElement(Btn, {
     small: true,
     kind: "gold",
-    onClick: copyReply
-  }, "Copy for Thumbtack"), React.createElement("a", {
-    href: "https://www.thumbtack.com/",
-    target: "_blank",
-    rel: "noopener noreferrer",
-    style: {
-      textDecoration: "none"
+    onClick: async () => {
+      await copyReply();
+      window.open(q.leadUrl || "https://www.thumbtack.com/", "_blank", "noopener");
     }
-  }, React.createElement(Btn, {
+  }, q.leadUrl ? "Copy & open this lead" : "Copy & open Thumbtack"), React.createElement(Btn, {
     small: true,
-    kind: "ghost"
-  }, "Open Thumbtack")), phoneDigits && React.createElement("a", {
+    kind: "ghost",
+    onClick: copyReply
+  }, "Copy only"), phoneDigits && React.createElement("a", {
     href: "sms:" + phoneDigits + "?&body=" + encodeURIComponent(replyText),
     style: {
       textDecoration: "none"

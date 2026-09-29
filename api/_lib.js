@@ -71,6 +71,24 @@ async function verifyCaller(idToken) {
   };
 }
 
+/* ---------- the Gmail script proving who it is ----------
+   Google Apps Script can hand over a Google-signed identity token for the
+   account it runs as. Google checks the signature; we check it's one of the
+   inboxes allowed to file leads. No shared secret to copy anywhere. */
+const INGEST_EMAILS = String(process.env.INGEST_EMAILS || "ludvert@gmail.com,info@jtproconstruction.com")
+  .split(",").map((x) => x.trim().toLowerCase()).filter(Boolean);
+async function verifyGoogleSender(idToken) {
+  if (!idToken) return null;
+  const r = await fetch("https://oauth2.googleapis.com/tokeninfo?id_token=" + encodeURIComponent(idToken));
+  if (!r.ok) return null;
+  const t = await r.json().catch(() => null);
+  if (!t || !["accounts.google.com", "https://accounts.google.com"].includes(t.iss)) return null;
+  if (String(t.email_verified) !== "true") return null;
+  if (Number(t.exp) * 1000 < Date.now()) return null;
+  const email = String(t.email || "").toLowerCase();
+  return INGEST_EMAILS.includes(email) ? email : null;
+}
+
 /* ---------- Firestore value encoding ----------
    The REST API wants every value tagged with its type. */
 function toValue(v) {
@@ -466,7 +484,7 @@ const QUOTE_TOOL = {
       confidenceReason: { type: "string", description: "One sentence." },
       needsSiteVisit: { type: "boolean", description: "True if the job should be seen in person before a firm price." },
 
-      clientReply: { type: "string", description: "A ready-to-send first reply to the customer, written as Joel from JTProconstruction for a Thumbtack/text chat. Warm, professional, 90–170 words. Thank them, show you understood the job in one or two specific sentences, give the price as the literal placeholder {{PRICE_RANGE}} (it is filled in by the system — never write a dollar figure yourself), say what's included in one line, then ask the open questions as a short numbered list, and close with a next step (quick call or site visit). Do not promise dates. Do not mention AI." },
+      clientReply: { type: "string", description: "The FIRST message to the customer on Thumbtack — it has to win the job against other pros who answered the same post, so make it stand out. Written as Joel, owner of JTProconstruction. 70–130 words, short lines, easy to read on a phone. Structure: (1) a warm, confident opener that uses their first name if known and names THEIR exact project — never a generic 'thanks for reaching out'; (2) one or two sentences showing you already understand the job and how you'd tackle it (a specific detail from their post or photos); (3) the price as the literal placeholder {{PRICE_FROM}} phrased like 'Projects like yours start at {{PRICE_FROM}}' — then make clear the final price is confirmed after a quick on-site look and can go up depending on what we find (size, condition, hidden damage); (4) why us, in one line: licensed & insured, itemized written quote, 90-day workmanship warranty, clean job site; (5) at most 2 quick questions, only the ones that matter most; (6) a clear call to action to book the on-site visit (e.g. 'What day works best for a quick walk-through?'). Never write a dollar figure yourself — only {{PRICE_FROM}}. Don't invent reviews, years in business, discounts or dates. At most one emoji. Do not mention AI." },
     },
     required: ["clientName", "clientPhone", "clientEmail", "clientAddress", "sourcePlatform", "timeline", "budgetMentioned",
       "category", "jobTitle", "projectSummary", "findings", "scope", "labor", "materials", "measurements",
@@ -558,10 +576,15 @@ function priceRange(total, confidence) {
   const f = (n) => "$" + r50(n).toLocaleString("en-US");
   return f(total * lo) + "–" + f(total * hi);
 }
+/* The "starting at" figure for a first message: the low end of the range. */
+function priceFrom(total, confidence) {
+  const [lo] = RANGE[confidence] || RANGE.medium;
+  return "$" + Math.max(50, Math.round((total * lo) / 50) * 50).toLocaleString("en-US");
+}
 function renderReply(template, total, confidence) {
-  const range = priceRange(total, confidence);
   const t = String(template || "");
-  return t.includes("{{PRICE_RANGE}}") ? t.split("{{PRICE_RANGE}}").join(range) : t + (t ? "\n\n" : "") + "Estimated investment: " + range;
+  if (!t.includes("{{PRICE_RANGE}}") && !t.includes("{{PRICE_FROM}}")) return t + (t ? "\n\n" : "") + "Projects like this start at " + priceFrom(total, confidence) + ".";
+  return t.split("{{PRICE_RANGE}}").join(priceRange(total, confidence)).split("{{PRICE_FROM}}").join(priceFrom(total, confidence));
 }
 
 /* Every standard step of the category shows up exactly once — ticked and
@@ -640,7 +663,7 @@ async function draftQuote({ text, images, settings }) {
     assumptions: arr(f.assumptions, 12), questions: arr(f.questions, 6),
     risks: str(f.risks, 1500), confidence: conf, confidenceReason: str(f.confidenceReason, 400),
     needsSiteVisit: f.needsSiteVisit === true,
-    replyTemplate: str(f.clientReply, 3000).replace(/\$\s?\d(?:[\d,]*\d)?(\.\d+)?(\s?(?:[-–]|to)\s?\$?\s?\d(?:[\d,]*\d)?(\.\d+)?)?/g, "{{PRICE_RANGE}}"),
+    replyTemplate: str(f.clientReply, 3000).replace(/\$\s?\d(?:[\d,]*\d)?(\.\d+)?(\s?(?:[-–]|to)\s?\$?\s?\d(?:[\d,]*\d)?(\.\d+)?)?/g, "{{PRICE_FROM}}"),
     model: QUOTE_MODEL, photoCount: nPhotos,
   };
   return { draft, usage };
@@ -718,6 +741,6 @@ module.exports = {
   toFields, fromFields, getDocAs, setDocAs, listDocsAs,
   adminToken, createDocAsServer, listDocsAsServer, setDocAsServer, getDocAsServer, queryAsServer,
   extractLead, sendEmail,
-  QUOTE_MODEL, draftQuote, draftToQuoteFields, quoteTotal, priceRange, renderReply,
+  QUOTE_MODEL, draftQuote, draftToQuoteFields, quoteTotal, priceRange, priceFrom, renderReply, verifyGoogleSender,
   uploadImageAsServer, checkImages,
 };

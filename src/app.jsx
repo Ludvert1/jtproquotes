@@ -1106,10 +1106,14 @@ function priceRange(total, confidence) {
   const f = (n) => "$" + r50(n).toLocaleString("en-US");
   return f(total * lo) + "–" + f(total * hi);
 }
+/* The "starting at" figure for a first message: the low end of the range. */
+function priceFrom(total, confidence) {
+  const [lo] = RANGE_BY_CONFIDENCE[confidence] || RANGE_BY_CONFIDENCE.medium;
+  return "$" + Math.max(50, Math.round((total * lo) / 50) * 50).toLocaleString("en-US");
+}
 function renderReply(template, total, confidence) {
   const t = String(template || "");
-  const range = priceRange(total, confidence);
-  return t.includes("{{PRICE_RANGE}}") ? t.split("{{PRICE_RANGE}}").join(range) : t;
+  return t.split("{{PRICE_RANGE}}").join(priceRange(total, confidence)).split("{{PRICE_FROM}}").join(priceFrom(total, confidence));
 }
 
 /* A photo on a quote may have a full-size copy in Storage (url), a small copy
@@ -1440,7 +1444,7 @@ function AiAssistant({ me, q, settings, disabled, onApplyDraft, onApplyLead, onS
                   </div>
                   <div style={{ textAlign: "right" }}>
                     <div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontSize: 28, fontWeight: 700, color: BRAND.navy }}>{money(preview.total)}</div>
-                    <div style={{ fontSize: 11.5, color: BRAND.sub }}>Reply range {priceRange(preview.total, draft.confidence)}</div>
+                    <div style={{ fontSize: 11.5, color: BRAND.sub }}>Reply says "starts at {priceFrom(preview.total, draft.confidence)}"</div>
                   </div>
                 </div>
                 <div style={{ fontSize: 12.5, marginTop: 8, fontWeight: 600, color: draft.confidence === "high" ? BRAND.green : draft.confidence === "medium" ? BRAND.amber : BRAND.red }}>
@@ -1826,8 +1830,12 @@ function QuoteForm({ me, isOwner, isManager, settings, notify, existing, onSave,
   const startReply = () => {
     setDirty(true);
     const first = (q.clientName || "").split(" ")[0];
-    set("replyTemplate", "Hi" + (first ? " " + first : "") + ", thanks for reaching out to JTProconstruction about " + (q.jobTitle || "your project").toLowerCase() + ".\n\nBased on what you've described, the estimated investment is {{PRICE_RANGE}}, covering labor, materials, cleanup and haul-off, with a 90-day workmanship warranty.\n\nWould you be open to a quick call or a short site visit so we can confirm measurements and give you a firm price?\n\n— Joel, JTProconstruction LLC");
+    set("replyTemplate", "Hi" + (first ? " " + first : "") + "! Joel here with JTProconstruction — your " + (q.jobTitle || "project").toLowerCase() + " is right in our wheelhouse.\n\n"
+      + "Projects like yours start at {{PRICE_FROM}}. I'll confirm the final price after a quick on-site look — it can go up depending on size, condition and anything hidden we find.\n\n"
+      + "Licensed & insured · itemized written quote · 90-day workmanship warranty · clean job site.\n\n"
+      + "What day works best for a quick walk-through?\n— Joel, JTProconstruction LLC");
   };
+
 
   const attachments = q.attachments || [];
 
@@ -2005,15 +2013,15 @@ function QuoteForm({ me, isOwner, isManager, settings, notify, existing, onSave,
                   <strong>Still to find out:</strong> {q.aiDraft.questions.join(" · ")}
                 </div>
               )}
-              <Field label="Message" hint="{{PRICE_RANGE}} fills itself in from the quote total, so the reply always matches the numbers.">
+              <Field label="Message" hint="{{PRICE_FROM}} becomes the starting price (and {{PRICE_RANGE}} a range) from the quote total, so the reply always matches the numbers.">
                 <textarea style={Object.assign({}, inputStyle, { minHeight: 170, fontSize: 14 })} disabled={locked} value={q.replyTemplate} onChange={(e) => set("replyTemplate", e.target.value)} />
               </Field>
               <div style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: "0.06em", color: BRAND.sub, fontWeight: 700, marginBottom: 4 }}>What the client will read</div>
               <div style={{ background: "#F4F7FB", border: `1px solid ${BRAND.line}`, borderRadius: 10, padding: 12, fontSize: 13.5, whiteSpace: "pre-wrap", marginBottom: 12 }}>{replyText}</div>
               {canSendReply ? (
                 <div className="flex gap-2 flex-wrap">
-                  <Btn small kind="gold" onClick={copyReply}>Copy for Thumbtack</Btn>
-                  <a href="https://www.thumbtack.com/" target="_blank" rel="noopener noreferrer" style={{ textDecoration: "none" }}><Btn small kind="ghost">Open Thumbtack</Btn></a>
+                  <Btn small kind="gold" onClick={async () => { await copyReply(); window.open(q.leadUrl || "https://www.thumbtack.com/", "_blank", "noopener"); }}>{q.leadUrl ? "Copy & open this lead" : "Copy & open Thumbtack"}</Btn>
+                  <Btn small kind="ghost" onClick={copyReply}>Copy only</Btn>
                   {phoneDigits && <a href={"sms:" + phoneDigits + "?&body=" + encodeURIComponent(replyText)} style={{ textDecoration: "none" }}><Btn small kind="ghost">Text it</Btn></a>}
                   {q.clientEmail && <a href={"mailto:" + q.clientEmail + "?subject=" + encodeURIComponent("Your project quote from JTProconstruction (" + q.quoteNo + ")") + "&body=" + encodeURIComponent(replyText)} style={{ textDecoration: "none" }}><Btn small kind="ghost">Email it</Btn></a>}
                 </div>

@@ -19,8 +19,8 @@
 
 const crypto = require("crypto");
 const {
-  bad, uid, parseBody, extractLead, sendEmail,
-  STANDARD_EXCLUSIONS, createDocAsServer, listDocsAsServer,
+  bad, uid, parseBody, extractLead, sendEmail, verifyGoogleSender, priceFrom,
+  STANDARD_EXCLUSIONS, createDocAsServer, listDocsAsServer, queryAsServer,
   draftQuote, draftToQuoteFields, quoteTotal, renderReply, priceRange,
   uploadImageAsServer, checkImages,
 } = require("./_lib");
@@ -41,8 +41,17 @@ function secretMatches(given) {
 
 module.exports = async (req, res) => {
   if (req.method !== "POST") return bad(res, 405, "POST only.");
-  if (!process.env.INGEST_SECRET) return bad(res, 503, "Lead ingest is not switched on — INGEST_SECRET is not set.");
-  if (!secretMatches(req.headers["x-ingest-secret"])) return bad(res, 401, "Bad or missing secret.");
+  /* Either the Gmail script's Google identity (preferred — nothing secret to
+     copy around) or the older shared secret. */
+  const auth = String(req.headers.authorization || "");
+  let sender = null;
+  if (auth.startsWith("Bearer ")) {
+    try { sender = await verifyGoogleSender(auth.slice(7)); } catch { sender = null; }
+  }
+  if (!sender && !secretMatches(req.headers["x-ingest-secret"])) {
+    return bad(res, 401, "Not an approved lead inbox. Run the script from ludvert@gmail.com, or set INGEST_EMAILS in Vercel.");
+  }
+  if (!process.env.FIREBASE_SERVICE_ACCOUNT) return bad(res, 503, "Lead ingest needs FIREBASE_SERVICE_ACCOUNT in Vercel.");
 
   const body = parseBody(req);
   if (!body) return bad(res, 400, "Missing or invalid request body.");
@@ -51,6 +60,8 @@ module.exports = async (req, res) => {
   const from = typeof body.from === "string" ? body.from.slice(0, 300) : "";
   const text = typeof body.text === "string" ? body.text.slice(0, 20000) : "";
   const messageId = typeof body.messageId === "string" ? body.messageId.slice(0, 200) : "";
+  // The "View / Reply" link from the Thumbtack email, so one tap opens the lead.
+  const leadUrl = typeof body.leadUrl === "string" && /^https:\/\/([\w-]+\.)*thumbtack\.com\//.test(body.leadUrl) ? body.leadUrl.slice(0, 1000) : "";
 
   // Photos the customer attached to the lead, sent along by the Gmail script.
   const checked = checkImages(body.images, 4, 3_500_000);
@@ -76,6 +87,14 @@ module.exports = async (req, res) => {
   }
 
   const leadText = (subject ? "Subject: " + subject + "\n\n" : "") + text;
+
+  // The same email filed twice (e.g. the script re-ran) is ignored.
+  if (messageId) {
+    try {
+      const dupes = await queryAsServer("quotes", { leadMessageId: messageId });
+      if (dupes.length) return res.status(200).json({ ok: true, duplicate: true, quoteNo: dupes[0].quoteNo, id: dupes[0].id });
+    } catch { /* carry on */ }
+  }
   const now = new Date().toISOString();
   const id = uid() + uid();
   const quoteNo = "Q-" + new Date().getFullYear() + "-" + Math.floor(1000 + Math.random() * 9000);
@@ -121,7 +140,7 @@ module.exports = async (req, res) => {
       clientPhone: d.clientPhone, clientEmail: d.clientEmail, clientAddress: d.clientAddress,
       exclusions: STANDARD_EXCLUSIONS.map((t) => ({ id: uid(), text: t, on: true })),
       notes: "", attachments: attachments.filter(Boolean),
-      fromInbox: true, leadSource: d.sourcePlatform || "email", leadMessageId: messageId, leadReadAt: now,
+      fromInbox: true, leadSource: d.sourcePlatform || "email", leadMessageId: messageId, leadReadAt: now, leadUrl,
       leadText: leadText.slice(0, 8000),
       history: [{ at: now, by: "Lead inbox", action: "Filed from a lead email and drafted by AI" }],
     }, fields);
@@ -163,7 +182,7 @@ module.exports = async (req, res) => {
       marginPct: (settings && settings.targetMargin) != null ? settings.targetMargin : 25,
       discountPct: 0,
       notes,
-      fromInbox: true, leadSource: f.sourcePlatform || "email", leadMessageId: messageId, leadReadAt: now,
+      fromInbox: true, leadSource: f.sourcePlatform || "email", leadMessageId: messageId, leadReadAt: now, leadUrl,
       leadText: leadText.slice(0, 8000),
       history: [{ at: now, by: "Lead inbox", action: "Filed from a lead email" }],
     };
@@ -204,6 +223,7 @@ module.exports = async (req, res) => {
       "",
       d && d.questions.length ? "Still need from the customer:\n" + d.questions.map((x, i) => `  ${i + 1}. ${x}`).join("\n") + "\n" : "",
       d ? "──── Reply to paste into Thumbtack (review first) ────\n" + reply + "\n────────────────────────────────────\n" : "",
+      leadUrl ? "Open the lead in Thumbtack: " + leadUrl + "\n" : "",
       d ? "Open JTProQuotes to check the numbers and approve it." : `Filed under ${ownerName}'s drafts. It has no price on it yet and nothing has been sent.`,
     ].filter((l) => l !== "").join("\n"),
     replyTo: quote.clientEmail || undefined,
@@ -214,8 +234,8 @@ module.exports = async (req, res) => {
     const [users, subs] = await Promise.all([listDocsAsServer("users"), listDocsAsServer("pushSubs")]);
     const managers = users.filter((u) => u && u.active === true && (u.role === "owner" || u.role === "assistant")).map((u) => u.id);
     await sendToPeople(subs, managers, {
-      title: "New lead · " + (d ? priceRange(total, d.confidence) : quote.category),
-      body: `${quote.clientName} — ${quote.jobTitle || quote.category}. ${d ? "Quote drafted, reply ready to send." : "Filed as a draft, needs pricing."}`,
+      title: "New Thumbtack lead · " + (d ? "from " + priceFrom(total, d.confidence) : quote.category),
+      body: `${quote.clientName} — ${quote.jobTitle || quote.category}. ${d ? "Reply is written — tap, copy, send." : "Filed as a draft, needs pricing."}`,
       tag: "q-" + id, url: "/?quote=" + id,
     });
   } catch (e) { console.error("[ingest-lead] push failed:", e.message); }

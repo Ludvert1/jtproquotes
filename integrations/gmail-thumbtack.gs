@@ -14,37 +14,35 @@
    Runs on Google's servers as you, so it needs no Google Cloud
    project, no OAuth app, and no password anywhere.
 
-   ── SETUP (about ten minutes, once) ──────────────────────────
-   1. Go to script.google.com and click "New project".
-   2. Delete whatever is in the editor and paste this whole file in.
-   3. Change ENDPOINT and SECRET below.
-        ENDPOINT  your app's address + /api/ingest-lead
-        SECRET    the same value you set as INGEST_SECRET in Vercel
-   4. Save (the disk icon). Name the project "JTProQuotes leads".
-   5. In the function dropdown at the top pick `testOnce`, click Run,
-      and approve the permissions Google asks for. It will say what it
-      found. Check JTProQuotes for the draft.
-   6. Click the clock icon (Triggers) on the left, then
-      "Add Trigger": function `checkForLeads`, time-driven,
-      minutes timer, every 15 minutes. Save.
+   ── SETUP (about five minutes, once) ─────────────────────────
+   Do this signed in as the Gmail that RECEIVES the Thumbtack emails
+   (ludvert@gmail.com — info@jtproconstruction.com forwards there).
+   1. script.google.com → New project. Name it "JTProQuotes leads".
+   2. Replace the code in Code.gs with this whole file.
+   3. Project Settings (gear) → tick "Show appsscript.json manifest
+      file in editor". Back in the editor, open appsscript.json and
+      replace it with integrations/appsscript.json from the repo.
+   4. Save. Pick `testOnce` in the function menu → Run → allow the
+      permissions Google asks for. The log says what it found.
+   5. Triggers (clock icon) → Add Trigger → `checkForLeads`,
+      Time-driven, Minutes timer, Every 5 minutes → Save.
 
-   That's it. New leads turn into drafts by themselves.
-
-   ── HOW IT DECIDES WHAT IS A LEAD ────────────────────────────
-   The SEARCHES list below. Each entry is an ordinary Gmail search.
-   Add your own — Angi, Facebook, your website's form — and they all
-   get filed the same way. Anything already processed is labelled, so
-   nothing is filed twice even if the script runs again.
+   No secret to copy: the script proves who it is with your Google
+   sign-in, and JTProQuotes only accepts leads from your inboxes.
 ============================================================ */
 
-// ---- EDIT THESE THREE ----------------------------------------
+// ---- SETTINGS -------------------------------------------------
 var ENDPOINT = "https://jtproquotes.vercel.app/api/ingest-lead";
-var SECRET = "paste-the-same-value-as-INGEST_SECRET-in-vercel";
+// Only needed if you ever switch back to a shared secret (INGEST_SECRET).
+var SECRET = "";
 
 var SEARCHES = [
   // Thumbtack sends new leads and direct requests from thumbtack.com.
   // Skip its marketing and billing mail — only real customer requests.
   'from:thumbtack.com newer_than:2d -label:JTPQ-Filed -subject:(receipt OR invoice OR "weekly" OR "tips" OR "budget" OR "payment")',
+  // Thumbtack mail that reached Gmail by forwarding from the business inbox,
+  // in case the forwarder rewraps it as "Fwd:" from info@jtproconstruction.com.
+  'to:info@jtproconstruction.com thumbtack newer_than:2d -from:thumbtack.com -label:JTPQ-Filed -subject:(receipt OR invoice OR "weekly" OR "tips" OR "budget" OR "payment")',
   // Add more as you need them, one per line, each in quotes and comma-ended:
   // 'from:angi.com newer_than:2d -label:JTPQ-Filed',
   // 'subject:"new quote request" newer_than:2d -label:JTPQ-Filed',
@@ -100,6 +98,7 @@ function fileOneLead(msg) {
     text: body.slice(0, 18000),
     messageId: msg.getId(),
     receivedAt: msg.getDate().toISOString(),
+    leadUrl: leadLinkFrom(msg),
     images: photosFrom(msg)
   };
 
@@ -107,7 +106,7 @@ function fileOneLead(msg) {
     var res = UrlFetchApp.fetch(ENDPOINT, {
       method: "post",
       contentType: "application/json",
-      headers: { "x-ingest-secret": SECRET },
+      headers: authHeaders(),
       payload: JSON.stringify(payload),
       muteHttpExceptions: true
     });
@@ -121,17 +120,40 @@ function fileOneLead(msg) {
       if (DRAFT_CUSTOMER_EMAIL && out.reply && out.clientEmail) {
         try {
           GmailApp.createDraft(out.clientEmail,
-            "Your project quote from JTProconstruction" + (out.quoteNo ? " (" + out.quoteNo + ")" : ""),
+            "Your project with JTProconstruction" + (out.quoteNo ? " (" + out.quoteNo + ")" : ""),
             out.reply);
           extra = "  · draft reply waiting in Gmail Drafts";
         } catch (e) { extra = "  · couldn't create the Gmail draft: " + e.message; }
       }
+      if (out.duplicate) return { ok: true, line: "ALREADY FILED  " + (out.quoteNo || "") + "  —  " + subject.slice(0, 60) };
       return { ok: true, line: "FILED  " + (out.quoteNo || "?") + (out.range ? "  " + out.range : "") + "  —  " + subject.slice(0, 60) + extra };
     }
     return { ok: false, line: "FAILED (" + code + ")  " + subject.slice(0, 60) + "  —  " + text.slice(0, 160) };
   } catch (e) {
     return { ok: false, line: "FAILED (network)  " + subject.slice(0, 60) + "  —  " + e.message };
   }
+}
+
+/* Proves to JTProQuotes that this is your Gmail talking. */
+function authHeaders() {
+  var h = { Authorization: "Bearer " + ScriptApp.getIdentityToken() };
+  if (SECRET) h["x-ingest-secret"] = SECRET;
+  return h;
+}
+
+/* The Thumbtack link that opens this lead (the "View / Reply" button). */
+function leadLinkFrom(msg) {
+  var html = "";
+  try { html = msg.getBody() || ""; } catch (e) { return ""; }
+  var links = html.match(/href="(https:\/\/[^"]*thumbtack\.com[^"]*)"/gi) || [];
+  var best = "";
+  for (var i = 0; i < links.length; i++) {
+    var u = links[i].replace(/^href="/i, "").replace(/"$/, "").replace(/&amp;/g, "&");
+    if (/unsubscribe|settings|privacy|terms|help|preferences|app-store|play\.google/i.test(u)) continue;
+    if (/lead|request|message|inbox|conversation|reply|view/i.test(u)) return u;
+    if (!best) best = u;
+  }
+  return best;
 }
 
 /* Image attachments and inline photos on the lead, as base64. Small images
@@ -159,9 +181,6 @@ function labelNamed(name) {
 /* Run this by hand once from the editor to check the setup. It does the
    same thing as the trigger, and tells you what happened. */
 function testOnce() {
-  if (SECRET.indexOf("paste-the-same-value") === 0) {
-    throw new Error("Set SECRET at the top of the script to the same value as INGEST_SECRET in Vercel.");
-  }
   var result = checkForLeads();
   Logger.log("---- result ----\n" + result);
   return result;

@@ -192,24 +192,30 @@ any reason, the lead is still filed as an unpriced draft so it is never lost.
 
 ### Setting it up
 
-1. In Firebase Console → **Project settings → Service accounts → Generate new
-   private key**. You get a JSON file.
-2. In Vercel add these environment variables, then redeploy:
-   - `FIREBASE_SERVICE_ACCOUNT` — the whole contents of that JSON file, pasted
-     as one line.
-   - `INGEST_SECRET` — any long random string you invent.
-3. Open `integrations/gmail-thumbtack.gs`, follow the setup comment at the top
-   (paste into script.google.com, set `ENDPOINT` and `SECRET`, run `testOnce`,
-   add a 15-minute trigger).
+1. Forward info@jtproconstruction.com to ludvert@gmail.com (Hostinger → Emails → Forwarders).
+2. In script.google.com (as ludvert@gmail.com) follow the setup comment at the top of
+   `integrations/gmail-thumbtack.gs` — paste it, paste `integrations/appsscript.json`
+   as the manifest, run `testOnce`, add a 5-minute trigger.
 
-The service-account key is a **real secret** — unlike the Firebase web key, it
-bypasses your security rules. It belongs only in Vercel's environment
-variables. Never put it in `config.js`, anywhere under `src/`, or in this
-repository.
+No shared secret: the script proves who it is with its Google sign-in and the
+server only accepts leads from the inboxes in `INGEST_EMAILS` (default
+ludvert@gmail.com, info@jtproconstruction.com). Needs `FIREBASE_SERVICE_ACCOUNT`
+in Vercel. The old `INGEST_SECRET` header still works if you prefer it.
 
-Add more lead sources by editing the `SEARCHES` list in the script — Angi,
-Facebook, your website's form. They all get filed the same way. Processed
-emails are labelled `JTPQ-Filed` so nothing is filed twice.
+### The first message
+
+The AI writes a short, specific first message built to win the job: their
+project named in the first line, how we'd tackle it, **"projects like yours
+start at $X"** (the low end of the estimate), a clear note that the final price
+is confirmed at the on-site visit and can go up depending on what's found, why
+JTPro (licensed & insured, itemized quote, 90-day warranty), at most two
+questions, and a call to book the walk-through. The alert on your phone opens
+the quote; **Copy & open this lead** copies it and jumps straight to that lead
+in Thumbtack.
+
+Thumbtack only lets approved partner software post into its inbox. For an
+instant automatic first touch, set Thumbtack's own **Settings → Auto
+responses**; the personalized AI reply follows within minutes.
 
 ---
 
