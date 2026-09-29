@@ -196,3 +196,12 @@ function resetLabels() {
   });
   Logger.log("Labels removed.");
 }
+
+/* Checks that JTProQuotes accepts this inbox, without filing anything. */
+function testConnection() {
+  var res = UrlFetchApp.fetch(ENDPOINT, { method: "post", contentType: "application/json", headers: authHeaders(), payload: "{}", muteHttpExceptions: true });
+  var code = res.getResponseCode();
+  var msg = code === 400 ? "CONNECTED — JTProQuotes accepted this inbox." : "NOT CONNECTED (" + code + "): " + res.getContentText().slice(0, 200);
+  Logger.log(msg);
+  return msg;
+}
