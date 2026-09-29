@@ -1830,10 +1830,9 @@ function QuoteForm({ me, isOwner, isManager, settings, notify, existing, onSave,
   const startReply = () => {
     setDirty(true);
     const first = (q.clientName || "").split(" ")[0];
-    set("replyTemplate", "Hi" + (first ? " " + first : "") + "! Joel here with JTProconstruction — your " + (q.jobTitle || "project").toLowerCase() + " is right in our wheelhouse.\n\n"
-      + "Projects like yours start at {{PRICE_FROM}}. I'll confirm the final price after a quick on-site look — it can go up depending on size, condition and anything hidden we find.\n\n"
-      + "Licensed & insured · itemized written quote · 90-day workmanship warranty · clean job site.\n\n"
-      + "What day works best for a quick walk-through?\n— Joel, JTProconstruction LLC");
+    set("replyTemplate", "Hey" + (first ? " " + first : " there") + "! Joel with JTProconstruction — happy to help with your " + (q.jobTitle || "project").toLowerCase() + ".\n\n"
+      + "Jobs like this usually start around {{PRICE_FROM}}. I'd lock in the exact price after a quick look — could go up a bit depending on what we find.\n\n"
+      + "When's a good time for me to swing by?\n— Joel");
   };
 
 
