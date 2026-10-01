@@ -16,8 +16,8 @@ const BRAND = {
 const COMPANY = {
   name: "JTProconstruction LLC",
   tag: "Licensed & Insured · Residential & Commercial",
-  area: "New Caney, TX · Serving Greater Houston & Texas",
-  cities: "Houston · Austin · Dallas · San Antonio · Corpus Christi",
+  area: "New Caney, TX · Serving Texas & Nevada",
+  cities: "Houston · Austin · Dallas · San Antonio · Corpus Christi · Nevada",
   phone: "(713) 835-8245",
   email: "info@jtproconstruction.com",
   site: "jtproconstruction.com",
@@ -162,9 +162,14 @@ async function logActivity(by, action, quoteNo) {
   } catch {}
 }
 
+/* Labor only (client buys the materials) or labor + materials. New quotes
+   start labor-only; quotes saved before this option existed keep counting
+   their materials so their totals don't change. */
+const isLaborOnly = (q) => !!q && q.pricingMode === "labor";
+
 function computeQuote(q, settings) {
   const labor = (q.crew || 0) * (q.days || 0) * (q.hoursPerDay || 0) * (q.laborRate || 0);
-  const materials = (q.items || []).reduce((s, it) => s + (Number(it.qty) || 0) * (Number(it.price) || 0), 0);
+  const materials = isLaborOnly(q) ? 0 : (q.items || []).reduce((s, it) => s + (Number(it.qty) || 0) * (Number(it.price) || 0), 0);
   const baseCost = labor + materials;
   const overhead = baseCost * ((q.overheadPct != null ? q.overheadPct : settings.overheadPct) / 100);
   const totalCost = baseCost + overhead;
@@ -1111,9 +1116,10 @@ function priceFrom(total, confidence) {
   const [lo] = RANGE_BY_CONFIDENCE[confidence] || RANGE_BY_CONFIDENCE.medium;
   return "$" + Math.max(50, Math.round((total * lo) / 50) * 50).toLocaleString("en-US");
 }
-function renderReply(template, total, confidence) {
+function renderReply(template, total, confidence, laborOnly) {
   const t = String(template || "");
-  return t.split("{{PRICE_RANGE}}").join(priceRange(total, confidence)).split("{{PRICE_FROM}}").join(priceFrom(total, confidence));
+  const tag = laborOnly ? " for labor" : "";
+  return t.split("{{PRICE_RANGE}}").join(priceRange(total, confidence) + tag).split("{{PRICE_FROM}}").join(priceFrom(total, confidence) + tag);
 }
 
 /* A photo on a quote may have a full-size copy in Storage (url), a small copy
@@ -1357,6 +1363,7 @@ function AiAssistant({ me, q, settings, disabled, onApplyDraft, onApplyLead, onS
   const preview = draft ? computeQuote({
     crew: draft.labor.crew, days: draft.labor.days, hoursPerDay: draft.labor.hoursPerDay,
     laborRate: q.laborRate, overheadPct: q.overheadPct, marginPct: q.marginPct, discountPct: q.discountPct,
+    pricingMode: q.pricingMode,
     items: draft.materials.map((m) => ({ qty: m.qty, price: m.unitCost })),
   }, settings) : null;
 
@@ -1486,7 +1493,7 @@ function AiAssistant({ me, q, settings, disabled, onApplyDraft, onApplyLead, onS
                 <div style={label}>Labor</div>
                 <div style={{ fontSize: 13 }}>{draft.labor.crew} × {draft.labor.days} day{draft.labor.days === 1 ? "" : "s"} × {draft.labor.hoursPerDay} hrs × {money(q.laborRate)} = <strong>{money(preview.labor)}</strong></div>
                 {draft.labor.basis && <div style={{ fontSize: 12, color: BRAND.sub, marginTop: 2 }}>{draft.labor.basis}</div>}
-                <div style={Object.assign({}, label, { marginTop: 10 })}>Materials at cost</div>
+                <div style={Object.assign({}, label, { marginTop: 10 })}>Materials at cost{isLaborOnly(q) ? " — labor-only quote: listed for the client, not in the price" : ""}</div>
                 <div style={{ overflowX: "auto" }}>
                   <table style={{ width: "100%", fontSize: 12.5, borderCollapse: "collapse" }}>
                     <tbody>
@@ -1538,7 +1545,7 @@ function AiAssistant({ me, q, settings, disabled, onApplyDraft, onApplyLead, onS
               {draft.replyTemplate && (
                 <div style={box}>
                   <div style={label}>First reply to the customer (saved on the quote)</div>
-                  <div style={{ fontSize: 13, whiteSpace: "pre-wrap", color: BRAND.ink }}>{renderReply(draft.replyTemplate, preview.total, draft.confidence)}</div>
+                  <div style={{ fontSize: 13, whiteSpace: "pre-wrap", color: BRAND.ink }}>{renderReply(draft.replyTemplate, preview.total, draft.confidence, isLaborOnly(q))}</div>
                 </div>
               )}
 
@@ -1570,6 +1577,8 @@ function QuoteForm({ me, isOwner, isManager, settings, notify, existing, onSave,
     exclusions: buildExclusions(),
     // No days yet: a blank quote shows $0 until the work is entered or drafted.
     crew: 2, days: 0, hoursPerDay: 8, laborRate: settings.laborRate,
+    pricingMode: "labor",
+    preparedBy: { id: me.id, name: me.name || "", email: me.email || "" },
     items: [], overheadPct: settings.overheadPct, marginPct: settings.targetMargin,
     discountPct: 0, notes: "", history: [{ at: new Date().toISOString(), by: me.name, action: "Created" }],
   });
@@ -1820,7 +1829,7 @@ function QuoteForm({ me, isOwner, isManager, settings, notify, existing, onSave,
      approval — same rule as printing the quote. */
   const releasable = ["approved", "sent", "negotiating", "won"].includes(q.status);
   const canSendReply = !isVoid(q) && (isManager || releasable);
-  const replyText = renderReply(q.replyTemplate, c.total, (q.aiDraft && q.aiDraft.confidence) || "medium");
+  const replyText = renderReply(q.replyTemplate, c.total, (q.aiDraft && q.aiDraft.confidence) || "medium", isLaborOnly(q));
   const copyReply = async () => {
     try { await navigator.clipboard.writeText(replyText); notify("Reply copied — paste it into Thumbtack."); }
     catch { window.prompt("Copy the reply:", replyText); }
@@ -1975,7 +1984,18 @@ function QuoteForm({ me, isOwner, isManager, settings, notify, existing, onSave,
             <h3 style={Object.assign({}, h3Style, { marginBottom: 0 })}>6 · MATERIALS & EXTRAS</h3>
             {!locked && <Btn small kind="ghost" onClick={addItem}>+ Add item</Btn>}
           </div>
-          {q.items.length === 0 && <div style={{ fontSize: 13, color: BRAND.sub }}>No materials yet. For labor-only jobs, leave this empty.</div>}
+          <Field label="What this quote covers">
+            <select style={inputStyle} disabled={locked} value={isLaborOnly(q) ? "labor" : "turnkey"} onChange={(e) => set("pricingMode", e.target.value)}>
+              <option value="labor">Labor only — client supplies materials</option>
+              <option value="turnkey">Labor + materials</option>
+            </select>
+          </Field>
+          {isLaborOnly(q) && q.items.length > 0 && (
+            <div style={{ background: BRAND.paper, borderRadius: 8, padding: "8px 12px", fontSize: 12.5, color: BRAND.sub, marginBottom: 10 }}>
+              Labor only: these materials are <strong>not in the price</strong>. They print on the quote as a shopping list for the client. Switch to "Labor + materials" to include them.
+            </div>
+          )}
+          {q.items.length === 0 && <div style={{ fontSize: 13, color: BRAND.sub }}>{isLaborOnly(q) ? "No materials listed. Add items if you'd like to give the client a shopping list." : "No materials yet."}</div>}
           {q.items.map((it) => (
             <div key={it.id} className="flex gap-2 mb-2 items-center flex-wrap">
               <input style={Object.assign({}, inputStyle, { flex: "2 1 180px" })} disabled={locked} placeholder="Item — e.g. Porcelain tile 12x24" value={it.desc} onChange={(e) => setItem(it.id, "desc", e.target.value)} />
@@ -2053,7 +2073,8 @@ function QuoteForm({ me, isOwner, isManager, settings, notify, existing, onSave,
                 {q.aiDraft.risks ? <div style={{ color: BRAND.red, marginTop: 4, fontWeight: 600 }}>{q.aiDraft.risks}</div> : null}
               </div>
             )}
-            {[["Labor", c.labor], ["Materials & extras", c.materials], ["Overhead", c.overhead]].map(([l, v]) => (
+            {isLaborOnly(q) && <div style={{ fontSize: 11.5, fontWeight: 700, color: BRAND.gold, letterSpacing: "0.04em", marginBottom: 6 }}>LABOR ONLY · CLIENT SUPPLIES MATERIALS</div>}
+            {[["Labor", c.labor], [isLaborOnly(q) ? "Materials (not included)" : "Materials & extras", c.materials], ["Overhead", c.overhead]].map(([l, v]) => (
               <div key={l} className="flex justify-between text-sm mb-1"><span style={{ color: BRAND.sub }}>{l}</span><span>{money(v)}</span></div>
             ))}
             {c.discount > 0 && <div className="flex justify-between text-sm mb-1" style={{ color: BRAND.green }}><span>Discount ({q.discountPct}%)</span><span>−{money(c.discount)}</span></div>}
@@ -2601,6 +2622,9 @@ function SettingsView({ settings, onSave }) {
 function PreviewModal({ quote, settings, users, me, onClose }) {
   const c = computeQuote(quote, settings);
   const author = users[quote.createdBy];
+  /* Who prepared it: the name saved on the quote, or the author's profile.
+     Leads filed automatically show the company instead. */
+  const preparer = Object.assign({ name: "", email: "" }, (author && !quote.fromInbox) ? { name: author.name, email: author.email } : {}, quote.preparedBy || {});
   const isOwnerViewer = me && canManage(me);
   const voided = isVoid(quote);
   const releasable = !voided && ["approved", "sent", "negotiating", "won"].includes(quote.status);
@@ -2735,7 +2759,13 @@ function PreviewModal({ quote, settings, users, me, onClose }) {
               <div style={goldLabel}>PROJECT</div>
               <div style={{ fontWeight: 700, fontSize: 15 }}>{quote.jobTitle || quote.category}</div>
               <div style={{ fontSize: 13, color: BRAND.sub }}>{quote.category} · Crew of {quote.crew} · Est. {quote.days} working day{quote.days > 1 ? "s" : ""}</div>
-              {author ? <div style={{ fontSize: 13, color: BRAND.sub }}>Prepared by: {author.name}</div> : null}
+              <div style={{ fontSize: 13, color: BRAND.sub }}>{isLaborOnly(quote) ? "Labor only — materials supplied by client" : "Labor & materials"}</div>
+            </div>
+            <div style={{ flex: "1 1 180px" }}>
+              <div style={goldLabel}>YOUR JTPRO CONTACT</div>
+              <div style={{ fontWeight: 700, fontSize: 15 }}>{preparer.name || COMPANY.name}</div>
+              <div style={{ fontSize: 13 }}>{COMPANY.phone}</div>
+              <div style={{ fontSize: 13 }}>{COMPANY.email}</div>
             </div>
           </div>
 
@@ -2786,7 +2816,12 @@ function PreviewModal({ quote, settings, users, me, onClose }) {
                 <td style={{ textAlign: "right", padding: "9px 12px" }}>{money(quote.laborRate)}</td>
                 <td style={{ textAlign: "right", padding: "9px 12px", fontWeight: 600 }}>{money(c.labor)}</td>
               </tr>
-              {quote.items.map((it) => (
+              {isLaborOnly(quote) ? (
+                <tr style={{ borderBottom: `1px solid ${BRAND.line}` }}>
+                  <td style={{ padding: "9px 12px", color: BRAND.sub }} colSpan={3}>Materials — supplied by client{(quote.items || []).length ? " (shopping list below)" : ""}</td>
+                  <td style={{ textAlign: "right", padding: "9px 12px", color: BRAND.sub }}>Not included</td>
+                </tr>
+              ) : quote.items.map((it) => (
                 <tr key={it.id} style={{ borderBottom: `1px solid ${BRAND.line}` }}>
                   <td style={{ padding: "9px 12px" }}>{it.desc || "Item"}</td>
                   <td style={{ textAlign: "right", padding: "9px 12px", whiteSpace: "nowrap" }}>{it.qty}{it.unit ? " " + it.unit : ""}</td>
@@ -2820,6 +2855,18 @@ function PreviewModal({ quote, settings, users, me, onClose }) {
               </div>
             </div>
           </div>
+
+          {isLaborOnly(quote) && (quote.items || []).some((it) => (it.desc || "").trim()) ? (
+            <div style={{ marginTop: 14, breakInside: "avoid" }}>
+              <div style={Object.assign({}, goldLabel, { marginBottom: 4 })}>MATERIALS FOR THE CLIENT TO PURCHASE</div>
+              <ul style={{ fontSize: 12.5, lineHeight: 1.6, paddingLeft: 18, margin: 0 }}>
+                {(quote.items || []).filter((it) => (it.desc || "").trim()).map((it) => (
+                  <li key={it.id} style={{ listStyle: "disc" }}>{it.desc}{it.qty ? " — " + it.qty + (it.unit ? " " + it.unit : "") : ""}</li>
+                ))}
+              </ul>
+              <div style={{ fontSize: 11.5, color: BRAND.sub, marginTop: 4 }}>We're happy to pick these up for you — just ask and we'll quote labor + materials.</div>
+            </div>
+          ) : null}
 
           {quote.notes ? <div style={{ fontSize: 13, marginTop: 10, background: BRAND.paper, padding: "10px 14px", borderRadius: 6, whiteSpace: "pre-wrap" }}><strong>Note:</strong> {quote.notes}</div> : null}
 
@@ -2857,7 +2904,7 @@ function PreviewModal({ quote, settings, users, me, onClose }) {
 
           {/* Signatures */}
           <div style={{ display: "flex", gap: 40, marginTop: 34 }}>
-            {["Client acceptance", COMPANY.name].map((who) => (
+            {["Client acceptance", COMPANY.name + (preparer.name ? " — " + preparer.name : "")].map((who) => (
               <div key={who} style={{ flex: 1 }}>
                 <div style={{ borderBottom: `1.5px solid ${BRAND.ink}`, height: 34 }} />
                 <div style={{ fontSize: 11, color: BRAND.sub, marginTop: 4 }}>{who} — signature &amp; date</div>

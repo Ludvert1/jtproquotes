@@ -495,7 +495,7 @@ const QUOTE_TOOL = {
 function quoteSystem(settings) {
   const s = settings || {};
   return [
-    "You are the senior estimator for JTProconstruction LLC, a licensed and insured residential and commercial remodeling contractor based in New Caney, TX, serving Greater Houston and major Texas cities — Houston, Austin, Dallas, San Antonio and Corpus Christi.",
+    "You are the senior estimator for JTProconstruction LLC, a licensed and insured residential and commercial remodeling contractor based in New Caney, TX, serving Greater Houston and major Texas cities — Houston, Austin, Dallas, San Antonio and Corpus Christi — and Nevada.",
     "Trades: flooring, painting, drywall, kitchen and bath remodels, exterior and siding, roofing repair, concrete, patio covers and covered structures, fencing, minor plumbing and electrical, water damage restoration, general repairs.",
     "",
     "You receive job-site photos, a customer's lead message, notes from the team, or any mix. Draft a complete, professional quote.",
@@ -557,7 +557,8 @@ function quoteTotal(q, s) {
   const settings = s || {};
   const hours = (Number(q.crew) || 0) * (Number(q.days) || 0) * (Number(q.hoursPerDay) || 0);
   const labor = hours * (Number(q.laborRate) || 0);
-  const materials = (q.items || []).reduce((sum, it) => sum + (Number(it.qty) || 0) * (Number(it.price) || 0), 0);
+  // Labor-only quotes list materials for the client but don't charge for them.
+  const materials = q.pricingMode === "labor" ? 0 : (q.items || []).reduce((sum, it) => sum + (Number(it.qty) || 0) * (Number(it.price) || 0), 0);
   const base = labor + materials;
   const overhead = base * ((Number(q.overheadPct != null ? q.overheadPct : settings.overheadPct) || 0) / 100);
   const cost = base + overhead;
@@ -581,8 +582,10 @@ function priceFrom(total, confidence) {
   const [lo] = RANGE[confidence] || RANGE.medium;
   return "$" + Math.max(50, Math.round((total * lo) / 50) * 50).toLocaleString("en-US");
 }
-function renderReply(template, total, confidence) {
-  const t = String(template || "");
+function renderReply(template, total, confidence, laborOnly) {
+  const t0 = String(template || "");
+  const tag = laborOnly ? " for labor" : "";
+  const t = tag ? t0.split("{{PRICE_FROM}}").join("{{PRICE_FROM}}" + tag).split("{{PRICE_RANGE}}").join("{{PRICE_RANGE}}" + tag) : t0;
   if (!t.includes("{{PRICE_RANGE}}") && !t.includes("{{PRICE_FROM}}")) return t + (t ? "\n\n" : "") + "Projects like this start at " + priceFrom(total, confidence) + ".";
   return t.split("{{PRICE_RANGE}}").join(priceRange(total, confidence)).split("{{PRICE_FROM}}").join(priceFrom(total, confidence));
 }
@@ -686,6 +689,8 @@ function draftToQuoteFields(d, settings, makeId, photoUrls) {
     overheadPct: s.overheadPct != null ? Number(s.overheadPct) : 12,
     marginPct: s.targetMargin != null ? Number(s.targetMargin) : 25,
     discountPct: 0,
+    // Every quote starts labor-only; materials stay listed for the client.
+    pricingMode: "labor",
     assessment: d.findings.map((f) => ({
       id: id(), title: f.title, detail: f.detail, photo: f.photo, priority: f.priority, on: true,
       photoUrl: (photoUrls && f.photo > 0 && photoUrls[f.photo - 1]) || "",

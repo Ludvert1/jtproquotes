@@ -177,7 +177,7 @@ module.exports = async (req, res) => {
       exclusions: STANDARD_EXCLUSIONS.map((t) => ({ id: uid(), text: t, on: true })),
       crew: 2, days: 1, hoursPerDay: 8,
       laborRate: (settings && settings.laborRate) || 45,
-      items: [],
+      items: [], pricingMode: "labor",
       overheadPct: (settings && settings.overheadPct) != null ? settings.overheadPct : 12,
       marginPct: (settings && settings.targetMargin) != null ? settings.targetMargin : 25,
       discountPct: 0,
@@ -202,7 +202,7 @@ module.exports = async (req, res) => {
   } catch { /* the log is useful, not essential */ }
 
   const total = d ? quoteTotal(quote, settings) : 0;
-  const reply = d ? renderReply(quote.replyTemplate, total, d.confidence) : "";
+  const reply = d ? renderReply(quote.replyTemplate, total, d.confidence, quote.pricingMode === "labor") : "";
 
   // Tell the team a lead landed, with the reply ready to paste into Thumbtack.
   await sendEmail({
