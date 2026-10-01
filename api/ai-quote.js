@@ -20,6 +20,7 @@
 
 const { bad, parseBody, verifyCaller, getDocAs, setDocAs, setDocAsServer, listDocsAs, draftQuote, checkImages } = require("./_lib");
 const { sendToPeople } = require("./_push");
+const { cleanProperty } = require("./_property");
 
 const MAX_PHOTOS = 8;
 // Vercel caps a request body at 4.5 MB. The app shrinks photos to ~1280px
@@ -49,7 +50,9 @@ module.exports = async (req, res) => {
   if (checked.error) return bad(res, 400, checked.error);
   const images = checked.images;
 
-  if (!text.trim() && images.length === 0) return bad(res, 400, "Add at least one photo or a description of the job.");
+  // Facts about the job address the app looked up (map, roof, flood zone…).
+  const property = cleanProperty(body.property);
+  if (!text.trim() && images.length === 0 && !property) return bad(res, 400, "Add at least one photo or a description of the job.");
 
   // The company's own numbers go into the brief so labor is sized against them.
   let settings = null;
@@ -75,7 +78,7 @@ module.exports = async (req, res) => {
   await saveJob({ status: "running", at: new Date().toISOString() });
 
   try {
-    const out = await draftQuote({ text, images, settings });
+    const out = await draftQuote({ text, images, settings, property });
     await saveJob({ status: "done", at: new Date().toISOString(), draft: out.draft, applied: false });
     // Let the phone know, in case the app isn't on screen any more.
     try {

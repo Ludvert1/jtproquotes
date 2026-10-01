@@ -319,3 +319,17 @@ Changing `config.js` does **not** require a rebuild — it's loaded directly by 
   blocked in a browser; this is deterrence by attribution.
 - Quote documents print to PDF from the browser (Ctrl/Cmd + P). Unapproved quotes carry a **DRAFT · NOT APPROVED** watermark and cannot be printed clean.
 - If something isn't saving in cloud mode, open the browser console (F12). Permission problems from the database rules are logged there with a `[JTProQuotes]` prefix.
+
+## Property lookup (address → property facts)
+
+Type the job address and press **Look up property** (it also runs on its own before every AI draft). You get:
+
+- the map pin and drive time from base (`BASE_ADDRESS`, default New Caney, TX 77357)
+- roof area, squares, number of faces and average pitch, measured from Google's satellite data
+- a Street View picture and a satellite picture
+- the FEMA flood zone
+- the lot size and use from Harris County records, for Harris County addresses
+
+The AI uses all of this when it drafts, and labels roof numbers "measured from satellite". Owner names, sale prices and mailing addresses are never requested. Lead emails that include a street address get the facts attached on their own.
+
+Setup: create a Google Cloud API key with **Geocoding, Routes, Solar, Street View Static and Maps Static** APIs enabled, then add it in Vercel as `GOOGLE_MAPS_API_KEY` and redeploy. Without the key, the button explains that it isn't switched on and AI drafts carry on without it.

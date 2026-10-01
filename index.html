@@ -2314,6 +2314,198 @@ const SOURCE_COLOR = {
   "assumed": BRAND.red
 };
 const MAX_PHOTOS = 8;
+const PROPERTY_PICS = {};
+const sameAddr = (a, b) => String(a || "").trim().toLowerCase() === String(b || "").trim().toLowerCase();
+async function fetchProperty(address) {
+  if (!fbAuth || !fbAuth.currentUser) throw new Error("Sign in again to look up the property.");
+  const idToken = await fbAuth.currentUser.getIdToken();
+  const r = await fetch("/api/property", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      idToken,
+      address
+    })
+  });
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) {
+    const e = new Error(data.error || "Property lookup failed.");
+    e.status = r.status;
+    throw e;
+  }
+  const p = data.property;
+  PROPERTY_PICS[address.trim().toLowerCase()] = {
+    streetView: p.streetView || "",
+    satellite: p.satellite || "",
+    streetViewDate: p.streetViewDate || ""
+  };
+  return Object.assign({}, p, {
+    streetView: "",
+    satellite: "",
+    query: address.trim()
+  });
+}
+const propertyPics = p => p && PROPERTY_PICS[String(p.query || "").trim().toLowerCase()] || null;
+function PropertyPanel({
+  q,
+  locked,
+  onProperty
+}) {
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  const [, bump] = useState(0);
+  const p = q.property;
+  const stale = p && !sameAddr(p.query, q.clientAddress);
+  const pics = propertyPics(p);
+  const run = async () => {
+    setErr("");
+    setBusy(true);
+    try {
+      onProperty(await fetchProperty(q.clientAddress));
+      bump(n => n + 1);
+    } catch (e) {
+      setErr(e.message);
+    }
+    setBusy(false);
+  };
+  if (!q.clientAddress || q.clientAddress.trim().length < 6) {
+    return p ? null : React.createElement("div", {
+      style: {
+        fontSize: 12,
+        color: BRAND.sub,
+        marginTop: -4
+      }
+    }, "Add the job address to look up the property \u2014 roof size, drive time, flood zone.");
+  }
+  const row = (label, value) => value ? React.createElement("div", {
+    style: {
+      display: "flex",
+      gap: 8,
+      fontSize: 13,
+      padding: "3px 0"
+    }
+  }, React.createElement("span", {
+    style: {
+      color: BRAND.sub,
+      minWidth: 92
+    }
+  }, label), React.createElement("span", {
+    style: {
+      color: BRAND.ink,
+      fontWeight: 600
+    }
+  }, value)) : null;
+  return React.createElement("div", {
+    style: {
+      border: "1px solid " + BRAND.line,
+      borderRadius: 10,
+      padding: 12,
+      background: "#FBFAF6",
+      marginTop: 4
+    }
+  }, React.createElement("div", {
+    className: "flex items-center justify-between flex-wrap gap-2"
+  }, React.createElement("div", {
+    style: {
+      fontSize: 11,
+      textTransform: "uppercase",
+      letterSpacing: "0.06em",
+      color: BRAND.sub,
+      fontWeight: 700
+    }
+  }, "\uD83D\uDCCD Property ", p && !stale ? "· " + (p.precise ? "found" : "approximate") : ""), !locked && React.createElement(Btn, {
+    small: true,
+    kind: "ghost",
+    disabled: busy,
+    onClick: run
+  }, busy ? "Looking up…" : p ? stale ? "Address changed — look up again" : pics ? "Refresh" : "Show pictures" : "Look up property")), err && React.createElement("div", {
+    style: {
+      color: BRAND.red,
+      fontSize: 12.5,
+      marginTop: 6
+    }
+  }, err), p && React.createElement("div", {
+    style: {
+      marginTop: 8,
+      opacity: stale ? 0.55 : 1
+    }
+  }, row("Address", p.address), p.drive && row("Drive", "~" + p.drive.minutes + " min · " + p.drive.miles + " mi from base"), p.roof && row("Roof", p.roof.sqft.toLocaleString() + " sq ft · " + p.roof.squares + " squares · " + p.roof.faces + " faces · pitch " + p.roof.pitch + (p.roof.steep ? " (steep)" : "")), p.roof && p.roof.footprintSqft > 0 && row("Footprint", "~" + p.roof.footprintSqft.toLocaleString() + " sq ft" + (p.roof.imageryDate ? " · imagery " + p.roof.imageryDate : "")), p.parcel && row("Lot", (p.parcel.use ? p.parcel.use + " · " : "") + (p.parcel.lotSqft ? p.parcel.lotSqft.toLocaleString() + " sq ft" : "") + (p.parcel.acres ? " (" + p.parcel.acres.toFixed(2) + " ac)" : "")), p.flood && row("Flood zone", p.flood.zone + (p.flood.highRisk ? " — high risk (check permit rules)" : "")), !p.roof && p.precise && React.createElement("div", {
+    style: {
+      fontSize: 12,
+      color: BRAND.sub
+    }
+  }, "No satellite roof data for this address."), pics && (pics.streetView || pics.satellite) && React.createElement("div", {
+    className: "grid grid-cols-2 gap-2",
+    style: {
+      marginTop: 8
+    }
+  }, pics.streetView && React.createElement("figure", {
+    style: {
+      margin: 0
+    }
+  }, React.createElement("img", {
+    src: pics.streetView,
+    alt: "Street View",
+    style: {
+      width: "100%",
+      borderRadius: 8,
+      display: "block"
+    }
+  }), React.createElement("figcaption", {
+    style: {
+      fontSize: 11,
+      color: BRAND.sub
+    }
+  }, "Street View", pics.streetViewDate ? " · " + pics.streetViewDate : "")), pics.satellite && React.createElement("figure", {
+    style: {
+      margin: 0
+    }
+  }, React.createElement("img", {
+    src: pics.satellite,
+    alt: "Satellite",
+    style: {
+      width: "100%",
+      borderRadius: 8,
+      display: "block"
+    }
+  }), React.createElement("figcaption", {
+    style: {
+      fontSize: 11,
+      color: BRAND.sub
+    }
+  }, "Satellite"))), React.createElement("div", {
+    style: {
+      display: "flex",
+      gap: 12,
+      marginTop: 6,
+      fontSize: 12.5
+    }
+  }, React.createElement("a", {
+    href: p.mapUrl,
+    target: "_blank",
+    rel: "noopener",
+    style: {
+      color: BRAND.navySoft,
+      fontWeight: 600
+    }
+  }, "Open in Google Maps"), p.parcel && p.parcel.link && React.createElement("a", {
+    href: p.parcel.link,
+    target: "_blank",
+    rel: "noopener",
+    style: {
+      color: BRAND.navySoft,
+      fontWeight: 600
+    }
+  }, "County record")), React.createElement("div", {
+    style: {
+      fontSize: 11,
+      color: BRAND.sub,
+      marginTop: 4
+    }
+  }, "The AI uses these when drafting. Satellite measurements are estimates \u2014 confirm on site.")));
+}
 function AiAssistant({
   me,
   q,
@@ -2322,6 +2514,7 @@ function AiAssistant({
   onApplyDraft,
   onApplyLead,
   onStartJob,
+  onProperty,
   notify
 }) {
   const [open, setOpen] = useState(false);
@@ -2439,6 +2632,21 @@ function AiAssistant({
           data: s.data
         }))
       };
+      let prop = q.property && sameAddr(q.property.query, q.clientAddress) ? q.property : null;
+      if (q.clientAddress && q.clientAddress.trim().length >= 6 && (!prop || !propertyPics(prop))) {
+        try {
+          prop = await fetchProperty(q.clientAddress);
+          if (onProperty) onProperty(prop);
+        } catch (e) {}
+      }
+      if (prop) {
+        const pics = propertyPics(prop) || {};
+        const photoChars = body.images.reduce((t, im) => t + im.data.length, 0);
+        body.property = photoChars < 3200000 ? Object.assign({}, prop, {
+          streetView: pics.streetView || "",
+          satellite: pics.satellite || ""
+        }) : prop;
+      }
       j.body = body;
       const data = await sendJob(j, body);
       setDraft(data.draft);
@@ -3708,6 +3916,7 @@ function QuoteForm({
     onApplyDraft: applyDraft,
     onApplyLead: applyLead,
     onStartJob: startJob,
+    onProperty: p => set("property", p),
     notify: notify
   }), attachments.length > 0 && React.createElement("div", {
     style: {
@@ -3801,7 +4010,11 @@ function QuoteForm({
     value: q.clientAddress,
     onChange: e => set("clientAddress", e.target.value),
     placeholder: "Street, City, TX"
-  })))), React.createElement(Card, null, React.createElement("h3", {
+  }))), React.createElement(PropertyPanel, {
+    q: q,
+    locked: locked,
+    onProperty: p => set("property", p)
+  })), React.createElement(Card, null, React.createElement("h3", {
     style: h3Style
   }, "2 \xB7 THE WORK"), React.createElement("div", {
     className: "grid md-grid-cols-2 gap-x-4"

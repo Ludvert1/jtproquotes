@@ -1186,7 +1186,77 @@ const SOURCE_COLOR = { "customer stated": BRAND.green, "estimated from photo": B
 
 const MAX_PHOTOS = 8;
 
-function AiAssistant({ me, q, settings, disabled, onApplyDraft, onApplyLead, onStartJob, notify }) {
+/* ---------- Property lookup ----------
+   From the job address: map, drive time from base, roof size and pitch
+   (satellite), Street View, flood zone and county lot facts. The facts
+   are saved on the quote; the two pictures are kept in memory only (they
+   are too big for the quote record) and fetched again when needed. */
+const PROPERTY_PICS = {}; // address -> { streetView, satellite, streetViewDate }
+const sameAddr = (a, b) => String(a || "").trim().toLowerCase() === String(b || "").trim().toLowerCase();
+async function fetchProperty(address) {
+  if (!fbAuth || !fbAuth.currentUser) throw new Error("Sign in again to look up the property.");
+  const idToken = await fbAuth.currentUser.getIdToken();
+  const r = await fetch("/api/property", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ idToken, address }) });
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) { const e = new Error(data.error || "Property lookup failed."); e.status = r.status; throw e; }
+  const p = data.property;
+  PROPERTY_PICS[address.trim().toLowerCase()] = { streetView: p.streetView || "", satellite: p.satellite || "", streetViewDate: p.streetViewDate || "" };
+  // What goes on the quote: facts only, plus the address typed (to spot edits).
+  return Object.assign({}, p, { streetView: "", satellite: "", query: address.trim() });
+}
+const propertyPics = (p) => (p && PROPERTY_PICS[String(p.query || "").trim().toLowerCase()]) || null;
+
+function PropertyPanel({ q, locked, onProperty }) {
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  const [, bump] = useState(0);
+  const p = q.property;
+  const stale = p && !sameAddr(p.query, q.clientAddress);
+  const pics = propertyPics(p);
+  const run = async () => {
+    setErr(""); setBusy(true);
+    try { onProperty(await fetchProperty(q.clientAddress)); bump((n) => n + 1); }
+    catch (e) { setErr(e.message); }
+    setBusy(false);
+  };
+  if (!q.clientAddress || q.clientAddress.trim().length < 6) {
+    return p ? null : <div style={{ fontSize: 12, color: BRAND.sub, marginTop: -4 }}>Add the job address to look up the property — roof size, drive time, flood zone.</div>;
+  }
+  const row = (label, value) => value ? <div style={{ display: "flex", gap: 8, fontSize: 13, padding: "3px 0" }}><span style={{ color: BRAND.sub, minWidth: 92 }}>{label}</span><span style={{ color: BRAND.ink, fontWeight: 600 }}>{value}</span></div> : null;
+  return (
+    <div style={{ border: "1px solid " + BRAND.line, borderRadius: 10, padding: 12, background: "#FBFAF6", marginTop: 4 }}>
+      <div className="flex items-center justify-between flex-wrap gap-2">
+        <div style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: "0.06em", color: BRAND.sub, fontWeight: 700 }}>📍 Property {p && !stale ? "· " + (p.precise ? "found" : "approximate") : ""}</div>
+        {!locked && <Btn small kind="ghost" disabled={busy} onClick={run}>{busy ? "Looking up…" : p ? (stale ? "Address changed — look up again" : (pics ? "Refresh" : "Show pictures")) : "Look up property"}</Btn>}
+      </div>
+      {err && <div style={{ color: BRAND.red, fontSize: 12.5, marginTop: 6 }}>{err}</div>}
+      {p && (
+        <div style={{ marginTop: 8, opacity: stale ? 0.55 : 1 }}>
+          {row("Address", p.address)}
+          {p.drive && row("Drive", "~" + p.drive.minutes + " min · " + p.drive.miles + " mi from base")}
+          {p.roof && row("Roof", p.roof.sqft.toLocaleString() + " sq ft · " + p.roof.squares + " squares · " + p.roof.faces + " faces · pitch " + p.roof.pitch + (p.roof.steep ? " (steep)" : ""))}
+          {p.roof && p.roof.footprintSqft > 0 && row("Footprint", "~" + p.roof.footprintSqft.toLocaleString() + " sq ft" + (p.roof.imageryDate ? " · imagery " + p.roof.imageryDate : ""))}
+          {p.parcel && row("Lot", (p.parcel.use ? p.parcel.use + " · " : "") + (p.parcel.lotSqft ? p.parcel.lotSqft.toLocaleString() + " sq ft" : "") + (p.parcel.acres ? " (" + p.parcel.acres.toFixed(2) + " ac)" : ""))}
+          {p.flood && row("Flood zone", p.flood.zone + (p.flood.highRisk ? " — high risk (check permit rules)" : ""))}
+          {!p.roof && p.precise && <div style={{ fontSize: 12, color: BRAND.sub }}>No satellite roof data for this address.</div>}
+          {pics && (pics.streetView || pics.satellite) && (
+            <div className="grid grid-cols-2 gap-2" style={{ marginTop: 8 }}>
+              {pics.streetView && <figure style={{ margin: 0 }}><img src={pics.streetView} alt="Street View" style={{ width: "100%", borderRadius: 8, display: "block" }} /><figcaption style={{ fontSize: 11, color: BRAND.sub }}>Street View{pics.streetViewDate ? " · " + pics.streetViewDate : ""}</figcaption></figure>}
+              {pics.satellite && <figure style={{ margin: 0 }}><img src={pics.satellite} alt="Satellite" style={{ width: "100%", borderRadius: 8, display: "block" }} /><figcaption style={{ fontSize: 11, color: BRAND.sub }}>Satellite</figcaption></figure>}
+            </div>
+          )}
+          <div style={{ display: "flex", gap: 12, marginTop: 6, fontSize: 12.5 }}>
+            <a href={p.mapUrl} target="_blank" rel="noopener" style={{ color: BRAND.navySoft, fontWeight: 600 }}>Open in Google Maps</a>
+            {p.parcel && p.parcel.link && <a href={p.parcel.link} target="_blank" rel="noopener" style={{ color: BRAND.navySoft, fontWeight: 600 }}>County record</a>}
+          </div>
+          <div style={{ fontSize: 11, color: BRAND.sub, marginTop: 4 }}>The AI uses these when drafting. Satellite measurements are estimates — confirm on site.</div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function AiAssistant({ me, q, settings, disabled, onApplyDraft, onApplyLead, onStartJob, onProperty, notify }) {
   const [open, setOpen] = useState(false);
   /* The AI draft runs on the server and is saved to aiJobs/<id> as it goes,
      so locking the phone or switching apps mid-draft loses nothing: the app
@@ -1281,6 +1351,17 @@ function AiAssistant({ me, q, settings, disabled, onApplyDraft, onApplyLead, onS
         text: [text.trim(), context()].filter(Boolean).join("\n\n"),
         images: photos.map((s) => ({ mediaType: s.mediaType, data: s.data })),
       };
+      // Look the property up first (quietly skipped if it isn't switched on).
+      let prop = q.property && sameAddr(q.property.query, q.clientAddress) ? q.property : null;
+      if (q.clientAddress && q.clientAddress.trim().length >= 6 && (!prop || !propertyPics(prop))) {
+        try { prop = await fetchProperty(q.clientAddress); if (onProperty) onProperty(prop); } catch (e) { /* draft without it */ }
+      }
+      if (prop) {
+        const pics = propertyPics(prop) || {};
+        const photoChars = body.images.reduce((t, im) => t + im.data.length, 0);
+        // Leave the pictures off if the photos already fill the upload.
+        body.property = photoChars < 3200000 ? Object.assign({}, prop, { streetView: pics.streetView || "", satellite: pics.satellite || "" }) : prop;
+      }
       j.body = body;
       const data = await sendJob(j, body);
       setDraft(data.draft); setBusy(null); releaseScreen();
@@ -1897,7 +1978,7 @@ function QuoteForm({ me, isOwner, isManager, settings, notify, existing, onSave,
       <div className="md-col-span-2 flex flex-col gap-5">
         <Card>
           <h3 style={h3Style}>1 · CLIENT</h3>
-          <AiAssistant me={me} q={q} settings={settings} disabled={locked} onApplyDraft={applyDraft} onApplyLead={applyLead} onStartJob={startJob} notify={notify} />
+          <AiAssistant me={me} q={q} settings={settings} disabled={locked} onApplyDraft={applyDraft} onApplyLead={applyLead} onStartJob={startJob} onProperty={(p) => set("property", p)} notify={notify} />
           {attachments.length > 0 && (
             <div style={{ marginBottom: 14 }}>
               <div style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: "0.06em", color: BRAND.sub, fontWeight: 700, marginBottom: 6 }}>Photos & screenshots on file ({attachments.length})</div>
@@ -1924,6 +2005,7 @@ function QuoteForm({ me, isOwner, isManager, settings, notify, existing, onSave,
             <Field label="Email"><input style={inputStyle} disabled={locked} value={q.clientEmail} onChange={(e) => set("clientEmail", e.target.value)} placeholder="client@email.com" /></Field>
             <Field label="Job address"><input style={inputStyle} disabled={locked} value={q.clientAddress} onChange={(e) => set("clientAddress", e.target.value)} placeholder="Street, City, TX" /></Field>
           </div>
+          <PropertyPanel q={q} locked={locked} onProperty={(p) => set("property", p)} />
         </Card>
 
         <Card>

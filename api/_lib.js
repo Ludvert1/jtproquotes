@@ -471,7 +471,7 @@ const QUOTE_TOOL = {
           properties: {
             what: { type: "string" },
             value: { type: "string", description: "e.g. 'about 120 sq ft'." },
-            source: { type: "string", enum: ["customer stated", "estimated from photo", "assumed"] },
+            source: { type: "string", enum: ["customer stated", "estimated from photo", "measured from satellite", "assumed"] },
           },
           required: ["what", "value", "source"],
         },
@@ -662,15 +662,26 @@ function buildScope(raw, category) {
   return out;
 }
 
-async function draftQuote({ text, images, settings }) {
+async function draftQuote({ text, images, settings, property }) {
+  const { propertyBrief, propertyImages } = require("./_property");
   const content = [];
   (images || []).forEach((im, i) => {
     content.push({ type: "text", text: "Photo " + (i + 1) + ":" });
     content.push({ type: "image", source: { type: "base64", media_type: im.mediaType, data: im.data } });
   });
+  // Street View / satellite come after the customer's photos and are never
+  // numbered as photos, so findings can't point at them.
+  propertyImages(property).forEach((im) => {
+    content.push({ type: "text", text: im.label + ":" });
+    content.push({ type: "image", source: { type: "base64", media_type: im.mediaType, data: im.data } });
+  });
+  const brief = propertyBrief(property);
+  const hasText = text && text.trim();
+  if (!hasText && !(images || []).length && !brief) throw Object.assign(new Error("Add a photo, a description or an address."), { code: 400 });
   content.push({
     type: "text",
-    text: (text && text.trim() ? "Lead message and team notes:\n\n" + text.trim() + "\n\n" : "No written description was provided — work from the photos.\n\n")
+    text: (hasText ? "Lead message and team notes:\n\n" + text.trim() + "\n\n" : "No written description was provided — work from the photos" + (brief ? " and property facts" : "") + ".\n\n")
+      + (brief ? brief + "\n\n" : "")
       + "Draft the quote with the quote_draft tool.",
   });
 
@@ -712,7 +723,7 @@ async function draftQuote({ text, images, settings }) {
     })).filter((m) => m.desc),
     measurements: (Array.isArray(f.measurements) ? f.measurements : []).slice(0, 15).map((m) => ({
       what: str(m && m.what, 160), value: str(m && m.value, 120),
-      source: ["customer stated", "estimated from photo", "assumed"].includes(m && m.source) ? m.source : "assumed",
+      source: ["customer stated", "estimated from photo", "measured from satellite", "assumed"].includes(m && m.source) ? m.source : "assumed",
     })).filter((m) => m.what),
     assumptions: arr(f.assumptions, 12), questions: arr(f.questions, 6),
     risks: str(f.risks, 1500), confidence: conf, confidenceReason: str(f.confidenceReason, 400),

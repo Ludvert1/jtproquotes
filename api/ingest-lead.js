@@ -25,6 +25,7 @@ const {
   uploadImageAsServer, checkImages,
 } = require("./_lib");
 const { sendToPeople } = require("./_push");
+const { lookupProperty } = require("./_property");
 
 const money = (n) => "$" + Math.round(Number(n) || 0).toLocaleString("en-US");
 
@@ -186,6 +187,17 @@ module.exports = async (req, res) => {
       leadText: leadText.slice(0, 8000),
       history: [{ at: now, by: "Lead inbox", action: "Filed from a lead email" }],
     };
+  }
+
+  /* A street address in the lead → attach the property facts (drive time,
+     roof size, flood zone, lot). Pictures are left off to keep the record
+     small; the app fetches them when the quote is opened. */
+  if (process.env.GOOGLE_MAPS_API_KEY && /\d+\s+\S+/.test(quote.clientAddress || "")) {
+    try {
+      const p = await Promise.race([lookupProperty(quote.clientAddress), new Promise((_, no) => setTimeout(() => no(new Error("timeout")), 15000))]);
+      quote.property = Object.assign({}, p, { streetView: "", satellite: "" });
+      quote.history.push({ at: now, by: "Lead inbox", action: "Property looked up: " + p.address });
+    } catch (e) { console.error("[ingest-lead] property lookup skipped:", e.message); }
   }
 
   // Price to win: just under the local market, never below the minimum margin.
