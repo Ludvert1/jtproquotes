@@ -21,7 +21,7 @@ const crypto = require("crypto");
 const {
   bad, uid, parseBody, extractLead, sendEmail, verifyGoogleSender, priceFrom,
   STANDARD_EXCLUSIONS, createDocAsServer, listDocsAsServer, queryAsServer,
-  draftQuote, draftToQuoteFields, quoteTotal, renderReply, priceRange,
+  draftQuote, draftToQuoteFields, quoteTotal, renderReply, priceRange, priceToWin,
   uploadImageAsServer, checkImages,
 } = require("./_lib");
 const { sendToPeople } = require("./_push");
@@ -188,6 +188,12 @@ module.exports = async (req, res) => {
     };
   }
 
+  // Price to win: just under the local market, never below the minimum margin.
+  if (d) {
+    const win = priceToWin(quote, settings, d.market);
+    if (win) { quote.marginPct = win.marginPct; quote.discountPct = 0; quote.aiDraft.pricingNote = win.note; }
+  }
+
   try {
     await createDocAsServer("quotes", id, quote);
   } catch (e) {
@@ -202,7 +208,7 @@ module.exports = async (req, res) => {
   } catch { /* the log is useful, not essential */ }
 
   const total = d ? quoteTotal(quote, settings) : 0;
-  const reply = d ? renderReply(quote.replyTemplate, total, d.confidence, quote.pricingMode === "labor") : "";
+  const reply = d ? renderReply(quote.replyTemplate, total, d.confidence, quote.pricingMode === "labor", d.market) : "";
 
   // Tell the team a lead landed, with the reply ready to paste into Thumbtack.
   await sendEmail({

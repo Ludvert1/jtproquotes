@@ -482,9 +482,21 @@ const QUOTE_TOOL = {
       risks: { type: "string", description: "Internal note for the estimator: red flags, hidden-damage risk, anything that could blow the budget. Empty string if none." },
       confidence: { type: "string", enum: ["low", "medium", "high"], description: "How firm the price is. Low when sizes are guessed or the scope is unclear from what was provided." },
       confidenceReason: { type: "string", description: "One sentence." },
+      market: {
+        type: "object",
+        description: "What other contractors in the job's local market typically CHARGE the customer for this same scope today (total price, not cost). Give honest, realistic ranges for an average licensed local contractor — not handyman bargain prices, not luxury firms.",
+        properties: {
+          laborOnlyLow: { type: "number", description: "Typical low end, USD, if the customer supplies the materials." },
+          laborOnlyHigh: { type: "number" },
+          withMaterialsLow: { type: "number", description: "Typical low end, USD, contractor supplies materials." },
+          withMaterialsHigh: { type: "number" },
+          basis: { type: "string", description: "One sentence: the unit rates or comparables this is based on (e.g. '$2.50–$3.50/sq ft for ceiling drywall repair in Houston')." },
+        },
+        required: ["laborOnlyLow", "laborOnlyHigh", "withMaterialsLow", "withMaterialsHigh", "basis"],
+      },
       needsSiteVisit: { type: "boolean", description: "True if the job should be seen in person before a firm price." },
 
-      clientReply: { type: "string", description: "The FIRST message to the customer on Thumbtack, written as Joel from JTProconstruction — short, casual and friendly, like a real contractor texting back. 40–70 words, 3–5 short lines, no bullet points, no lists, no corporate phrases ('thank you for reaching out', 'we appreciate', 'please don't hesitate'). Structure: 'Hey [first name]!' (or 'Hey there!') + one line showing you get THEIR job, mentioning a specific detail; the price as the literal placeholder {{PRICE_FROM}}, e.g. 'Jobs like this usually start around {{PRICE_FROM}} — I'd lock in the exact price after a quick look, could go up a bit depending on what we find.'; optionally ONE quick question only if it really matters; end with an easy next step like 'When's a good time for me to swing by?' Sign off '— Joel'. You may mention 'licensed & insured' in a few words if it fits naturally. Never write a dollar figure yourself — only {{PRICE_FROM}}. Don't invent reviews, years in business, discounts or dates. At most one emoji. Do not mention AI." },
+      clientReply: { type: "string", description: "The FIRST message to the customer on Thumbtack, written as Joel from JTProconstruction — short, casual and friendly, like a real contractor texting back, and built to stand out from the other pros. 55–90 words, 4–6 short lines, no bullet points, no corporate phrases ('thank you for reaching out', 'we appreciate', 'please don't hesitate'). Structure: 'Hey [first name]!' (or 'Hey there!') + one line showing you get THEIR job with a specific detail; then the price as an eye-catching hook that says it is based on what they sent — e.g. 'Good news — based on your photos and description, a job like this starts at just {{PRICE_FROM}} 🔥' (say 'based on your description' if no photos were provided); then a short line comparing with the market using the literal placeholder {{MARKET_RANGE}} — e.g. 'Most contractors around here charge {{MARKET_RANGE}} for this.'; then one short line on why us (licensed & insured, written itemized quote, 90-day workmanship warranty — pick one or two, in a few words); then one short line that the exact price is locked in after a quick look and could go up depending on what we find; optionally ONE quick question only if it really matters; end with an easy next step like 'When's a good time for me to swing by?' Sign off '— Joel'. Never write a dollar figure yourself — only {{PRICE_FROM}}. Don't invent reviews, years in business, discounts or dates, and don't claim to be the cheapest. At most one emoji. Do not mention AI." },
     },
     required: ["clientName", "clientPhone", "clientEmail", "clientAddress", "sourcePlatform", "timeline", "budgetMentioned",
       "category", "jobTitle", "projectSummary", "findings", "scope", "labor", "materials", "measurements",
@@ -568,6 +580,36 @@ function quoteTotal(q, s) {
   return Math.max(withMargin - discount, 0);
 }
 
+/* "Price to win": set the margin so the quote lands just under the low end
+   of what local contractors typically charge — but never below the minimum
+   margin in Settings, so every job stays profitable. Returns the fields to
+   change and a short explanation, or null when there's no market estimate. */
+function priceToWin(q, settings, market) {
+  const s = settings || {};
+  if (!market) return null;
+  const labor = q.pricingMode === "labor";
+  const mLow = labor ? market.laborOnlyLow : market.withMaterialsLow;
+  const mHigh = labor ? market.laborOnlyHigh : market.withMaterialsHigh;
+  if (!mLow) return null;
+  const base = Object.assign({}, q, { discountPct: 0 });
+  const hours = (Number(base.crew) || 0) * (Number(base.days) || 0) * (Number(base.hoursPerDay) || 0);
+  const mats = labor ? 0 : (base.items || []).reduce((t, it) => t + (Number(it.qty) || 0) * (Number(it.price) || 0), 0);
+  const cost = (hours * (Number(base.laborRate) || 0) + mats) * (1 + (Number(base.overheadPct != null ? base.overheadPct : s.overheadPct) || 0) / 100);
+  if (!(cost > 0)) return null;
+  const floor = Number(s.minMargin != null ? s.minMargin : 15);
+  const target = mLow * 0.95;                       // 5% under the typical low end
+  let margin = (1 - cost / target) * 100;
+  let note;
+  if (margin < floor) {
+    margin = floor;
+    note = "Can't beat the typical low price at your " + floor + "% minimum margin — priced at the minimum.";
+  } else {
+    margin = Math.min(margin, 45);                  // don't get greedy on oddball estimates
+    note = "Priced about 5% under the local low end ($" + Math.round(mLow).toLocaleString("en-US") + "–$" + Math.round(mHigh || mLow).toLocaleString("en-US") + ").";
+  }
+  return { marginPct: Math.round(margin * 10) / 10, discountPct: 0, note };
+}
+
 /* A firm-looking single figure off a photo would be a promise we can't keep,
    so the reply quotes a range whose width follows the confidence. */
 const RANGE = { high: [0.95, 1.08], medium: [0.9, 1.15], low: [0.85, 1.3] };
@@ -582,8 +624,17 @@ function priceFrom(total, confidence) {
   const [lo] = RANGE[confidence] || RANGE.medium;
   return "$" + Math.max(50, Math.round((total * lo) / 50) * 50).toLocaleString("en-US");
 }
-function renderReply(template, total, confidence, laborOnly) {
-  const t0 = String(template || "");
+function renderReply(template, total, confidence, laborOnly, market) {
+  let t0 = String(template || "");
+  // The market line only appears when we really are at or under the market.
+  const lo = market ? (laborOnly ? market.laborOnlyLow : market.withMaterialsLow) : 0;
+  const hi = market ? (laborOnly ? market.laborOnlyHigh : market.withMaterialsHigh) : 0;
+  if (lo && total <= (hi || lo)) {
+    const r50 = (n) => "$" + (Math.round(n / 50) * 50).toLocaleString("en-US");
+    t0 = t0.split("{{MARKET_RANGE}}").join(r50(lo) + "–" + r50(hi || lo));
+  } else {
+    t0 = t0.split("\n").filter((line) => !line.includes("{{MARKET_RANGE}}")).join("\n").split("{{MARKET_RANGE}}").join("");
+  }
   const tag = laborOnly ? " for labor" : "";
   const t = tag ? t0.split("{{PRICE_FROM}}").join("{{PRICE_FROM}}" + tag).split("{{PRICE_RANGE}}").join("{{PRICE_RANGE}}" + tag) : t0;
   if (!t.includes("{{PRICE_RANGE}}") && !t.includes("{{PRICE_FROM}}")) return t + (t ? "\n\n" : "") + "Projects like this start at " + priceFrom(total, confidence) + ".";
@@ -666,6 +717,12 @@ async function draftQuote({ text, images, settings }) {
     assumptions: arr(f.assumptions, 12), questions: arr(f.questions, 6),
     risks: str(f.risks, 1500), confidence: conf, confidenceReason: str(f.confidenceReason, 400),
     needsSiteVisit: f.needsSiteVisit === true,
+    market: (() => {
+      const m = f.market || {};
+      const n = (v) => (Number.isFinite(Number(v)) && Number(v) > 0 ? Math.round(Number(v)) : 0);
+      const out = { laborOnlyLow: n(m.laborOnlyLow), laborOnlyHigh: n(m.laborOnlyHigh), withMaterialsLow: n(m.withMaterialsLow), withMaterialsHigh: n(m.withMaterialsHigh), basis: str(m.basis, 300) };
+      return out.laborOnlyLow || out.withMaterialsLow ? out : null;
+    })(),
     replyTemplate: str(f.clientReply, 3000).replace(/\$\s?\d(?:[\d,]*\d)?(\.\d+)?(\s?(?:[-–]|to)\s?\$?\s?\d(?:[\d,]*\d)?(\.\d+)?)?/g, "{{PRICE_FROM}}"),
     model: QUOTE_MODEL, photoCount: nPhotos,
   };
@@ -700,6 +757,7 @@ function draftToQuoteFields(d, settings, makeId, photoUrls) {
       needsSiteVisit: d.needsSiteVisit, measurements: d.measurements, assumptions: d.assumptions,
       questions: d.questions, risks: d.risks, laborBasis: d.labor.basis, photoCount: d.photoCount,
       timeline: d.timeline || "", budgetMentioned: d.budgetMentioned || "",
+      market: d.market || null,
     },
     replyTemplate: d.replyTemplate,
     aiDrafted: true,
@@ -746,6 +804,6 @@ module.exports = {
   toFields, fromFields, getDocAs, setDocAs, listDocsAs,
   adminToken, createDocAsServer, listDocsAsServer, setDocAsServer, getDocAsServer, queryAsServer,
   extractLead, sendEmail,
-  QUOTE_MODEL, draftQuote, draftToQuoteFields, quoteTotal, priceRange, priceFrom, renderReply, verifyGoogleSender,
+  QUOTE_MODEL, draftQuote, priceToWin, draftToQuoteFields, quoteTotal, priceRange, priceFrom, renderReply, verifyGoogleSender,
   uploadImageAsServer, checkImages,
 };

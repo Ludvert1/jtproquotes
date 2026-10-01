@@ -1111,13 +1111,43 @@ function priceRange(total, confidence) {
   const f = (n) => "$" + r50(n).toLocaleString("en-US");
   return f(total * lo) + "–" + f(total * hi);
 }
+/* "Price to win" — mirrors priceToWin in api/_lib.js. Sets the margin so the
+   quote lands ~5% under the low end of what local contractors typically
+   charge, but never below the minimum margin in Settings. */
+function marketFor(q, market) {
+  if (!market) return null;
+  const labor = isLaborOnly(q);
+  const low = labor ? market.laborOnlyLow : market.withMaterialsLow;
+  const high = labor ? market.laborOnlyHigh : market.withMaterialsHigh;
+  return low ? { low, high: high || low } : null;
+}
+function priceToWin(q, settings, market) {
+  const s = settings || {};
+  const m = marketFor(q, market);
+  if (!m) return null;
+  const c = computeQuote(Object.assign({}, q, { discountPct: 0 }), s);
+  if (!(c.totalCost > 0)) return null;
+  const floor = Number(s.minMargin != null ? s.minMargin : 15);
+  let margin = (1 - c.totalCost / (m.low * 0.95)) * 100;
+  let note;
+  if (margin < floor) { margin = floor; note = "Can't beat the typical low price at your " + floor + "% minimum margin — priced at the minimum."; }
+  else { margin = Math.min(margin, 45); note = "Priced about 5% under the local low end (" + money(m.low).replace(".00", "") + "–" + money(m.high).replace(".00", "") + ")."; }
+  return { marginPct: Math.round(margin * 10) / 10, discountPct: 0, note };
+}
+
 /* The "starting at" figure for a first message: the low end of the range. */
 function priceFrom(total, confidence) {
   const [lo] = RANGE_BY_CONFIDENCE[confidence] || RANGE_BY_CONFIDENCE.medium;
   return "$" + Math.max(50, Math.round((total * lo) / 50) * 50).toLocaleString("en-US");
 }
-function renderReply(template, total, confidence, laborOnly) {
-  const t = String(template || "");
+function renderReply(template, total, confidence, laborOnly, market) {
+  let t = String(template || "");
+  // Mirrors api/_lib.js: the market line only shows when we're at or under it.
+  const lo = market ? (laborOnly ? market.laborOnlyLow : market.withMaterialsLow) : 0;
+  const hi = market ? (laborOnly ? market.laborOnlyHigh : market.withMaterialsHigh) : 0;
+  const r50 = (n) => "$" + (Math.round(n / 50) * 50).toLocaleString("en-US");
+  if (lo && total <= (hi || lo)) t = t.split("{{MARKET_RANGE}}").join(r50(lo) + "–" + r50(hi || lo));
+  else t = t.split("\n").filter((line) => !line.includes("{{MARKET_RANGE}}")).join("\n").split("{{MARKET_RANGE}}").join("");
   const tag = laborOnly ? " for labor" : "";
   return t.split("{{PRICE_RANGE}}").join(priceRange(total, confidence) + tag).split("{{PRICE_FROM}}").join(priceFrom(total, confidence) + tag);
 }
@@ -1366,6 +1396,15 @@ function AiAssistant({ me, q, settings, disabled, onApplyDraft, onApplyLead, onS
     pricingMode: q.pricingMode,
     items: draft.materials.map((m) => ({ qty: m.qty, price: m.unitCost })),
   }, settings) : null;
+  /* What "Use this draft" will do to the price: land just under the market. */
+  const previewQ = draft ? {
+    crew: draft.labor.crew, days: draft.labor.days, hoursPerDay: draft.labor.hoursPerDay,
+    laborRate: q.laborRate, overheadPct: q.overheadPct, marginPct: q.marginPct, discountPct: 0,
+    pricingMode: q.pricingMode, items: draft.materials.map((m) => ({ qty: m.qty, price: m.unitCost })),
+  } : null;
+  const win = draft ? priceToWin(previewQ, settings, draft.market) : null;
+  const winTotal = win ? computeQuote(Object.assign({}, previewQ, { marginPct: win.marginPct }), settings).total : (preview ? preview.total : 0);
+  const mk = draft ? marketFor(q, draft.market) : null;
 
   return (
     <div style={{ border: `1.5px dashed ${BRAND.gold}`, borderRadius: 10, padding: 14, marginBottom: 16, background: "#FDFBF4" }}>
@@ -1450,8 +1489,9 @@ function AiAssistant({ me, q, settings, disabled, onApplyDraft, onApplyLead, onS
                     <div style={{ fontSize: 12.5, color: BRAND.sub }}>{draft.category} · crew of {draft.labor.crew} · {draft.labor.days} day{draft.labor.days === 1 ? "" : "s"} · {draft.materials.length} material lines</div>
                   </div>
                   <div style={{ textAlign: "right" }}>
-                    <div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontSize: 28, fontWeight: 700, color: BRAND.navy }}>{money(preview.total)}</div>
-                    <div style={{ fontSize: 11.5, color: BRAND.sub }}>Reply says "starts at {priceFrom(preview.total, draft.confidence)}"</div>
+                    <div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontSize: 28, fontWeight: 700, color: BRAND.navy }}>{money(winTotal)}</div>
+                    {mk && <div style={{ fontSize: 11.5, color: BRAND.green, fontWeight: 700 }}>Market {money(mk.low).replace(".00", "")}–{money(mk.high).replace(".00", "")}{win ? " · " + win.marginPct + "% margin" : ""}</div>}
+                    <div style={{ fontSize: 11.5, color: BRAND.sub }}>Reply says "starts at just {priceFrom(winTotal, draft.confidence)}"</div>
                   </div>
                 </div>
                 <div style={{ fontSize: 12.5, marginTop: 8, fontWeight: 600, color: draft.confidence === "high" ? BRAND.green : draft.confidence === "medium" ? BRAND.amber : BRAND.red }}>
@@ -1545,7 +1585,7 @@ function AiAssistant({ me, q, settings, disabled, onApplyDraft, onApplyLead, onS
               {draft.replyTemplate && (
                 <div style={box}>
                   <div style={label}>First reply to the customer (saved on the quote)</div>
-                  <div style={{ fontSize: 13, whiteSpace: "pre-wrap", color: BRAND.ink }}>{renderReply(draft.replyTemplate, preview.total, draft.confidence, isLaborOnly(q))}</div>
+                  <div style={{ fontSize: 13, whiteSpace: "pre-wrap", color: BRAND.ink }}>{renderReply(draft.replyTemplate, winTotal, draft.confidence, isLaborOnly(q), draft.market)}</div>
                 </div>
               )}
 
@@ -1803,12 +1843,16 @@ function QuoteForm({ me, isOwner, isManager, settings, notify, existing, onSave,
         needsSiteVisit: d.needsSiteVisit, measurements: d.measurements, assumptions: d.assumptions,
         questions: d.questions, risks: d.risks, laborBasis: d.labor.basis, photoCount: d.photoCount,
         timeline: d.timeline || "", budgetMentioned: d.budgetMentioned || "",
+        market: d.market || null,
       },
       replyTemplate: d.replyTemplate || q.replyTemplate || "",
       aiDrafted: true,
       updatedAt: new Date().toISOString(),
       history: (q.history || []).concat([{ at: new Date().toISOString(), by: me.name, action: "Applied AI draft (" + d.confidence + " confidence, " + (d.photoCount || 0) + " photos)" }]),
     });
+    // Price to win: just under the local market, never below the minimum margin.
+    const win = priceToWin(next, settings, d.market);
+    if (win) { next.marginPct = win.marginPct; next.discountPct = 0; next.aiDraft.pricingNote = win.note; }
     setDirty(true);
     setQ(next);
     // Save it right away rather than waiting for the autosave tick.
@@ -1829,7 +1873,7 @@ function QuoteForm({ me, isOwner, isManager, settings, notify, existing, onSave,
      approval — same rule as printing the quote. */
   const releasable = ["approved", "sent", "negotiating", "won"].includes(q.status);
   const canSendReply = !isVoid(q) && (isManager || releasable);
-  const replyText = renderReply(q.replyTemplate, c.total, (q.aiDraft && q.aiDraft.confidence) || "medium", isLaborOnly(q));
+  const replyText = renderReply(q.replyTemplate, c.total, (q.aiDraft && q.aiDraft.confidence) || "medium", isLaborOnly(q), q.aiDraft && q.aiDraft.market);
   const copyReply = async () => {
     try { await navigator.clipboard.writeText(replyText); notify("Reply copied — paste it into Thumbtack."); }
     catch { window.prompt("Copy the reply:", replyText); }
@@ -1840,7 +1884,8 @@ function QuoteForm({ me, isOwner, isManager, settings, notify, existing, onSave,
     setDirty(true);
     const first = (q.clientName || "").split(" ")[0];
     set("replyTemplate", "Hey" + (first ? " " + first : " there") + "! Joel with JTProconstruction — happy to help with your " + (q.jobTitle || "project").toLowerCase() + ".\n\n"
-      + "Jobs like this usually start around {{PRICE_FROM}}. I'd lock in the exact price after a quick look — could go up a bit depending on what we find.\n\n"
+      + "Based on what you sent, jobs like this start at just {{PRICE_FROM}}. Most contractors around here charge {{MARKET_RANGE}}.\n"
+      + "Licensed & insured, written itemized quote, 90-day workmanship warranty. I'd lock in the exact price after a quick look — could go up a bit depending on what we find.\n\n"
       + "When's a good time for me to swing by?\n— Joel");
   };
 
@@ -2062,6 +2107,28 @@ function QuoteForm({ me, isOwner, isManager, settings, notify, existing, onSave,
                 Nothing priced yet. Set the days on site and materials, or use the AI assistant at the top.
               </div>
             )}
+            {q.aiDraft && marketFor(q, q.aiDraft.market) && (() => {
+              const m = marketFor(q, q.aiDraft.market);
+              const pos = c.total <= m.low ? "under" : c.total <= m.high ? "within" : "above";
+              const win = priceToWin(q, settings, q.aiDraft.market);
+              return (
+                <div style={{ border: `1.5px solid ${pos === "above" ? BRAND.red : BRAND.green}`, borderRadius: 8, padding: "8px 10px", fontSize: 12.5, marginBottom: 12 }}>
+                  <div style={{ fontWeight: 700, color: BRAND.navy }}>Local market: {money(m.low).replace(".00", "")}–{money(m.high).replace(".00", "")}</div>
+                  <div style={{ color: pos === "above" ? BRAND.red : BRAND.green, fontWeight: 600 }}>
+                    Your price is {pos === "under" ? "under the typical range — competitive" : pos === "within" ? "inside the typical range" : "above the typical range"} · {c.realMargin.toFixed(1)}% margin
+                  </div>
+                  {q.aiDraft.pricingNote && <div style={{ color: BRAND.sub, marginTop: 2 }}>{q.aiDraft.pricingNote}</div>}
+                  {q.aiDraft.market && q.aiDraft.market.basis && <div style={{ color: BRAND.sub, marginTop: 2, fontSize: 11.5 }}>AI estimate: {q.aiDraft.market.basis}</div>}
+                  <label style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 6, fontSize: 12, cursor: "pointer" }}>
+                    <input type="checkbox" disabled={locked} checked={q.showMarket !== false} onChange={(e) => set("showMarket", e.target.checked)} />
+                    Show "How this compares" on the client quote{pos === "above" ? " (hidden while you're above the range)" : ""}
+                  </label>
+                  {!locked && win && Math.abs(win.marginPct - (Number(q.marginPct) || 0)) > 0.4 && (
+                    <div className="mt-2"><Btn small kind="gold" onClick={() => { setDirty(true); setQ((p) => Object.assign({}, p, { marginPct: win.marginPct, discountPct: 0, aiDraft: Object.assign({}, p.aiDraft, { pricingNote: win.note }) })); }}>Price to win ({win.marginPct}% margin)</Btn></div>
+                  )}
+                </div>
+              );
+            })()}
             {q.aiDraft && (
               <div style={{ background: q.aiDraft.confidence === "high" ? "#E2F2E9" : q.aiDraft.confidence === "medium" ? "#FBF3DE" : "#F9E5E3", borderRadius: 8, padding: "8px 10px", fontSize: 12, marginBottom: 12, color: BRAND.ink }}>
                 <strong>AI draft · {q.aiDraft.confidence} confidence.</strong> {q.aiDraft.needsSiteVisit ? "Site visit recommended. " : ""}
@@ -2590,6 +2657,7 @@ function SettingsView({ settings, onSave }) {
         <Field label="Default labor rate ($/hr per crew member)"><input style={inputStyle} type="number" value={s.laborRate} onChange={(e) => setS(Object.assign({}, s, { laborRate: Number(e.target.value) }))} /></Field>
         <Field label="Default overhead %" hint="Applied on top of labor + materials before profit."><input style={inputStyle} type="number" value={s.overheadPct} onChange={(e) => setS(Object.assign({}, s, { overheadPct: Number(e.target.value) }))} /></Field>
         <Field label="Default profit margin %"><input style={inputStyle} type="number" value={s.targetMargin} onChange={(e) => setS(Object.assign({}, s, { targetMargin: Number(e.target.value) }))} /></Field>
+        <Field label="Minimum profit margin %" hint="'Price to win' never goes below this, even to beat the market. Default 15%."><input style={inputStyle} type="number" value={s.minMargin != null ? s.minMargin : 15} onChange={(e) => setS(Object.assign({}, s, { minMargin: Number(e.target.value) }))} /></Field>
         <div style={{ background: BRAND.paper, borderRadius: 8, padding: 12, marginBottom: 16 }}>
           <label style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer" }}>
             <input type="checkbox" style={{ width: 18, height: 18 }} checked={!!s.requireTeamCode} onChange={(e) => setS(Object.assign({}, s, { requireTeamCode: e.target.checked }))} />
@@ -2853,6 +2921,46 @@ function PreviewModal({ quote, settings, users, me, onClose }) {
               <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, padding: "6px 2px", color: BRAND.sub }}>
                 <span>Deposit to schedule (50%)</span><span style={{ fontWeight: 700, color: BRAND.ink }}>{money(c.deposit)}</span>
               </div>
+            </div>
+          </div>
+
+          {/* How this compares — shown only when we really are at or under the typical local price. */}
+          {(() => {
+            const m = quote.aiDraft && marketFor(quote, quote.aiDraft.market);
+            if (!m || quote.showMarket === false || c.total > m.high) return null;
+            const savePct = Math.round((1 - c.total / ((m.low + m.high) / 2)) * 100);
+            return (
+              <div style={{ marginTop: 16, border: `1.5px solid ${BRAND.gold}`, borderRadius: 8, padding: "12px 14px", breakInside: "avoid" }}>
+                <div style={Object.assign({}, goldLabel, { marginBottom: 6 })}>HOW THIS COMPARES</div>
+                <div style={{ display: "flex", gap: 18, flexWrap: "wrap", alignItems: "flex-end" }}>
+                  <div>
+                    <div style={{ fontSize: 11.5, color: BRAND.sub }}>Typical local price for this scope</div>
+                    <div style={{ fontSize: 17, fontWeight: 700, color: BRAND.sub }}>{money(m.low).replace(".00", "")} – {money(m.high).replace(".00", "")}</div>
+                  </div>
+                  <div>
+                    <div style={{ fontSize: 11.5, color: BRAND.sub }}>Your JTPro price</div>
+                    <div style={{ fontSize: 17, fontWeight: 700, color: BRAND.navy }}>{money(c.total)}</div>
+                  </div>
+                  {savePct >= 3 && <div style={{ background: BRAND.navy, color: "#fff", borderRadius: 6, padding: "6px 10px", fontSize: 13, fontWeight: 700 }}>About {savePct}% below the typical midpoint</div>}
+                </div>
+                <div style={{ fontSize: 10.5, color: BRAND.sub, marginTop: 6 }}>Typical range is our estimate of what licensed local contractors charge for comparable work{isLaborOnly(quote) ? " (labor only)" : ""}; actual competitor quotes vary.</div>
+              </div>
+            );
+          })()}
+
+          <div style={{ marginTop: 16, breakInside: "avoid" }}>
+            <div style={Object.assign({}, goldLabel, { marginBottom: 6 })}>WHY HOMEOWNERS CHOOSE JTPROCONSTRUCTION</div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: "6px 18px", fontSize: 12.5, lineHeight: 1.45 }}>
+              {[
+                ["Licensed & insured", "Your home and our crew are covered on every job."],
+                ["Written, itemized pricing", "You see exactly what you pay for — no surprise add-ons."],
+                ["90-day workmanship warranty", "If our work isn't right, we come back and make it right."],
+                ["Changes approved in writing", "Nothing extra is done or billed without your OK."],
+                ["Clean site, every day", "We protect your space and clean up before we leave."],
+                ["One point of contact", (preparer.name || "Your JTPro contact") + " stays with your project start to finish."],
+              ].map(([t, d]) => (
+                <div key={t}><span style={{ color: BRAND.gold, fontWeight: 700 }}>✓ </span><strong>{t}</strong> — <span style={{ color: BRAND.sub }}>{d}</span></div>
+              ))}
             </div>
           </div>
 
