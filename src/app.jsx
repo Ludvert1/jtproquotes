@@ -1193,10 +1193,36 @@ const MAX_PHOTOS = 8;
    are too big for the quote record) and fetched again when needed. */
 const PROPERTY_PICS = {}; // address -> { streetView, satellite, streetViewDate }
 const sameAddr = (a, b) => String(a || "").trim().toLowerCase() === String(b || "").trim().toLowerCase();
+/* Drive time is from wherever the associate is. First choice: this phone's
+   location (asked once; the browser remembers the answer). Otherwise a
+   starting address they typed, kept on this device. Otherwise the company
+   base, on the server. */
+const START_KEY = "jtpq.startFrom";
+const getStartFrom = () => { try { return localStorage.getItem(START_KEY) || ""; } catch { return ""; } };
+const setStartFrom = (v) => { try { v ? localStorage.setItem(START_KEY, v) : localStorage.removeItem(START_KEY); } catch {} };
+function hereNow() {
+  return new Promise((resolve) => {
+    if (!navigator.geolocation) return resolve(null);
+    const t = setTimeout(() => resolve(null), 7000);
+    try {
+      navigator.geolocation.getCurrentPosition(
+        (pos) => { clearTimeout(t); resolve({ lat: pos.coords.latitude, lng: pos.coords.longitude, label: "your location" }); },
+        () => { clearTimeout(t); resolve(null); },
+        { enableHighAccuracy: false, timeout: 6500, maximumAge: 10 * 60 * 1000 }
+      );
+    } catch { clearTimeout(t); resolve(null); }
+  });
+}
+async function startOrigin() {
+  const typed = getStartFrom();
+  if (typed) return { address: typed };
+  return await hereNow(); // null → server uses the company base
+}
 async function fetchProperty(address) {
   if (!fbAuth || !fbAuth.currentUser) throw new Error("Sign in again to look up the property.");
   const idToken = await fbAuth.currentUser.getIdToken();
-  const r = await fetch("/api/property", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ idToken, address }) });
+  const origin = await startOrigin();
+  const r = await fetch("/api/property", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ idToken, address, origin }) });
   const data = await r.json().catch(() => ({}));
   if (!r.ok) { const e = new Error(data.error || "Property lookup failed."); e.status = r.status; throw e; }
   const p = data.property;
@@ -1205,6 +1231,23 @@ async function fetchProperty(address) {
   return Object.assign({}, p, { streetView: "", satellite: "", query: address.trim() });
 }
 const propertyPics = (p) => (p && PROPERTY_PICS[String(p.query || "").trim().toLowerCase()]) || null;
+
+/* "Starting from" — blank means use this phone's location. */
+function StartFrom() {
+  const [v, setV] = useState(getStartFrom());
+  const [edit, setEdit] = useState(false);
+  if (!edit) return (
+    <div style={{ fontSize: 12, color: BRAND.sub, marginTop: 6 }}>
+      Drive time from {v ? <b>{v}</b> : "your phone's location"} · <a href="#" onClick={(e) => { e.preventDefault(); setEdit(true); }} style={{ color: BRAND.navySoft, fontWeight: 600 }}>change</a>
+    </div>
+  );
+  return (
+    <div style={{ display: "flex", gap: 6, marginTop: 6, alignItems: "center", flexWrap: "wrap" }}>
+      <input style={Object.assign({}, inputStyle, { flex: "1 1 180px", padding: "6px 10px", fontSize: 13 })} value={v} onChange={(e) => setV(e.target.value)} placeholder="Leave blank to use your location" />
+      <Btn small kind="ghost" onClick={() => { setStartFrom(v.trim()); setEdit(false); }}>Save</Btn>
+    </div>
+  );
+}
 
 function PropertyPanel({ q, locked, onProperty }) {
   const [busy, setBusy] = useState(false);
@@ -1233,7 +1276,7 @@ function PropertyPanel({ q, locked, onProperty }) {
       {p && (
         <div style={{ marginTop: 8, opacity: stale ? 0.55 : 1 }}>
           {row("Address", p.address)}
-          {p.drive && row("Drive", "~" + p.drive.minutes + " min · " + p.drive.miles + " mi from base")}
+          {p.drive && row("Drive", "~" + p.drive.minutes + " min · " + p.drive.miles + " mi from " + p.drive.from)}
           {p.roof && row("Roof", p.roof.sqft.toLocaleString() + " sq ft · " + p.roof.squares + " squares · " + p.roof.faces + " faces · pitch " + p.roof.pitch + (p.roof.steep ? " (steep)" : ""))}
           {p.roof && p.roof.footprintSqft > 0 && row("Footprint", "~" + p.roof.footprintSqft.toLocaleString() + " sq ft" + (p.roof.imageryDate ? " · imagery " + p.roof.imageryDate : ""))}
           {p.parcel && row("Lot", (p.parcel.use ? p.parcel.use + " · " : "") + (p.parcel.lotSqft ? p.parcel.lotSqft.toLocaleString() + " sq ft" : "") + (p.parcel.acres ? " (" + p.parcel.acres.toFixed(2) + " ac)" : ""))}
@@ -1249,6 +1292,7 @@ function PropertyPanel({ q, locked, onProperty }) {
             <a href={p.mapUrl} target="_blank" rel="noopener" style={{ color: BRAND.navySoft, fontWeight: 600 }}>Open in Google Maps</a>
             {p.parcel && p.parcel.link && <a href={p.parcel.link} target="_blank" rel="noopener" style={{ color: BRAND.navySoft, fontWeight: 600 }}>County record</a>}
           </div>
+          <StartFrom />
           <div style={{ fontSize: 11, color: BRAND.sub, marginTop: 4 }}>The AI uses these when drafting. Satellite measurements are estimates — confirm on site.</div>
         </div>
       )}

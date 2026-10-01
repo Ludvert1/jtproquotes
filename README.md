@@ -324,7 +324,7 @@ Changing `config.js` does **not** require a rebuild — it's loaded directly by 
 
 Type the job address and press **Look up property** (it also runs on its own before every AI draft). You get:
 
-- the map pin and drive time from base (`BASE_ADDRESS`, default New Caney, TX 77357)
+- the map pin and drive time from wherever the associate is — their phone's location, or a "starting from" address they set on their device (falls back to `BASE_ADDRESS`, default New Caney, TX 77357, e.g. for leads filed from email)
 - roof area, squares, number of faces and average pitch, measured from Google's satellite data
 - a Street View picture and a satellite picture
 - the FEMA flood zone

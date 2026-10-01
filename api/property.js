@@ -25,7 +25,9 @@ module.exports = async (req, res) => {
   if (address.length < 6) return bad(res, 400, "Enter the job address first (street, city).");
 
   try {
-    const p = await lookupProperty(address);
+    // Where the associate is starting from (phone location or a typed address).
+    const o = body.origin && typeof body.origin === "object" ? body.origin : null;
+    const p = await lookupProperty(address, o);
     console.log("[property] ok uid=" + caller.uid + " precise=" + p.precise + " roof=" + !!p.roof + " parcel=" + !!p.parcel);
     return res.status(200).json({ property: p });
   } catch (e) {

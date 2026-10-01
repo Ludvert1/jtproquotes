@@ -2316,9 +2316,56 @@ const SOURCE_COLOR = {
 const MAX_PHOTOS = 8;
 const PROPERTY_PICS = {};
 const sameAddr = (a, b) => String(a || "").trim().toLowerCase() === String(b || "").trim().toLowerCase();
+const START_KEY = "jtpq.startFrom";
+const getStartFrom = () => {
+  try {
+    return localStorage.getItem(START_KEY) || "";
+  } catch {
+    return "";
+  }
+};
+const setStartFrom = v => {
+  try {
+    v ? localStorage.setItem(START_KEY, v) : localStorage.removeItem(START_KEY);
+  } catch {}
+};
+function hereNow() {
+  return new Promise(resolve => {
+    if (!navigator.geolocation) return resolve(null);
+    const t = setTimeout(() => resolve(null), 7000);
+    try {
+      navigator.geolocation.getCurrentPosition(pos => {
+        clearTimeout(t);
+        resolve({
+          lat: pos.coords.latitude,
+          lng: pos.coords.longitude,
+          label: "your location"
+        });
+      }, () => {
+        clearTimeout(t);
+        resolve(null);
+      }, {
+        enableHighAccuracy: false,
+        timeout: 6500,
+        maximumAge: 10 * 60 * 1000
+      });
+    } catch {
+      clearTimeout(t);
+      resolve(null);
+    }
+  });
+}
+async function startOrigin() {
+  const typed = getStartFrom();
+  if (typed) return {
+    address: typed
+  };
+  return await hereNow();
+}
 async function fetchProperty(address) {
   if (!fbAuth || !fbAuth.currentUser) throw new Error("Sign in again to look up the property.");
   const idToken = await fbAuth.currentUser.getIdToken();
+  const origin = await startOrigin();
   const r = await fetch("/api/property", {
     method: "POST",
     headers: {
@@ -2326,7 +2373,8 @@ async function fetchProperty(address) {
     },
     body: JSON.stringify({
       idToken,
-      address
+      address,
+      origin
     })
   });
   const data = await r.json().catch(() => ({}));
@@ -2348,6 +2396,52 @@ async function fetchProperty(address) {
   });
 }
 const propertyPics = p => p && PROPERTY_PICS[String(p.query || "").trim().toLowerCase()] || null;
+function StartFrom() {
+  const [v, setV] = useState(getStartFrom());
+  const [edit, setEdit] = useState(false);
+  if (!edit) return React.createElement("div", {
+    style: {
+      fontSize: 12,
+      color: BRAND.sub,
+      marginTop: 6
+    }
+  }, "Drive time from ", v ? React.createElement("b", null, v) : "your phone's location", " \xB7 ", React.createElement("a", {
+    href: "#",
+    onClick: e => {
+      e.preventDefault();
+      setEdit(true);
+    },
+    style: {
+      color: BRAND.navySoft,
+      fontWeight: 600
+    }
+  }, "change"));
+  return React.createElement("div", {
+    style: {
+      display: "flex",
+      gap: 6,
+      marginTop: 6,
+      alignItems: "center",
+      flexWrap: "wrap"
+    }
+  }, React.createElement("input", {
+    style: Object.assign({}, inputStyle, {
+      flex: "1 1 180px",
+      padding: "6px 10px",
+      fontSize: 13
+    }),
+    value: v,
+    onChange: e => setV(e.target.value),
+    placeholder: "Leave blank to use your location"
+  }), React.createElement(Btn, {
+    small: true,
+    kind: "ghost",
+    onClick: () => {
+      setStartFrom(v.trim());
+      setEdit(false);
+    }
+  }, "Save"));
+}
 function PropertyPanel({
   q,
   locked,
@@ -2431,7 +2525,7 @@ function PropertyPanel({
       marginTop: 8,
       opacity: stale ? 0.55 : 1
     }
-  }, row("Address", p.address), p.drive && row("Drive", "~" + p.drive.minutes + " min · " + p.drive.miles + " mi from base"), p.roof && row("Roof", p.roof.sqft.toLocaleString() + " sq ft · " + p.roof.squares + " squares · " + p.roof.faces + " faces · pitch " + p.roof.pitch + (p.roof.steep ? " (steep)" : "")), p.roof && p.roof.footprintSqft > 0 && row("Footprint", "~" + p.roof.footprintSqft.toLocaleString() + " sq ft" + (p.roof.imageryDate ? " · imagery " + p.roof.imageryDate : "")), p.parcel && row("Lot", (p.parcel.use ? p.parcel.use + " · " : "") + (p.parcel.lotSqft ? p.parcel.lotSqft.toLocaleString() + " sq ft" : "") + (p.parcel.acres ? " (" + p.parcel.acres.toFixed(2) + " ac)" : "")), p.flood && row("Flood zone", p.flood.zone + (p.flood.highRisk ? " — high risk (check permit rules)" : "")), !p.roof && p.precise && React.createElement("div", {
+  }, row("Address", p.address), p.drive && row("Drive", "~" + p.drive.minutes + " min · " + p.drive.miles + " mi from " + p.drive.from), p.roof && row("Roof", p.roof.sqft.toLocaleString() + " sq ft · " + p.roof.squares + " squares · " + p.roof.faces + " faces · pitch " + p.roof.pitch + (p.roof.steep ? " (steep)" : "")), p.roof && p.roof.footprintSqft > 0 && row("Footprint", "~" + p.roof.footprintSqft.toLocaleString() + " sq ft" + (p.roof.imageryDate ? " · imagery " + p.roof.imageryDate : "")), p.parcel && row("Lot", (p.parcel.use ? p.parcel.use + " · " : "") + (p.parcel.lotSqft ? p.parcel.lotSqft.toLocaleString() + " sq ft" : "") + (p.parcel.acres ? " (" + p.parcel.acres.toFixed(2) + " ac)" : "")), p.flood && row("Flood zone", p.flood.zone + (p.flood.highRisk ? " — high risk (check permit rules)" : "")), !p.roof && p.precise && React.createElement("div", {
     style: {
       fontSize: 12,
       color: BRAND.sub
@@ -2498,7 +2592,7 @@ function PropertyPanel({
       color: BRAND.navySoft,
       fontWeight: 600
     }
-  }, "County record")), React.createElement("div", {
+  }, "County record")), React.createElement(StartFrom, null), React.createElement("div", {
     style: {
       fontSize: 11,
       color: BRAND.sub,

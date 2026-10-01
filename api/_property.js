@@ -10,7 +10,8 @@
    Environment:
      GOOGLE_MAPS_API_KEY   Geocoding, Routes, Solar, Street View Static
                            and Maps Static APIs enabled on it
-     BASE_ADDRESS          optional — where crews start from
+     BASE_ADDRESS          optional — fallback starting point for drive
+                           time when the associate's location isn't known
                            (default "New Caney, TX 77357")
 ============================================================ */
 
@@ -50,15 +51,27 @@ async function geocode(address) {
   };
 }
 
-async function driveFromBase(destination) {
+/* Drive time from wherever the associate is: their phone's location, a
+   starting address they typed, or the company base as a last resort. */
+function originOf(o) {
+  if (o && Number.isFinite(Number(o.lat)) && Number.isFinite(Number(o.lng)) && (Number(o.lat) || Number(o.lng))) {
+    return { waypoint: { location: { latLng: { latitude: Number(o.lat), longitude: Number(o.lng) } } }, label: String(o.label || "your location").slice(0, 120) };
+  }
+  if (o && typeof o.address === "string" && o.address.trim().length >= 3) {
+    return { waypoint: { address: o.address.trim().slice(0, 200) }, label: o.address.trim().slice(0, 120) };
+  }
+  return { waypoint: { address: BASE() }, label: BASE() };
+}
+async function driveFromBase(destination, origin) {
+  const o = originOf(origin);
   const d = await getJson("https://routes.googleapis.com/directions/v2:computeRoutes", {
     method: "POST",
     headers: { "Content-Type": "application/json", "X-Goog-Api-Key": KEY(), "X-Goog-FieldMask": "routes.duration,routes.distanceMeters" },
-    body: JSON.stringify({ origin: { address: BASE() }, destination: { address: destination }, travelMode: "DRIVE" }),
+    body: JSON.stringify({ origin: o.waypoint, destination: { address: destination }, travelMode: "DRIVE" }),
   });
   const r = d && d.routes && d.routes[0];
   if (!r) return null;
-  return { minutes: Math.round(parseInt(String(r.duration || "0"), 10) / 60), miles: Math.round((r.distanceMeters || 0) / 1609.34), from: BASE() };
+  return { minutes: Math.round(parseInt(String(r.duration || "0"), 10) / 60), miles: Math.round((r.distanceMeters || 0) / 1609.34), from: o.label };
 }
 
 async function roof(lat, lng) {
@@ -119,12 +132,12 @@ async function harrisParcel(lat, lng) {
   };
 }
 
-async function lookupProperty(address) {
+async function lookupProperty(address, origin) {
   if (!KEY()) throw Object.assign(new Error("Property lookup isn't switched on yet — GOOGLE_MAPS_API_KEY is not set in Vercel."), { code: 503 });
   const g = await geocode(address);
   if (!g) throw Object.assign(new Error("Couldn't find that address on the map. Check the street and city."), { code: 404 });
   const [drive, roofInfo, sv, sat, flood, parcel] = await Promise.all([
-    driveFromBase(g.formatted),
+    driveFromBase(g.formatted, origin),
     g.precise ? roof(g.lat, g.lng) : Promise.resolve(null),
     g.precise ? streetView(g.formatted, g.lat, g.lng) : Promise.resolve({ image: "", date: "" }),
     g.precise ? satellite(g.lat, g.lng) : Promise.resolve(""),
@@ -145,7 +158,7 @@ async function lookupProperty(address) {
 function propertyBrief(p) {
   if (!p) return "";
   const bits = ["PROPERTY FACTS (looked up from the job address — use them, don't repeat them to the customer):", "Address: " + p.address + (p.precise ? "" : " (approximate — street-level only)")];
-  if (p.drive) bits.push("Drive from our base (" + p.drive.from + "): about " + p.drive.minutes + " min / " + p.drive.miles + " miles each way.");
+  if (p.drive) bits.push("Drive for the associate quoting it (from " + p.drive.from + "): about " + p.drive.minutes + " min / " + p.drive.miles + " miles each way.");
   if (p.roof) bits.push("Roof (satellite measurement" + (p.roof.imageryDate ? ", imagery " + p.roof.imageryDate : "") + "): about " + p.roof.sqft + " sq ft = " + p.roof.squares + " squares, " + p.roof.faces + " roof faces, average pitch " + p.roof.pitch + (p.roof.steep ? " (steep — add safety equipment and time)" : "") + "; building footprint about " + p.roof.footprintSqft + " sq ft. Treat roof numbers as measured, but say 'measured from satellite' in assumptions.");
   if (p.parcel) bits.push(p.parcel.source + ": " + (p.parcel.use || "property") + ", lot about " + p.parcel.lotSqft + " sq ft.");
   if (p.flood) bits.push("FEMA flood zone " + p.flood.zone + (p.flood.highRisk ? " (high-risk special flood hazard area — flag permit/elevation rules in risks)" : ""));
