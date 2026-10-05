@@ -1805,6 +1805,50 @@ function QuoteForm({ me, isOwner, isManager, settings, notify, existing, onSave,
   const addItem = () => set("items", q.items.concat([{ id: uid(), desc: "", qty: 1, price: 0 }]));  const setItem = (id, k, v) => set("items", q.items.map((it) => (it.id === id ? Object.assign({}, it, { [k]: v }) : it)));
   const rmItem = (id) => set("items", q.items.filter((it) => it.id !== id));
 
+  /* "Labor + materials": the AI reads the scope, sizes, findings and photos
+     and lists everything to buy. With items already listed, it adds only
+     what's missing. */
+  const [matBusy, setMatBusy] = useState(false);
+  const [matNote, setMatNote] = useState("");
+  const detectMaterials = async () => {
+    if (!CLOUD || !fbAuth || !fbAuth.currentUser) return notify("Sign in again to list materials.");
+    const scope = (q.scopeItems || []).filter((x) => x.on && String(x.text || "").trim()).map((x) => x.text);
+    if (!q.jobTitle && !q.description && !scope.length) { setMatNote("Add a job title, description or scope first — or use the AI assistant — so there's something to list materials for."); return; }
+    setMatBusy(true); setMatNote("");
+    try {
+      const p = q.property;
+      const propertyFacts = p ? [p.roof ? "roof about " + p.roof.sqft + " sq ft (" + p.roof.squares + " squares), pitch " + p.roof.pitch : "", p.roof && p.roof.footprintSqft ? "building footprint about " + p.roof.footprintSqft + " sq ft" : "", p.parcel && p.parcel.lotSqft ? "lot about " + p.parcel.lotSqft + " sq ft" : ""].filter(Boolean).join("; ") : "";
+      const photos = (q.attachments || []).filter((a) => a.kind === "photo" && /^data:image\/(jpeg|png|webp|gif);base64,/.test(a.thumb || "")).slice(0, 6)
+        .map((a) => { const m = /^data:(image\/[a-z]+);base64,(.+)$/.exec(a.thumb); return { mediaType: m[1], data: m[2] }; });
+      const existing = (q.items || []).filter((it) => String(it.desc || "").trim()).map((it) => it.desc + (it.qty ? " — " + it.qty + " " + (it.unit || "") : ""));
+      const body = {
+        idToken: await fbAuth.currentUser.getIdToken(), existing, images: photos,
+        quote: {
+          category: q.category, jobTitle: q.jobTitle, description: q.description,
+          clientAddress: q.clientAddress, city: p && p.address ? p.address : "",
+          scope, findings: (q.assessment || []).filter((a) => a.on !== false && a.title).map((a) => a.title + (a.detail ? " — " + a.detail : "")),
+          measurements: ((q.aiDraft && q.aiDraft.measurements) || []).map((m) => m.what + ": " + m.value + " (" + m.source + ")"),
+          crewPlan: q.crew + " people × " + q.days + " days", propertyFacts, notes: q.notes,
+        },
+      };
+      const r = await fetch("/api/materials", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(data.error || "Couldn't list the materials. Try again.");
+      const found = (data.items || []).map((m) => ({ id: uid(), desc: m.desc, qty: m.qty, unit: m.unit, price: m.unitCost, ai: true, why: m.why || "" }));
+      setDirty(true);
+      setQ((prev) => Object.assign({}, prev, { items: (prev.items || []).filter((it) => String(it.desc || "").trim()).concat(found) }));
+      setMatNote(found.length
+        ? (existing.length ? "Added " + found.length + " missing item" + (found.length === 1 ? "" : "s") + "." : "Listed " + found.length + " items.") + (data.basis ? " " + data.basis : "") + " Check quantities and prices before sending."
+        : "Nothing missing — the list already covers this scope.");
+      logActivity(me.name, "Listed materials with AI (" + found.length + " items)", q.quoteNo);
+    } catch (e) { setMatNote(e.message || "Couldn't list the materials."); }
+    setMatBusy(false);
+  };
+  const changePricing = (mode) => {
+    set("pricingMode", mode);
+    if (mode === "turnkey" && !locked) detectMaterials();
+  };
+
   const save = async (submit, opts) => {
     if (!q.clientName.trim()) return alert("Enter the client's name.");
     if (submit && !(Number(q.days) > 0) && !(q.items || []).length) return alert("Add the days on site (or materials) before submitting — the quote is still $0.");
@@ -2179,11 +2223,18 @@ function QuoteForm({ me, isOwner, isManager, settings, notify, existing, onSave,
             {!locked && <Btn small kind="ghost" onClick={addItem}>+ Add item</Btn>}
           </div>
           <Field label="What this quote covers">
-            <select style={inputStyle} disabled={locked} value={isLaborOnly(q) ? "labor" : "turnkey"} onChange={(e) => set("pricingMode", e.target.value)}>
+            <select style={inputStyle} disabled={locked || matBusy} value={isLaborOnly(q) ? "labor" : "turnkey"} onChange={(e) => changePricing(e.target.value)}>
               <option value="labor">Labor only — client supplies materials</option>
               <option value="turnkey">Labor + materials</option>
             </select>
           </Field>
+          {!locked && CLOUD && (
+            <div className="flex items-center gap-2 flex-wrap" style={{ marginTop: -6, marginBottom: 10 }}>
+              <Btn small kind="ghost" disabled={matBusy} onClick={detectMaterials}>{matBusy ? "Listing materials for this job…" : (q.items.length ? "🔍 Find missing materials" : "🔍 List materials with AI")}</Btn>
+              {matBusy && <span style={{ fontSize: 12, color: BRAND.sub }}>Reading the scope, sizes and photos — about 20–40 seconds.</span>}
+            </div>
+          )}
+          {matNote && <div style={{ background: "#F4F7FB", border: `1px solid ${BRAND.line}`, borderRadius: 8, padding: "8px 12px", fontSize: 12.5, color: BRAND.ink, marginBottom: 10 }}>{matNote}</div>}
           {isLaborOnly(q) && q.items.length > 0 && (
             <div style={{ background: BRAND.paper, borderRadius: 8, padding: "8px 12px", fontSize: 12.5, color: BRAND.sub, marginBottom: 10 }}>
               Labor only: these materials are <strong>not in the price</strong>. They print on the quote as a shopping list for the client. Switch to "Labor + materials" to include them.
@@ -2192,7 +2243,7 @@ function QuoteForm({ me, isOwner, isManager, settings, notify, existing, onSave,
           {q.items.length === 0 && <div style={{ fontSize: 13, color: BRAND.sub }}>{isLaborOnly(q) ? "No materials listed. Add items if you'd like to give the client a shopping list." : "No materials yet."}</div>}
           {q.items.map((it) => (
             <div key={it.id} className="flex gap-2 mb-2 items-center flex-wrap">
-              <input style={Object.assign({}, inputStyle, { flex: "2 1 180px" })} disabled={locked} placeholder="Item — e.g. Porcelain tile 12x24" value={it.desc} onChange={(e) => setItem(it.id, "desc", e.target.value)} />
+              <input style={Object.assign({}, inputStyle, { flex: "2 1 180px" })} disabled={locked} title={it.why || ""} placeholder="Item — e.g. Porcelain tile 12x24" value={it.desc} onChange={(e) => setItem(it.id, "desc", e.target.value)} />
               <input style={Object.assign({}, inputStyle, { flex: "0 1 70px" })} disabled={locked} type="number" placeholder="Qty" value={it.qty} onChange={(e) => setItem(it.id, "qty", e.target.value)} />
               <input style={Object.assign({}, inputStyle, { flex: "0 1 64px" })} disabled={locked} placeholder="unit" value={it.unit || ""} onChange={(e) => setItem(it.id, "unit", e.target.value)} />
               <input style={Object.assign({}, inputStyle, { flex: "0 1 110px" })} disabled={locked} type="number" placeholder="Unit $" value={it.price} onChange={(e) => setItem(it.id, "price", e.target.value)} />

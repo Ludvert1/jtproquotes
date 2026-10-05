@@ -90,6 +90,9 @@
     },
     "api/property.js": {
       "maxDuration": 30
+    },
+    "api/materials.js": {
+      "maxDuration": 90
     }
   }
 }

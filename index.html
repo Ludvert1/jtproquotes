@@ -3641,6 +3641,79 @@ function QuoteForm({
     [k]: v
   }) : it));
   const rmItem = id => set("items", q.items.filter(it => it.id !== id));
+  const [matBusy, setMatBusy] = useState(false);
+  const [matNote, setMatNote] = useState("");
+  const detectMaterials = async () => {
+    if (!CLOUD || !fbAuth || !fbAuth.currentUser) return notify("Sign in again to list materials.");
+    const scope = (q.scopeItems || []).filter(x => x.on && String(x.text || "").trim()).map(x => x.text);
+    if (!q.jobTitle && !q.description && !scope.length) {
+      setMatNote("Add a job title, description or scope first — or use the AI assistant — so there's something to list materials for.");
+      return;
+    }
+    setMatBusy(true);
+    setMatNote("");
+    try {
+      const p = q.property;
+      const propertyFacts = p ? [p.roof ? "roof about " + p.roof.sqft + " sq ft (" + p.roof.squares + " squares), pitch " + p.roof.pitch : "", p.roof && p.roof.footprintSqft ? "building footprint about " + p.roof.footprintSqft + " sq ft" : "", p.parcel && p.parcel.lotSqft ? "lot about " + p.parcel.lotSqft + " sq ft" : ""].filter(Boolean).join("; ") : "";
+      const photos = (q.attachments || []).filter(a => a.kind === "photo" && /^data:image\/(jpeg|png|webp|gif);base64,/.test(a.thumb || "")).slice(0, 6).map(a => {
+        const m = /^data:(image\/[a-z]+);base64,(.+)$/.exec(a.thumb);
+        return {
+          mediaType: m[1],
+          data: m[2]
+        };
+      });
+      const existing = (q.items || []).filter(it => String(it.desc || "").trim()).map(it => it.desc + (it.qty ? " — " + it.qty + " " + (it.unit || "") : ""));
+      const body = {
+        idToken: await fbAuth.currentUser.getIdToken(),
+        existing,
+        images: photos,
+        quote: {
+          category: q.category,
+          jobTitle: q.jobTitle,
+          description: q.description,
+          clientAddress: q.clientAddress,
+          city: p && p.address ? p.address : "",
+          scope,
+          findings: (q.assessment || []).filter(a => a.on !== false && a.title).map(a => a.title + (a.detail ? " — " + a.detail : "")),
+          measurements: (q.aiDraft && q.aiDraft.measurements || []).map(m => m.what + ": " + m.value + " (" + m.source + ")"),
+          crewPlan: q.crew + " people × " + q.days + " days",
+          propertyFacts,
+          notes: q.notes
+        }
+      };
+      const r = await fetch("/api/materials", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify(body)
+      });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(data.error || "Couldn't list the materials. Try again.");
+      const found = (data.items || []).map(m => ({
+        id: uid(),
+        desc: m.desc,
+        qty: m.qty,
+        unit: m.unit,
+        price: m.unitCost,
+        ai: true,
+        why: m.why || ""
+      }));
+      setDirty(true);
+      setQ(prev => Object.assign({}, prev, {
+        items: (prev.items || []).filter(it => String(it.desc || "").trim()).concat(found)
+      }));
+      setMatNote(found.length ? (existing.length ? "Added " + found.length + " missing item" + (found.length === 1 ? "" : "s") + "." : "Listed " + found.length + " items.") + (data.basis ? " " + data.basis : "") + " Check quantities and prices before sending." : "Nothing missing — the list already covers this scope.");
+      logActivity(me.name, "Listed materials with AI (" + found.length + " items)", q.quoteNo);
+    } catch (e) {
+      setMatNote(e.message || "Couldn't list the materials.");
+    }
+    setMatBusy(false);
+  };
+  const changePricing = mode => {
+    set("pricingMode", mode);
+    if (mode === "turnkey" && !locked) detectMaterials();
+  };
   const save = async (submit, opts) => {
     if (!q.clientName.trim()) return alert("Enter the client's name.");
     if (submit && !(Number(q.days) > 0) && !(q.items || []).length) return alert("Add the days on site (or materials) before submitting — the quote is still $0.");
@@ -4414,14 +4487,40 @@ function QuoteForm({
     label: "What this quote covers"
   }, React.createElement("select", {
     style: inputStyle,
-    disabled: locked,
+    disabled: locked || matBusy,
     value: isLaborOnly(q) ? "labor" : "turnkey",
-    onChange: e => set("pricingMode", e.target.value)
+    onChange: e => changePricing(e.target.value)
   }, React.createElement("option", {
     value: "labor"
   }, "Labor only \u2014 client supplies materials"), React.createElement("option", {
     value: "turnkey"
-  }, "Labor + materials"))), isLaborOnly(q) && q.items.length > 0 && React.createElement("div", {
+  }, "Labor + materials"))), !locked && CLOUD && React.createElement("div", {
+    className: "flex items-center gap-2 flex-wrap",
+    style: {
+      marginTop: -6,
+      marginBottom: 10
+    }
+  }, React.createElement(Btn, {
+    small: true,
+    kind: "ghost",
+    disabled: matBusy,
+    onClick: detectMaterials
+  }, matBusy ? "Listing materials for this job…" : q.items.length ? "🔍 Find missing materials" : "🔍 List materials with AI"), matBusy && React.createElement("span", {
+    style: {
+      fontSize: 12,
+      color: BRAND.sub
+    }
+  }, "Reading the scope, sizes and photos \u2014 about 20\u201340 seconds.")), matNote && React.createElement("div", {
+    style: {
+      background: "#F4F7FB",
+      border: `1px solid ${BRAND.line}`,
+      borderRadius: 8,
+      padding: "8px 12px",
+      fontSize: 12.5,
+      color: BRAND.ink,
+      marginBottom: 10
+    }
+  }, matNote), isLaborOnly(q) && q.items.length > 0 && React.createElement("div", {
     style: {
       background: BRAND.paper,
       borderRadius: 8,
@@ -4443,6 +4542,7 @@ function QuoteForm({
       flex: "2 1 180px"
     }),
     disabled: locked,
+    title: it.why || "",
     placeholder: "Item \u2014 e.g. Porcelain tile 12x24",
     value: it.desc,
     onChange: e => setItem(it.id, "desc", e.target.value)
