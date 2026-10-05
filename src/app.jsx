@@ -1308,6 +1308,10 @@ function AiAssistant({ me, q, settings, disabled, onApplyDraft, onApplyLead, onS
      says it's ready). `job` is the one being waited on or reviewed. */
   const [job, setJob] = useState(null); // { id, attIds }
   const [found, setFound] = useState(null); // a finished draft from a previous visit
+  /* A draft the person asked for goes straight onto the quote when it lands —
+     no extra tap. (Drafts were finishing and then sitting unused, leaving the
+     quote on its generic starting scope.) */
+  const autoRef = useRef(false);
   const wakeRef = useRef(null);
   const [text, setText] = useState("");
   const [photos, setPhotos] = useState([]);
@@ -1382,6 +1386,7 @@ function AiAssistant({ me, q, settings, disabled, onApplyDraft, onApplyLead, onS
   const runDraft = async () => {
     setErr(""); setDraft(null); setFound(null);
     if (!text.trim() && !photos.length && !context()) return setErr("Add at least one photo or describe the job first.");
+    autoRef.current = true;
     setBusy("draft");
     holdScreen();
     const j = { id: uid() + uid(), attIds: [] };
@@ -1464,8 +1469,15 @@ function AiAssistant({ me, q, settings, disabled, onApplyDraft, onApplyLead, onS
     jobApi({ quoteId: q.id }).then((res) => {
       const latest = res && res.job;
       if (!alive || !latest) return;
-      if (latest.status === "done" && latest.draft && !latest.applied) setFound(latest);
+      if (latest.status === "done" && latest.draft && !latest.applied) {
+        // Never applied and the quote is still on its starting scope: apply it now.
+        if (!q.aiDrafted && !hasRealWork() && !disabled) {
+          autoRef.current = true;
+          setOpen(true); setJob({ id: latest.id, attIds: latest.attIds || [] }); setDraft(latest.draft);
+        } else setFound(latest);
+      }
       else if (latest.status === "running" && Date.now() - new Date(latest.startedAt || latest.at).getTime() < 5 * 60000) {
+        autoRef.current = true;
         setOpen(true); setJob({ id: latest.id, attIds: latest.attIds || [] }); setBusy("waiting");
       }
     }).catch(warn("ai jobs"));
@@ -1492,12 +1504,19 @@ function AiAssistant({ me, q, settings, disabled, onApplyDraft, onApplyLead, onS
     setBusy(null);
   };
 
-  const reset = () => { setOpen(false); setDraft(null); setPhotos([]); setText(""); setErr(""); setJob(null); setFound(null); releaseScreen(); };
+  const reset = () => { autoRef.current = false; setOpen(false); setDraft(null); setPhotos([]); setText(""); setErr(""); setJob(null); setFound(null); releaseScreen(); };
+
+  /* Work someone typed by hand (not the standard starting steps or an
+     earlier AI draft) — only then do we ask before replacing it. */
+  function hasRealWork() {
+    const tmpl = new Set([].concat(...Object.values(SCOPE_TEMPLATES)));
+    return (q.items || []).some((it) => !it.ai && String(it.desc || "").trim())
+      || (q.scopeItems || []).some((x) => x.on && String(x.text || "").trim() && !x.ai && !tmpl.has(x.text));
+  }
 
   const apply = async () => {
     if (!draft) return;
-    const hasWork = (q.items || []).length > 0 || (q.scopeEdited && (q.scopeItems || []).some((s) => s.on && s.text.trim() && !s.ai));
-    if (hasWork && !window.confirm("Replace the scope, materials and crew already on this quote with the AI draft?\n\nClient details you've typed are kept.")) return;
+    if (hasRealWork() && !window.confirm("Replace the scope, materials and crew already on this quote with the AI draft?\n\nClient details you've typed are kept.")) return;
     setBusy("apply");
     const j = job;
     try {
@@ -1508,6 +1527,10 @@ function AiAssistant({ me, q, settings, disabled, onApplyDraft, onApplyLead, onS
     catch (e) { setErr(e.message || "Couldn't apply the draft."); }
     setBusy(null);
   };
+
+  useEffect(() => {
+    if (draft && autoRef.current && !disabled && busy !== "apply") { autoRef.current = false; apply(); }
+  }, [draft]);
 
   if (!CLOUD) return null;
 

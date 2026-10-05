@@ -2614,6 +2614,7 @@ function AiAssistant({
   const [open, setOpen] = useState(false);
   const [job, setJob] = useState(null);
   const [found, setFound] = useState(null);
+  const autoRef = useRef(false);
   const wakeRef = useRef(null);
   const [text, setText] = useState("");
   const [photos, setPhotos] = useState([]);
@@ -2704,6 +2705,7 @@ function AiAssistant({
     setDraft(null);
     setFound(null);
     if (!text.trim() && !photos.length && !context()) return setErr("Add at least one photo or describe the job first.");
+    autoRef.current = true;
     setBusy("draft");
     holdScreen();
     const j = {
@@ -2830,7 +2832,18 @@ function AiAssistant({
     }).then(res => {
       const latest = res && res.job;
       if (!alive || !latest) return;
-      if (latest.status === "done" && latest.draft && !latest.applied) setFound(latest);else if (latest.status === "running" && Date.now() - new Date(latest.startedAt || latest.at).getTime() < 5 * 60000) {
+      if (latest.status === "done" && latest.draft && !latest.applied) {
+        if (!q.aiDrafted && !hasRealWork() && !disabled) {
+          autoRef.current = true;
+          setOpen(true);
+          setJob({
+            id: latest.id,
+            attIds: latest.attIds || []
+          });
+          setDraft(latest.draft);
+        } else setFound(latest);
+      } else if (latest.status === "running" && Date.now() - new Date(latest.startedAt || latest.at).getTime() < 5 * 60000) {
+        autoRef.current = true;
         setOpen(true);
         setJob({
           id: latest.id,
@@ -2874,6 +2887,7 @@ function AiAssistant({
     setBusy(null);
   };
   const reset = () => {
+    autoRef.current = false;
     setOpen(false);
     setDraft(null);
     setPhotos([]);
@@ -2883,10 +2897,13 @@ function AiAssistant({
     setFound(null);
     releaseScreen();
   };
+  function hasRealWork() {
+    const tmpl = new Set([].concat(...Object.values(SCOPE_TEMPLATES)));
+    return (q.items || []).some(it => !it.ai && String(it.desc || "").trim()) || (q.scopeItems || []).some(x => x.on && String(x.text || "").trim() && !x.ai && !tmpl.has(x.text));
+  }
   const apply = async () => {
     if (!draft) return;
-    const hasWork = (q.items || []).length > 0 || q.scopeEdited && (q.scopeItems || []).some(s => s.on && s.text.trim() && !s.ai);
-    if (hasWork && !window.confirm("Replace the scope, materials and crew already on this quote with the AI draft?\n\nClient details you've typed are kept.")) return;
+    if (hasRealWork() && !window.confirm("Replace the scope, materials and crew already on this quote with the AI draft?\n\nClient details you've typed are kept.")) return;
     setBusy("apply");
     const j = job;
     try {
@@ -2901,6 +2918,12 @@ function AiAssistant({
     }
     setBusy(null);
   };
+  useEffect(() => {
+    if (draft && autoRef.current && !disabled && busy !== "apply") {
+      autoRef.current = false;
+      apply();
+    }
+  }, [draft]);
   if (!CLOUD) return null;
   const label = {
     fontSize: 11,
