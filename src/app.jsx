@@ -2838,17 +2838,29 @@ function PreviewModal({ quote, settings, users, me, onClose }) {
   const [pdfBusy, setPdfBusy] = useState("");
   const [pdfErr, setPdfErr] = useState("");
   const fileName = (quote.quoteNo + " " + (quote.clientName || "Client") + " - JTProconstruction Quote").replace(/[^\w .\-]+/g, "").trim() + ".pdf";
+  /* The page behind this window is often scrolled (a quote opened from far
+     down the dashboard). The PDF maker measures from the top of the page, so
+     a scrolled page came out as blank sheets. Capture from the top, then put
+     the page back where it was. */
   const makePdf = async () => {
     const lib = await loadHtml2pdf();
     const el = document.getElementById("print-doc");
-    return lib().set({
-      margin: [6, 6, 8, 6],
-      filename: fileName,
-      image: { type: "jpeg", quality: 0.92 },
-      html2canvas: { scale: 2, useCORS: true, backgroundColor: "#ffffff" },
-      jsPDF: { unit: "mm", format: "letter", orientation: "portrait" },
-      pagebreak: { mode: ["css", "legacy"], avoid: ["tr", "li", ".keep-together"] },
-    }).from(el).outputPdf("blob");
+    const sx = window.scrollX, sy = window.scrollY;
+    window.scrollTo(0, 0);
+    try {
+      // Phones can't draw a very tall canvas at double size; scale down when needed.
+      const scale = Math.max(1, Math.min(2, 14000 / Math.max(1, el.scrollHeight)));
+      const blob = await lib().set({
+        margin: [6, 6, 8, 6],
+        filename: fileName,
+        image: { type: "jpeg", quality: 0.92 },
+        html2canvas: { scale, useCORS: true, backgroundColor: "#ffffff", scrollX: 0, scrollY: 0 },
+        jsPDF: { unit: "mm", format: "letter", orientation: "portrait" },
+        pagebreak: { mode: ["css", "legacy"], avoid: ["tr", "li", ".keep-together"] },
+      }).from(el).outputPdf("blob");
+      if (!blob || blob.size < 3000) throw new Error("The PDF came out empty. Use Print → Save as PDF instead.");
+      return blob;
+    } finally { window.scrollTo(sx, sy); }
   };
   const downloadPdf = async () => {
     setPdfErr(""); setPdfBusy("download");
