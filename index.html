@@ -287,15 +287,58 @@ const BRAND = {
   amber: "#B07D10",
   red: "#B3372E"
 };
-const COMPANY = {
+const JTPRO_COMPANY = {
   name: "JTProconstruction LLC",
   tag: "Licensed & Insured · Residential & Commercial",
   area: "New Caney, TX · Serving Texas & Nevada",
   cities: "Houston · Austin · Dallas · San Antonio · Corpus Christi · Nevada",
   phone: "(713) 835-8245",
   email: "info@jtproconstruction.com",
-  site: "jtproconstruction.com"
+  site: "jtproconstruction.com",
+  short: "JTPro",
+  signer: "Joel",
+  initials: "JT",
+  logo: ""
 };
+const BLANK_COMPANY = {
+  name: "Your Company",
+  tag: "Licensed & Insured",
+  area: "",
+  cities: "",
+  phone: "",
+  email: "",
+  site: "",
+  short: "",
+  signer: "",
+  initials: "",
+  logo: ""
+};
+let COMPANY = Object.assign({}, JTPRO_COMPANY);
+const randomKey = () => {
+  const a = new Uint8Array(18);
+  crypto.getRandomValues(a);
+  return Array.from(a, b => "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789"[b % 56]).join("");
+};
+const initialsOf = name => String(name || "").replace(/\b(LLC|INC|CO|CORP|LTD)\b\.?/gi, "").split(/\s+/).filter(Boolean).slice(0, 2).map(w => w[0]).join("").toUpperCase() || "Q";
+function applyBrand(settings, isDefaultCompany) {
+  const base = isDefaultCompany ? JTPRO_COMPANY : BLANK_COMPANY;
+  const p = settings && settings.profile || {};
+  const pick = k => typeof p[k] === "string" && p[k].trim() ? p[k].trim() : base[k];
+  const name = pick("name");
+  COMPANY = {
+    name,
+    tag: pick("tag"),
+    area: pick("area"),
+    cities: pick("cities"),
+    phone: pick("phone"),
+    email: pick("email"),
+    site: pick("site"),
+    short: pick("short") || name.replace(/,?\s+(LLC|L\.L\.C\.|Inc\.?|Co\.?|Corp\.?|Ltd\.?)$/i, ""),
+    signer: pick("signer"),
+    logo: pick("logo"),
+    initials: isDefaultCompany && !p.name ? JTPRO_COMPANY.initials : initialsOf(name)
+  };
+}
 const CATEGORIES = ["Flooring", "Painting", "Drywall", "Kitchen Remodel", "Bath Remodel", "Exterior / Siding", "Concrete", "Covered Structure / Patio", "Fencing", "Roofing Repair", "Plumbing Repair", "Electrical (minor)", "Water Damage Restoration", "General Repair", "Other"];
 const buildScope = cat => (SCOPE_TEMPLATES[cat] || SCOPE_TEMPLATES["Other"]).map(t => ({
   id: uid(),
@@ -407,6 +450,12 @@ if (CLOUD) {
     console.error("[JTProQuotes] Firebase failed to start:", e);
   }
 }
+let TENANT = null;
+const fsBase = () => TENANT ? db.collection("companies").doc(TENANT) : db;
+const col = name => fsBase().collection(name);
+const PRODUCT = window.JTPQ_CONFIG && window.JTPQ_CONFIG.productName || "JTProQuotes";
+const ALLOW_COMPANY_SIGNUP = !!(window.JTPQ_CONFIG && window.JTPQ_CONFIG.allowCompanySignup);
+let signupInFlight = null;
 const warn = where => e => console.warn("[JTProQuotes] " + where + ":", e && e.message || e);
 const hasClaudeStore = typeof window.storage !== "undefined" && window.storage && typeof window.storage.get === "function";
 async function sGet(key, fallback) {
@@ -482,7 +531,7 @@ async function sessionClear() {
 async function logActivity(by, action, quoteNo) {
   if (CLOUD) {
     try {
-      await db.collection("activity").add({
+      await col("activity").add({
         at: new Date().toISOString(),
         by: by,
         action: action,
@@ -693,7 +742,7 @@ async function enablePush(me, ask) {
     applicationServerKey: b64uToBytes(VAPID_PUBLIC)
   });
   const j = sub.toJSON();
-  await db.collection("pushSubs").doc(me.id).set({
+  await col("pushSubs").doc(me.id).set({
     uid: me.id,
     name: me.name || "",
     updatedAt: new Date().toISOString(),
@@ -972,9 +1021,21 @@ function App() {
           return;
         }
         let profile;
-        const ref = db.collection("users").doc(fu.uid);
+        if (signupInFlight) {
+          try {
+            await signupInFlight;
+          } catch {}
+        }
+        TENANT = null;
+        try {
+          const m = await db.collection("memberships").doc(fu.uid).get();
+          if (m.exists && m.data().companyId) TENANT = m.data().companyId;
+        } catch (e) {}
+        applyBrand(null, !TENANT);
+        const ref = col("users").doc(fu.uid);
         try {
           let snap = await ref.get();
+          if (!snap.exists && TENANT) throw new Error("Your company profile is missing. Ask your company's owner to check your account.");
           if (!snap.exists) {
             const isTheOwner = fu.email.toLowerCase() === OWNER_EMAIL.toLowerCase();
             await ref.set({
@@ -1009,16 +1070,20 @@ function App() {
         setPending(null);
         const owner = isOwnerRole(profile);
         const manager = canManage(profile);
-        unsubS = db.collection("settings").doc("company").onSnapshot(d => {
-          if (d.exists) setSettings(d.data());else {
-            if (owner) db.collection("settings").doc("company").set(DEFAULT_SETTINGS).catch(warn("seed settings"));
+        unsubS = col("settings").doc("company").onSnapshot(d => {
+          if (d.exists) {
+            applyBrand(d.data(), !TENANT);
+            setSettings(d.data());
+          } else {
+            if (owner) col("settings").doc("company").set(DEFAULT_SETTINGS).catch(warn("seed settings"));
+            applyBrand(null, !TENANT);
             setSettings(DEFAULT_SETTINGS);
           }
         }, e => {
           warn("settings")(e);
           setSettings(DEFAULT_SETTINGS);
         });
-        unsubU = db.collection("users").onSnapshot(s => {
+        unsubU = col("users").onSnapshot(s => {
           const o = {};
           s.forEach(d => o[d.id] = d.data());
           setUsers(o);
@@ -1028,7 +1093,7 @@ function App() {
             [profile.id]: profile
           });
         });
-        const qref = manager ? db.collection("quotes") : db.collection("quotes").where("createdBy", "==", fu.uid);
+        const qref = manager ? col("quotes") : col("quotes").where("createdBy", "==", fu.uid);
         unsubQ = qref.onSnapshot(s => {
           const o = {};
           s.forEach(d => o[d.id] = d.data());
@@ -1061,7 +1126,7 @@ function App() {
     if (CLOUD) {
       const cur = users || {};
       for (const id in u) {
-        if (JSON.stringify(u[id]) !== JSON.stringify(cur[id])) await db.collection("users").doc(id).set(u[id]);
+        if (JSON.stringify(u[id]) !== JSON.stringify(cur[id])) await col("users").doc(id).set(u[id]);
       }
       return;
     }
@@ -1074,7 +1139,7 @@ function App() {
   };
   const deleteUser = async id => {
     if (CLOUD) {
-      await db.collection("users").doc(id).delete();
+      await col("users").doc(id).delete();
       return;
     }
     const next = Object.assign({}, users);
@@ -1084,11 +1149,32 @@ function App() {
   };
   const saveSettings = async s => {
     if (CLOUD) {
-      await db.collection("settings").doc("company").set(s);
+      const before = settings || {};
+      await col("settings").doc("company").set(s);
+      if (TENANT) {
+        const oldCode = String(before.teamCode || "").toUpperCase(),
+          newCode = String(s.teamCode || "").toUpperCase();
+        if (newCode && newCode !== oldCode) {
+          await db.collection("joincodes").doc(newCode).set({
+            companyId: TENANT,
+            companyName: s.profile && s.profile.name || COMPANY.name
+          }).catch(warn("save join code"));
+          if (oldCode) await db.collection("joincodes").doc(oldCode).delete().catch(warn("retire join code"));
+        }
+        if (s.profile && s.profile.name && s.profile.name !== (before.profile && before.profile.name || "")) {
+          db.collection("companies").doc(TENANT).update({
+            name: s.profile.name,
+            updatedAt: new Date().toISOString()
+          }).catch(warn("rename company"));
+        }
+        applyBrand(s, false);
+        return;
+      }
       await db.collection("settings").doc("joincode").set({
         requireTeamCode: !!s.requireTeamCode,
         teamCode: s.teamCode || ""
       }).catch(warn("save join code"));
+      applyBrand(s, true);
       return;
     }
     setSettings(s);
@@ -1099,11 +1185,11 @@ function App() {
   const seenPending = useRef(null);
   useEffect(() => {
     if (!me) {
-      document.title = "JTProQuotes";
+      document.title = PRODUCT;
       seenPending.current = null;
       return;
     }
-    document.title = (pendingCount > 0 && managerNow ? "(" + pendingCount + ") " : "") + "JTProQuotes";
+    document.title = (pendingCount > 0 && managerNow ? "(" + pendingCount + ") " : "") + (TENANT ? COMPANY.name : PRODUCT);
     if (!managerNow) return;
     if (seenPending.current === null) {
       seenPending.current = pendingCount;
@@ -1186,7 +1272,7 @@ function App() {
       fontSize: 24,
       letterSpacing: "0.15em"
     }
-  }, "LOADING JTPROQUOTES\u2026"));
+  }, "LOADING ", PRODUCT.toUpperCase(), "\u2026"));
   if (pending) return React.createElement(PendingApproval, {
     profile: pending,
     onSignOut: () => fbAuth.signOut()
@@ -1210,7 +1296,7 @@ function App() {
   const upsertQuote = async q => {
     if (CLOUD) {
       const before = quotes && quotes[q.id];
-      await db.collection("quotes").doc(q.id).set(q);
+      await col("quotes").doc(q.id).set(q);
       if ((!before || before.status !== q.status) && ["pending", "approved", "changes"].includes(q.status)) {
         tellServer({
           quoteId: q.id
@@ -1224,7 +1310,7 @@ function App() {
   };
   const deleteQuote = async id => {
     if (CLOUD) {
-      await db.collection("quotes").doc(id).delete();
+      await col("quotes").doc(id).delete();
       return;
     }
     const next = Object.assign({}, quotes);
@@ -1234,6 +1320,8 @@ function App() {
   const logout = async () => {
     if (CLOUD) {
       await fbAuth.signOut();
+      TENANT = null;
+      applyBrand(null, true);
       setMe(null);
       setView("dashboard");
       return;
@@ -1260,7 +1348,17 @@ function App() {
     className: "max-w-5xl mx-auto px-4 py-3 flex items-center justify-between flex-wrap gap-2"
   }, React.createElement("div", {
     className: "flex items-center gap-3"
-  }, React.createElement("div", {
+  }, COMPANY.logo ? React.createElement("img", {
+    src: COMPANY.logo,
+    alt: "",
+    style: {
+      width: 38,
+      height: 38,
+      objectFit: "contain",
+      background: "#fff",
+      borderRadius: 8
+    }
+  }) : React.createElement("div", {
     style: {
       width: 38,
       height: 38,
@@ -1274,7 +1372,7 @@ function App() {
       fontSize: 19,
       color: BRAND.navy
     }
-  }, "JT"), React.createElement("div", null, React.createElement("div", {
+  }, COMPANY.initials), React.createElement("div", null, React.createElement("div", {
     style: {
       color: "#fff",
       fontFamily: "'Barlow Condensed', sans-serif",
@@ -1283,13 +1381,13 @@ function App() {
       letterSpacing: "0.05em",
       lineHeight: 1
     }
-  }, "JTPROQUOTES"), React.createElement("div", {
+  }, TENANT ? COMPANY.name.toUpperCase() : PRODUCT.toUpperCase()), React.createElement("div", {
     style: {
       color: BRAND.goldBright,
       fontSize: 11,
       letterSpacing: "0.1em"
     }
-  }, "JTPROCONSTRUCTION LLC"))), React.createElement("nav", {
+  }, TENANT ? PRODUCT.toUpperCase() : COMPANY.name.toUpperCase()))), React.createElement("nav", {
     className: "flex items-center gap-1 flex-wrap"
   }, navItems.map(([k, l]) => React.createElement("button", {
     key: k,
@@ -1452,7 +1550,7 @@ function PendingApproval({
       fontSize: 28,
       color: BRAND.navy
     }
-  }, "JT"), React.createElement("h1", {
+  }, TENANT ? "⏳" : "JT"), React.createElement("h1", {
     style: {
       color: "#fff",
       fontFamily: "'Barlow Condensed', sans-serif",
@@ -1461,7 +1559,7 @@ function PendingApproval({
       letterSpacing: "0.08em",
       margin: "12px 0 2px"
     }
-  }, "JTPROQUOTES")), React.createElement("div", {
+  }, PRODUCT.toUpperCase())), React.createElement("div", {
     style: {
       background: "#fff",
       borderRadius: 14,
@@ -1488,7 +1586,7 @@ function PendingApproval({
       color: BRAND.sub,
       lineHeight: 1.55
     }
-  }, declined ? "This account no longer has access to JTProQuotes. Contact the owner if you think that's a mistake." : "Your account was created and the owner has been notified. Once it's approved you'll be able to build quotes — this page unlocks on its own, no need to sign in again."), React.createElement("div", {
+  }, declined ? "This account no longer has access. Contact the owner if you think that's a mistake." : "Your account was created and the owner has been notified. Once it's approved you'll be able to build quotes — this page unlocks on its own, no need to sign in again."), React.createElement("div", {
     style: {
       background: BRAND.paper,
       borderRadius: 10,
@@ -1510,7 +1608,7 @@ function PendingApproval({
   }, React.createElement(Btn, {
     kind: "ghost",
     onClick: onSignOut
-  }, "Sign out"))), React.createElement("p", {
+  }, "Sign out"))), !TENANT && React.createElement("p", {
     style: {
       color: "rgba(255,255,255,0.6)",
       fontSize: 12,
@@ -1522,7 +1620,11 @@ function PendingApproval({
 function CloudAuth({
   gate
 }) {
-  const [mode, setMode] = useState("login");
+  const startCompany = ALLOW_COMPANY_SIGNUP && /[?&]start\b/.test(window.location.search);
+  const [mode, setMode] = useState(startCompany ? "company" : "login");
+  const [company, setCompany] = useState("");
+  const [phone, setPhone] = useState("");
+  const [city, setCity] = useState("");
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [pw, setPw] = useState("");
@@ -1538,10 +1640,119 @@ function CloudAuth({
       if (mode === "login") {
         await fbAuth.signInWithEmailAndPassword(email.trim(), pw);
         logActivity(email.trim(), "Signed in");
+      } else if (mode === "company") {
+        if (!company.trim()) throw new Error("Enter your company name.");
+        if (!name.trim()) throw new Error("Enter your full name.");
+        if (pw.length < 6) throw new Error("Choose a password of at least 6 characters.");
+        signupInFlight = (async () => {
+          const cred = await fbAuth.createUserWithEmailAndPassword(email.trim(), pw);
+          await cred.user.updateProfile({
+            displayName: name.trim()
+          });
+          const uidNew = cred.user.uid;
+          const cid = "c" + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+          const now = new Date().toISOString();
+          const teamCode = initialsOf(company) + "-" + Math.random().toString(36).slice(2, 6).toUpperCase();
+          const b = db.batch();
+          const cref = db.collection("companies").doc(cid);
+          b.set(cref, {
+            name: company.trim(),
+            ownerUid: uidNew,
+            ownerEmail: email.trim(),
+            plan: "trial",
+            createdAt: now,
+            trialEnds: new Date(Date.now() + 14 * 864e5).toISOString()
+          });
+          b.set(db.collection("memberships").doc(uidNew), {
+            companyId: cid,
+            at: now
+          });
+          b.set(cref.collection("users").doc(uidNew), {
+            id: uidNew,
+            name: name.trim(),
+            username: email.trim(),
+            email: email.trim(),
+            role: "owner",
+            active: true,
+            createdAt: now
+          });
+          b.set(cref.collection("settings").doc("company"), {
+            laborRate: 45,
+            overheadPct: 12,
+            targetMargin: 25,
+            minMargin: 15,
+            requireTeamCode: true,
+            teamCode,
+            ingestKey: randomKey(),
+            profile: {
+              name: company.trim(),
+              phone: phone.trim(),
+              email: email.trim(),
+              area: city.trim(),
+              cities: "",
+              tag: "Licensed & Insured",
+              signer: name.trim().split(/\s+/)[0],
+              site: "",
+              logo: ""
+            }
+          });
+          b.set(db.collection("joincodes").doc(teamCode), {
+            companyId: cid,
+            companyName: company.trim()
+          });
+          await b.commit();
+        })();
+        try {
+          await signupInFlight;
+        } finally {
+          signupInFlight = null;
+        }
       } else {
         if (!name.trim()) throw new Error("Enter your full name.");
         if (!gate) throw new Error("Still connecting — try again in a moment.");
-        if (gate.requireTeamCode && code.trim().toUpperCase() !== String(gate.teamCode || "").toUpperCase()) throw new Error("Invalid team code. Ask the owner for the current code.");
+        const typed = code.trim().toUpperCase();
+        let joinCo = null;
+        if (typed) {
+          try {
+            const j = await db.collection("joincodes").doc(typed).get();
+            if (j.exists) joinCo = Object.assign({
+              code: typed
+            }, j.data());
+          } catch {}
+        }
+        if (joinCo) {
+          signupInFlight = (async () => {
+            const cred = await fbAuth.createUserWithEmailAndPassword(email.trim(), pw);
+            await cred.user.updateProfile({
+              displayName: name.trim()
+            });
+            const now = new Date().toISOString();
+            const b = db.batch();
+            b.set(db.collection("memberships").doc(cred.user.uid), {
+              companyId: joinCo.companyId,
+              joinCode: joinCo.code,
+              at: now
+            });
+            b.set(db.collection("companies").doc(joinCo.companyId).collection("users").doc(cred.user.uid), {
+              id: cred.user.uid,
+              name: name.trim(),
+              username: email.trim(),
+              email: email.trim(),
+              role: "associate",
+              active: false,
+              createdAt: now
+            });
+            await b.commit();
+          })();
+          try {
+            await signupInFlight;
+          } finally {
+            signupInFlight = null;
+          }
+          setBusy(false);
+          return;
+        }
+        if (gate.requireTeamCode && typed !== String(gate.teamCode || "").toUpperCase()) throw new Error("Invalid team code. Ask the owner for the current code.");
         const isTheOwner = email.trim().toLowerCase() === OWNER_EMAIL.toLowerCase();
         const cred = await fbAuth.createUserWithEmailAndPassword(email.trim(), pw);
         await cred.user.updateProfile({
@@ -1600,7 +1811,7 @@ function CloudAuth({
       fontSize: 28,
       color: BRAND.navy
     }
-  }, "JT"), React.createElement("h1", {
+  }, mode === "company" ? "AI" : "JT"), React.createElement("h1", {
     style: {
       color: "#fff",
       fontFamily: "'Barlow Condensed', sans-serif",
@@ -1609,20 +1820,57 @@ function CloudAuth({
       letterSpacing: "0.08em",
       margin: "12px 0 2px"
     }
-  }, "JTPROQUOTES"), React.createElement("p", {
+  }, PRODUCT.toUpperCase()), React.createElement("p", {
     style: {
       color: BRAND.goldBright,
       fontSize: 13,
       letterSpacing: "0.08em"
     }
-  }, "PROFESSIONAL QUOTES \xB7 JTPROCONSTRUCTION LLC")), React.createElement("div", {
+  }, mode === "company" ? "AI QUOTES FOR CONTRACTORS · 14-DAY FREE TRIAL" : "PROFESSIONAL QUOTES · " + JTPRO_COMPANY.name.toUpperCase())), React.createElement("div", {
     style: {
       background: "#fff",
       borderRadius: 14,
       padding: 26
     }
-  }, mode === "register" && React.createElement(Field, {
-    label: "Full name"
+  }, mode === "company" && React.createElement(React.Fragment, null, React.createElement("h2", {
+    style: {
+      fontFamily: "'Barlow Condensed', sans-serif",
+      fontSize: 22,
+      fontWeight: 700,
+      color: BRAND.navy,
+      marginBottom: 4
+    }
+  }, "START YOUR COMPANY ACCOUNT"), React.createElement("p", {
+    style: {
+      fontSize: 13,
+      color: BRAND.sub,
+      marginBottom: 14
+    }
+  }, "Photo-to-quote AI, branded PDF quotes with your name and logo, and a lead inbox \u2014 set up in two minutes. No card needed for the trial."), React.createElement(Field, {
+    label: "Company name"
+  }, React.createElement("input", {
+    style: inputStyle,
+    value: company,
+    onChange: e => setCompany(e.target.value),
+    placeholder: "e.g. Lone Star Remodeling LLC"
+  })), React.createElement("div", {
+    className: "grid grid-cols-2 gap-x-3"
+  }, React.createElement(Field, {
+    label: "Business phone"
+  }, React.createElement("input", {
+    style: inputStyle,
+    value: phone,
+    onChange: e => setPhone(e.target.value),
+    placeholder: "(281) 000-0000"
+  })), React.createElement(Field, {
+    label: "City, State"
+  }, React.createElement("input", {
+    style: inputStyle,
+    value: city,
+    onChange: e => setCity(e.target.value),
+    placeholder: "Katy, TX"
+  })))), (mode === "register" || mode === "company") && React.createElement(Field, {
+    label: mode === "company" ? "Your full name" : "Full name"
   }, React.createElement("input", {
     style: inputStyle,
     value: name,
@@ -1646,14 +1894,14 @@ function CloudAuth({
     value: pw,
     onChange: e => setPw(e.target.value),
     placeholder: "\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022"
-  })), mode === "register" && gate && gate.requireTeamCode && React.createElement(Field, {
+  })), mode === "register" && React.createElement(Field, {
     label: "Team code",
-    hint: "Provided by the owner."
+    hint: "Provided by your company's owner."
   }, React.createElement("input", {
     style: inputStyle,
     value: code,
     onChange: e => setCode(e.target.value),
-    placeholder: "JTPRO-XXXX"
+    placeholder: "ABC-XXXX"
   })), mode === "register" && React.createElement("div", {
     style: {
       background: "#FBF3DE",
@@ -1682,7 +1930,7 @@ function CloudAuth({
     kind: "gold",
     onClick: submit,
     disabled: busy
-  }, busy ? "Please wait…" : mode === "login" ? "Sign in" : "Create account"), React.createElement("button", {
+  }, busy ? "Please wait…" : mode === "login" ? "Sign in" : mode === "company" ? "Start free trial" : "Create account"), React.createElement("button", {
     onClick: () => {
       setMode(mode === "login" ? "register" : "login");
       setErr("");
@@ -1699,7 +1947,24 @@ function CloudAuth({
       textDecoration: "underline",
       padding: 0
     }
-  }, mode === "login" ? "New associate? Create your profile" : "Already have an account? Sign in"), mode === "login" && React.createElement("button", {
+  }, mode === "login" ? "New team member? Create your profile" : "Already have an account? Sign in"), ALLOW_COMPANY_SIGNUP && mode !== "company" && React.createElement("button", {
+    onClick: () => {
+      setMode("company");
+      setErr("");
+      setMsg("");
+    },
+    style: {
+      display: "block",
+      marginTop: 8,
+      background: "none",
+      border: "none",
+      color: BRAND.sub,
+      fontSize: 12,
+      cursor: "pointer",
+      textDecoration: "underline",
+      padding: 0
+    }
+  }, "Own a contracting business? Start your company's free trial"), mode === "login" && React.createElement("button", {
     onClick: resetPw,
     style: {
       display: "block",
@@ -4089,7 +4354,7 @@ function QuoteForm({
   const startReply = () => {
     setDirty(true);
     const first = (q.clientName || "").split(" ")[0];
-    set("replyTemplate", "Hey" + (first ? " " + first : " there") + "! Joel with JTProconstruction — happy to help with your " + (q.jobTitle || "project").toLowerCase() + ".\n\n" + "Based on what you sent, jobs like this start at just {{PRICE_FROM}}. Most contractors around here charge {{MARKET_RANGE}}.\n" + "Licensed & insured, written itemized quote, 90-day workmanship warranty. I'd lock in the exact price after a quick look — could go up a bit depending on what we find.\n\n" + "When's a good time for me to swing by?\n— Joel");
+    set("replyTemplate", "Hey" + (first ? " " + first : " there") + "! " + (COMPANY.signer ? COMPANY.signer + " with " : "") + COMPANY.name + " — happy to help with your " + (q.jobTitle || "project").toLowerCase() + ".\n\n" + "Based on what you sent, jobs like this start at just {{PRICE_FROM}}. Most contractors around here charge {{MARKET_RANGE}}.\n" + "Licensed & insured, written itemized quote, 90-day workmanship warranty. I'd lock in the exact price after a quick look — could go up a bit depending on what we find.\n\n" + "When's a good time for me to swing by?\n— " + (COMPANY.signer || COMPANY.name));
   };
   const attachments = q.attachments || [];
   return React.createElement("div", {
@@ -4704,7 +4969,7 @@ function QuoteForm({
     small: true,
     kind: "ghost"
   }, "Text it")), q.clientEmail && React.createElement("a", {
-    href: "mailto:" + q.clientEmail + "?subject=" + encodeURIComponent("Your project quote from JTProconstruction (" + q.quoteNo + ")") + "&body=" + encodeURIComponent(replyText),
+    href: "mailto:" + q.clientEmail + "?subject=" + encodeURIComponent("Your project quote from " + COMPANY.name + " (" + q.quoteNo + ")") + "&body=" + encodeURIComponent(replyText),
     style: {
       textDecoration: "none"
     }
@@ -4972,7 +5237,7 @@ function TeamView({
   const [activity, setActivity] = useState([]);
   useEffect(() => {
     if (CLOUD) {
-      const un = db.collection("activity").orderBy("at", "desc").limit(300).onSnapshot(s => {
+      const un = col("activity").orderBy("at", "desc").limit(300).onSnapshot(s => {
         const a = [];
         s.forEach(d => a.push(d.data()));
         setActivity(a);
@@ -4988,7 +5253,7 @@ function TeamView({
   const myRole = roleOf(me);
   const iAmOwner = myRole === "owner";
   const rotateTeamCode = async reason => {
-    const fresh = "JTPRO-" + Math.random().toString(36).slice(2, 6).toUpperCase();
+    const fresh = (TENANT ? initialsOf(COMPANY.name) : "JTPRO") + "-" + Math.random().toString(36).slice(2, 6).toUpperCase();
     try {
       await onSaveSettings(Object.assign({}, settings, {
         teamCode: fresh
@@ -5656,6 +5921,232 @@ function TeamView({
     }
   }, "\xB7 ", new Date(a.at).toLocaleString()))))));
 }
+function shrinkLogo(file) {
+  return new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => {
+      const img = new Image();
+      img.onload = () => {
+        const k = Math.min(1, 480 / img.width, 200 / img.height);
+        const c = document.createElement("canvas");
+        c.width = Math.max(1, Math.round(img.width * k));
+        c.height = Math.max(1, Math.round(img.height * k));
+        c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
+        let out = c.toDataURL("image/png");
+        if (out.length > 160000) {
+          const g = c.getContext("2d");
+          const bg = document.createElement("canvas");
+          bg.width = c.width;
+          bg.height = c.height;
+          const bx = bg.getContext("2d");
+          bx.fillStyle = "#fff";
+          bx.fillRect(0, 0, c.width, c.height);
+          bx.drawImage(c, 0, 0);
+          out = bg.toDataURL("image/jpeg", 0.85);
+        }
+        if (out.length > 200000) return reject(new Error("That logo is too detailed. Try a simpler PNG or JPG."));
+        resolve(out);
+      };
+      img.onerror = () => reject(new Error("Couldn't read that image."));
+      img.src = r.result;
+    };
+    r.onerror = () => reject(new Error("Couldn't read that file."));
+    r.readAsDataURL(file);
+  });
+}
+function CompanyProfileCard({
+  s,
+  setS
+}) {
+  const p = Object.assign({}, JTPRO_DEFAULTS_FOR(s), s.profile || {});
+  const setP = (k, v) => setS(Object.assign({}, s, {
+    profile: Object.assign({}, s.profile || {}, {
+      [k]: v
+    })
+  }));
+  const [err, setErr] = useState("");
+  const logoRef = useRef(null);
+  const row = (k, label, ph, hint) => React.createElement(Field, {
+    label: label,
+    hint: hint
+  }, React.createElement("input", {
+    style: inputStyle,
+    value: p[k] || "",
+    onChange: e => setP(k, e.target.value),
+    placeholder: ph
+  }));
+  return React.createElement(Card, {
+    style: {
+      marginBottom: 14
+    }
+  }, React.createElement("h3", {
+    style: {
+      fontFamily: "'Barlow Condensed', sans-serif",
+      fontSize: 20,
+      fontWeight: 700,
+      color: BRAND.navy,
+      marginBottom: 4
+    }
+  }, "COMPANY PROFILE"), React.createElement("div", {
+    style: {
+      fontSize: 12.5,
+      color: BRAND.sub,
+      marginBottom: 12
+    }
+  }, "This is what clients see on every quote, PDF and reply."), React.createElement("div", {
+    className: "flex items-center gap-3",
+    style: {
+      marginBottom: 14
+    }
+  }, p.logo ? React.createElement("img", {
+    src: p.logo,
+    alt: "Logo",
+    style: {
+      maxHeight: 60,
+      maxWidth: 180,
+      objectFit: "contain",
+      border: "1px solid " + BRAND.line,
+      borderRadius: 8,
+      padding: 4,
+      background: "#fff"
+    }
+  }) : React.createElement("div", {
+    style: {
+      width: 60,
+      height: 60,
+      background: BRAND.gold,
+      borderRadius: 10,
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "center",
+      fontFamily: "'Barlow Condensed', sans-serif",
+      fontWeight: 700,
+      fontSize: 24,
+      color: BRAND.navy
+    }
+  }, initialsOf(p.name)), React.createElement("div", {
+    className: "flex gap-2 flex-wrap"
+  }, React.createElement(Btn, {
+    small: true,
+    kind: "ghost",
+    onClick: () => logoRef.current && logoRef.current.click()
+  }, p.logo ? "Change logo" : "Upload logo"), p.logo && React.createElement(Btn, {
+    small: true,
+    kind: "ghost",
+    onClick: () => setP("logo", "")
+  }, "Remove")), React.createElement("input", {
+    ref: logoRef,
+    type: "file",
+    accept: "image/*",
+    style: {
+      display: "none"
+    },
+    onChange: async e => {
+      setErr("");
+      const f = e.target.files && e.target.files[0];
+      e.target.value = "";
+      if (!f) return;
+      try {
+        setP("logo", await shrinkLogo(f));
+      } catch (x) {
+        setErr(x.message);
+      }
+    }
+  })), err && React.createElement("div", {
+    style: {
+      color: BRAND.red,
+      fontSize: 12.5,
+      marginBottom: 10
+    }
+  }, err), row("name", "Company name", "Lone Star Remodeling LLC"), row("tag", "Tagline", "Licensed & Insured · Residential & Commercial"), React.createElement("div", {
+    className: "grid md-grid-cols-2 gap-x-4"
+  }, row("phone", "Phone", "(281) 000-0000"), row("email", "Email", "office@yourcompany.com"), row("site", "Website", "yourcompany.com"), row("signer", "Sign replies as", "First name", "Ends every client reply, e.g. '— Mike'.")), row("area", "Base / service area", "Katy, TX · Serving Greater Houston"), row("cities", "Cities served (optional)", "Houston · Katy · Sugar Land · Cypress", "Prints under your name on the quote, and tells the AI where you work."));
+}
+function LeadInboxCard({
+  s,
+  setS
+}) {
+  const key = s.ingestKey ? TENANT + "." + s.ingestKey : "";
+  const [copied, setCopied] = useState("");
+  const copy = async (txt, what) => {
+    try {
+      await navigator.clipboard.writeText(txt);
+      setCopied(what);
+      setTimeout(() => setCopied(""), 2000);
+    } catch {
+      window.prompt("Copy:", txt);
+    }
+  };
+  const endpoint = window.location.origin + "/api/ingest-lead";
+  return React.createElement(Card, {
+    style: {
+      marginBottom: 14
+    }
+  }, React.createElement("h3", {
+    style: {
+      fontFamily: "'Barlow Condensed', sans-serif",
+      fontSize: 20,
+      fontWeight: 700,
+      color: BRAND.navy,
+      marginBottom: 4
+    }
+  }, "LEAD INBOX (THUMBTACK, ANGI, EMAIL)"), React.createElement("div", {
+    style: {
+      fontSize: 12.5,
+      color: BRAND.sub,
+      marginBottom: 10
+    }
+  }, "New lead emails become AI-drafted quotes with a reply ready to send. Set up once in your Gmail: script.google.com \u2192 New project \u2192 paste the lead script \u2192 set the two lines below \u2192 run it once \u2192 add a 5-minute trigger."), key ? React.createElement(React.Fragment, null, React.createElement(Field, {
+    label: "ENDPOINT"
+  }, React.createElement("div", {
+    className: "flex gap-2"
+  }, React.createElement("input", {
+    style: inputStyle,
+    readOnly: true,
+    value: endpoint
+  }), React.createElement(Btn, {
+    small: true,
+    kind: "ghost",
+    onClick: () => copy(endpoint, "e")
+  }, copied === "e" ? "Copied" : "Copy"))), React.createElement(Field, {
+    label: "COMPANY_KEY",
+    hint: "Keep it private \u2014 it lets lead emails into your account. Make a new one if it ever leaks (then update your script)."
+  }, React.createElement("div", {
+    className: "flex gap-2"
+  }, React.createElement("input", {
+    style: inputStyle,
+    readOnly: true,
+    value: key
+  }), React.createElement(Btn, {
+    small: true,
+    kind: "ghost",
+    onClick: () => copy(key, "k")
+  }, copied === "k" ? "Copied" : "Copy"))), React.createElement(Btn, {
+    small: true,
+    kind: "ghost",
+    onClick: () => {
+      if (window.confirm("Make a new key? Your Gmail script stops filing leads until you paste the new one in. Save settings after.")) setS(Object.assign({}, s, {
+        ingestKey: randomKey()
+      }));
+    }
+  }, "Make a new key")) : React.createElement(Btn, {
+    small: true,
+    kind: "gold",
+    onClick: () => setS(Object.assign({}, s, {
+      ingestKey: randomKey()
+    }))
+  }, "Create my lead-inbox key"));
+}
+const JTPRO_DEFAULTS_FOR = s => TENANT ? {} : {
+  name: JTPRO_COMPANY.name,
+  tag: JTPRO_COMPANY.tag,
+  phone: JTPRO_COMPANY.phone,
+  email: JTPRO_COMPANY.email,
+  site: JTPRO_COMPANY.site,
+  signer: JTPRO_COMPANY.signer,
+  area: JTPRO_COMPANY.area,
+  cities: JTPRO_COMPANY.cities
+};
 function SettingsView({
   settings,
   onSave
@@ -5674,7 +6165,13 @@ function SettingsView({
       letterSpacing: "0.03em",
       marginBottom: 14
     }
-  }, "COMPANY SETTINGS"), React.createElement(Card, null, React.createElement(Field, {
+  }, "COMPANY SETTINGS"), React.createElement(CompanyProfileCard, {
+    s: s,
+    setS: setS
+  }), TENANT && React.createElement(LeadInboxCard, {
+    s: s,
+    setS: setS
+  }), React.createElement(Card, null, React.createElement(Field, {
     label: "Default labor rate ($/hr per crew member)"
   }, React.createElement("input", {
     style: inputStyle,
@@ -5712,7 +6209,7 @@ function SettingsView({
     onChange: e => setS(Object.assign({}, s, {
       minMargin: Number(e.target.value)
     }))
-  })), React.createElement("div", {
+  })), !TENANT && React.createElement("div", {
     style: {
       background: BRAND.paper,
       borderRadius: 8,
@@ -5749,7 +6246,7 @@ function SettingsView({
     }
   }, s.requireTeamCode ? "ON — new associates must enter the code below. Recommended once you go live." : "OFF — anyone who opens the app can create an account. Fine while you're testing; turn this on before you deploy.")), React.createElement(Field, {
     label: "Team code",
-    hint: "Used only when the setting above is ON. Change it any time to lock out unwanted signups."
+    hint: TENANT ? "Give this to your team: they choose 'New team member' on the sign-in screen and type it in. You approve each one. Change it any time to stop new sign-ups." : "Used only when the setting above is ON. Change it any time to lock out unwanted signups."
   }, React.createElement("input", {
     style: inputStyle,
     value: s.teamCode,
@@ -5822,7 +6319,7 @@ function PreviewModal({
   };
   const [pdfBusy, setPdfBusy] = useState("");
   const [pdfErr, setPdfErr] = useState("");
-  const fileName = (quote.quoteNo + " " + (quote.clientName || "Client") + " - JTProconstruction Quote").replace(/[^\w .\-]+/g, "").trim() + ".pdf";
+  const fileName = (quote.quoteNo + " " + (quote.clientName || "Client") + " - " + COMPANY.name + " Quote").replace(/[^\w .\-]+/g, "").trim() + ".pdf";
   const makePdf = async () => {
     const lib = await loadHtml2pdf();
     const el = document.getElementById("print-doc");
@@ -5895,7 +6392,7 @@ function PreviewModal({
       await navigator.share({
         files: [file],
         title: fileName,
-        text: "Hi" + (first ? " " + first : "") + ", here is your quote from JTProconstruction (" + quote.quoteNo + "). Let me know if you have any questions. — Joel"
+        text: "Hi" + (first ? " " + first : "") + ", here is your quote from " + COMPANY.name + " (" + quote.quoteNo + "). Let me know if you have any questions. — " + (COMPANY.signer || COMPANY.name)
       });
       logActivity(me ? me.name : "Unknown", "Shared PDF", quote.quoteNo);
     } catch (e) {
@@ -6070,7 +6567,17 @@ function PreviewModal({
       flexWrap: "wrap",
       gap: 12
     }
-  }, React.createElement("div", null, React.createElement("div", {
+  }, React.createElement("div", null, COMPANY.logo && React.createElement("img", {
+    src: COMPANY.logo,
+    alt: "",
+    style: {
+      maxHeight: 56,
+      maxWidth: 220,
+      objectFit: "contain",
+      display: "block",
+      marginBottom: 4
+    }
+  }), React.createElement("div", {
     style: {
       fontFamily: "'Barlow Condensed', sans-serif",
       fontSize: 30,
@@ -6083,12 +6590,12 @@ function PreviewModal({
       fontSize: 12,
       color: BRAND.sub
     }
-  }, COMPANY.tag), React.createElement("div", {
+  }, COMPANY.tag), COMPANY.area && React.createElement("div", {
     style: {
       fontSize: 12,
       color: BRAND.sub
     }
-  }, COMPANY.area), React.createElement("div", {
+  }, COMPANY.area), COMPANY.cities && React.createElement("div", {
     style: {
       fontSize: 12,
       color: BRAND.navy,
@@ -6099,7 +6606,7 @@ function PreviewModal({
       fontSize: 12,
       color: BRAND.sub
     }
-  }, COMPANY.phone, " \xB7 ", COMPANY.email, " \xB7 ", COMPANY.site)), React.createElement("div", {
+  }, [COMPANY.phone, COMPANY.email, COMPANY.site].filter(Boolean).join(" · "))), React.createElement("div", {
     style: {
       textAlign: "right"
     }
@@ -6183,7 +6690,7 @@ function PreviewModal({
     }
   }, React.createElement("div", {
     style: goldLabel
-  }, "YOUR JTPRO CONTACT"), React.createElement("div", {
+  }, "YOUR " + (COMPANY.short || "PROJECT").toUpperCase() + " CONTACT"), React.createElement("div", {
     style: {
       fontWeight: 700,
       fontSize: 15
@@ -6491,7 +6998,7 @@ function PreviewModal({
         fontSize: 11.5,
         color: BRAND.sub
       }
-    }, "Your JTPro price"), React.createElement("div", {
+    }, "Your " + (COMPANY.short || "") + " price"), React.createElement("div", {
       style: {
         fontSize: 17,
         fontWeight: 700,
@@ -6522,7 +7029,7 @@ function PreviewModal({
     style: Object.assign({}, goldLabel, {
       marginBottom: 6
     })
-  }, "WHY HOMEOWNERS CHOOSE JTPROCONSTRUCTION"), React.createElement("div", {
+  }, "WHY HOMEOWNERS CHOOSE " + COMPANY.name.toUpperCase()), React.createElement("div", {
     style: {
       display: "grid",
       gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
@@ -6530,7 +7037,7 @@ function PreviewModal({
       fontSize: 12.5,
       lineHeight: 1.45
     }
-  }, [["Licensed & insured", "Your home and our crew are covered on every job."], ["Written, itemized pricing", "You see exactly what you pay for — no surprise add-ons."], ["90-day workmanship warranty", "If our work isn't right, we come back and make it right."], ["Changes approved in writing", "Nothing extra is done or billed without your OK."], ["Clean site, every day", "We protect your space and clean up before we leave."], ["One point of contact", (preparer.name || "Your JTPro contact") + " stays with your project start to finish."]].map(([t, d]) => React.createElement("div", {
+  }, [["Licensed & insured", "Your home and our crew are covered on every job."], ["Written, itemized pricing", "You see exactly what you pay for — no surprise add-ons."], ["90-day workmanship warranty", "If our work isn't right, we come back and make it right."], ["Changes approved in writing", "Nothing extra is done or billed without your OK."], ["Clean site, every day", "We protect your space and clean up before we leave."], ["One point of contact", (preparer.name || "Your " + (COMPANY.short || "project") + " contact") + " stays with your project start to finish."]].map(([t, d]) => React.createElement("div", {
     key: t
   }, React.createElement("span", {
     style: {

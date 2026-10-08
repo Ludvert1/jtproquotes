@@ -42,14 +42,14 @@ module.exports = async (req, res) => {
   if (!caller) return bad(res, 403, "Your account isn't approved.");
 
   let subs = [];
-  const loadSubs = async () => { try { subs = await listDocsAs(idToken, "pushSubs"); } catch { subs = []; } };
+  const loadSubs = async () => { try { subs = await listDocsAs(idToken, caller.p("pushSubs")); } catch { subs = []; } };
 
   /* ---- test alert to your own devices ---- */
   if (body.test === true) {
     if (!pushEnabled()) return bad(res, 503, "Phone alerts aren't switched on yet — VAPID_PRIVATE_KEY is not set in Vercel.");
     await loadSubs();
     const r = await sendToPeople(subs, [caller.uid], {
-      title: "JTProQuotes alerts are on ✅",
+      title: "Phone alerts are on ✅",
       body: "This is how you'll hear about quotes waiting for approval and new leads.",
       tag: "jtpq-test", url: "/",
     });
@@ -60,13 +60,13 @@ module.exports = async (req, res) => {
   if (!quoteId) return bad(res, 400, "No quote was named.");
 
   let quote;
-  try { quote = await getDocAs(idToken, "quotes/" + encodeURIComponent(quoteId)); }
+  try { quote = await getDocAs(idToken, caller.p("quotes/" + encodeURIComponent(quoteId))); }
   catch { quote = null; }
   if (!quote) return bad(res, 404, "That quote couldn't be read back.");
 
   let settings = null, team = [];
-  try { settings = await getDocAs(idToken, "settings/company"); } catch { /* defaults are fine */ }
-  try { team = await listDocsAs(idToken, "users"); } catch { /* names are optional */ }
+  try { settings = await getDocAs(idToken, caller.p("settings/company")); } catch { /* defaults are fine */ }
+  try { team = await listDocsAs(idToken, caller.p("users")); } catch { /* names are optional */ }
 
   const author = team.find((u) => u && u.id === quote.createdBy);
   const managers = team.filter((u) => u && u.active === true && (u.role === "owner" || u.role === "assistant"));
@@ -99,7 +99,8 @@ module.exports = async (req, res) => {
     tag: "q-" + quoteId, url: "/?quote=" + quoteId,
   });
 
-  if (!String(process.env.WEB3FORMS_KEYS || "").trim()) {
+  // Email copies go to JTProconstruction's inbox only; other companies get phone alerts.
+  if (caller.companyId || !String(process.env.WEB3FORMS_KEYS || "").trim()) {
     return res.status(200).json(out);
   }
 

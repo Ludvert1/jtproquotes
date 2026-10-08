@@ -46,6 +46,38 @@ service cloud.firestore {
       return request.auth.token.email.lower();
     }
 
+    /* ============ OTHER COMPANIES ============
+       JTProconstruction keeps the top-level collections above exactly as
+       they were. Every other company that signs up gets its own private
+       space under /companies/{cid}/..., and memberships/{uid} records which
+       company an account belongs to. A member of one company has no
+       profile anywhere else, so it can read and write nothing outside its
+       own company. */
+    function hasMembership() {
+      return exists(/databases/$(database)/documents/memberships/$(request.auth.uid));
+    }
+    function cPath(cid) {
+      return /databases/$(database)/documents/companies/$(cid)/users/$(request.auth.uid);
+    }
+    function cProfile(cid) {
+      return get(cPath(cid)).data;
+    }
+    function cHas(cid) {
+      return signedIn() && exists(cPath(cid));
+    }
+    function cApproved(cid) {
+      return cHas(cid) && cProfile(cid).active == true;
+    }
+    function cOwner(cid) {
+      return cApproved(cid) && cProfile(cid).role == 'owner';
+    }
+    function cAssistant(cid) {
+      return cApproved(cid) && cProfile(cid).role == 'assistant';
+    }
+    function cManager(cid) {
+      return cOwner(cid) || cAssistant(cid);
+    }
+
     // ---- USER PROFILES ----
     match /users/{uid} {
       // You can always read your own profile (that is how the app learns
@@ -64,6 +96,7 @@ service cloud.firestore {
       // an active profile, otherwise nobody could ever approve anyone.
       allow create: if signedIn()
         && request.auth.uid == uid
+        && !hasMembership()
         && request.resource.data.email.lower() == claimedEmail()
         && (
              (request.resource.data.role == 'associate' && request.resource.data.active == false)
@@ -172,6 +205,115 @@ service cloud.firestore {
       allow update: if isApproved() && resource.data.uid == request.auth.uid
         && request.resource.data.uid == request.auth.uid;
       allow delete: if false;
+    }
+
+    // ---- WHICH COMPANY AN ACCOUNT BELONGS TO ----
+    // Written once, when someone starts a company or joins one with its
+    // team code. Only you can read your own.
+    match /memberships/{uid} {
+      allow get: if signedIn() && request.auth.uid == uid;
+      allow create: if signedIn()
+        && request.auth.uid == uid
+        && !exists(/databases/$(database)/documents/users/$(uid))
+        && request.resource.data.companyId is string
+        && (
+             // Starting a company: you are its owner (created in the same batch).
+             getAfter(/databases/$(database)/documents/companies/$(request.resource.data.companyId)).data.ownerUid == uid
+             // Joining one: the team code you typed points at that company.
+             || (request.resource.data.joinCode is string
+                 && get(/databases/$(database)/documents/joincodes/$(request.resource.data.joinCode)).data.companyId
+                    == request.resource.data.companyId)
+           );
+      allow update, delete: if false;
+    }
+
+    // ---- TEAM CODES ----
+    // Looked up by exact code on the sign-up screen (never listed).
+    match /joincodes/{code} {
+      allow get: if true;
+      allow list: if false;
+      allow create: if signedIn()
+        && request.resource.data.companyId is string
+        && (cManager(request.resource.data.companyId)
+            || getAfter(/databases/$(database)/documents/companies/$(request.resource.data.companyId)).data.ownerUid == request.auth.uid);
+      allow delete: if cManager(resource.data.companyId);
+      allow update: if false;
+    }
+
+    match /companies/{cid} {
+      allow read: if cApproved(cid);
+      // A new company: the person creating it is its owner, on a trial.
+      allow create: if signedIn()
+        && request.resource.data.ownerUid == request.auth.uid
+        && request.resource.data.plan == 'trial'
+        && !hasMembership()
+        && !exists(/databases/$(database)/documents/users/$(request.auth.uid));
+      // The owner may rename it; plan and billing are set by the server only.
+      allow update: if cOwner(cid)
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['name', 'updatedAt']);
+      allow delete: if false;
+
+      match /users/{uid} {
+        allow read: if cApproved(cid) || (signedIn() && request.auth.uid == uid);
+        allow create: if signedIn()
+          && request.auth.uid == uid
+          && request.resource.data.email.lower() == claimedEmail()
+          && (
+               (request.resource.data.role == 'owner'
+                 && request.resource.data.active == true
+                 && getAfter(/databases/$(database)/documents/companies/$(cid)).data.ownerUid == uid)
+               || (request.resource.data.role == 'associate'
+                 && request.resource.data.active == false
+                 && getAfter(/databases/$(database)/documents/memberships/$(uid)).data.companyId == cid)
+             );
+        allow update: if
+          (cOwner(cid)
+            && (request.resource.data.role == resource.data.role || request.auth.uid != uid))
+          || (cAssistant(cid)
+            && resource.data.role == 'associate'
+            && request.resource.data.role == 'associate'
+            && request.resource.data.id == resource.data.id
+            && request.resource.data.email == resource.data.email
+            && request.auth.uid != uid);
+        allow delete: if cOwner(cid) && request.auth.uid != uid;
+      }
+
+      match /quotes/{quoteId} {
+        allow read: if cManager(cid) ||
+          (cApproved(cid) && resource.data.createdBy == request.auth.uid);
+        allow create: if cManager(cid) ||
+          (cApproved(cid) &&
+           request.resource.data.createdBy == request.auth.uid &&
+           request.resource.data.status in ['draft', 'pending']);
+        allow update: if cManager(cid) ||
+          (cApproved(cid) &&
+           resource.data.createdBy == request.auth.uid &&
+           request.resource.data.createdBy == request.auth.uid &&
+           resource.data.status in ['draft', 'pending', 'changes'] &&
+           request.resource.data.status in ['draft', 'pending', 'changes']);
+        allow delete: if cOwner(cid);
+      }
+
+      match /settings/company {
+        allow read: if cApproved(cid);
+        // Also written once by the owner while creating the company.
+        allow write: if cOwner(cid)
+          || (request.method == 'create'
+              && getAfter(/databases/$(database)/documents/companies/$(cid)).data.ownerUid == request.auth.uid);
+      }
+
+      match /activity/{entryId} {
+        allow read: if cManager(cid);
+        allow create: if cApproved(cid);
+        allow update, delete: if false;
+      }
+
+      match /pushSubs/{uid} {
+        allow read: if cApproved(cid);
+        allow create, update: if cApproved(cid) && request.auth.uid == uid
+          && request.resource.data.uid == uid;
+        allow delete: if signedIn() && request.auth.uid == uid;
+      }
     }
 
     // Anything not matched above is denied.

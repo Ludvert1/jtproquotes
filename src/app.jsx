@@ -13,7 +13,11 @@ const BRAND = {
   green: "#1E7F4F", amber: "#B07D10", red: "#B3372E",
 };
 
-const COMPANY = {
+/* The company whose quotes these are. JTProconstruction's details are the
+   defaults for its own workspace; every other company that signs up fills
+   in its own profile (Settings → Company profile), and applyBrand() swaps
+   it in as soon as their settings load. */
+const JTPRO_COMPANY = {
   name: "JTProconstruction LLC",
   tag: "Licensed & Insured · Residential & Commercial",
   area: "New Caney, TX · Serving Texas & Nevada",
@@ -21,7 +25,27 @@ const COMPANY = {
   phone: "(713) 835-8245",
   email: "info@jtproconstruction.com",
   site: "jtproconstruction.com",
+  short: "JTPro",
+  signer: "Joel",
+  initials: "JT",
+  logo: "",
 };
+const BLANK_COMPANY = { name: "Your Company", tag: "Licensed & Insured", area: "", cities: "", phone: "", email: "", site: "", short: "", signer: "", initials: "", logo: "" };
+let COMPANY = Object.assign({}, JTPRO_COMPANY);
+const randomKey = () => { const a = new Uint8Array(18); crypto.getRandomValues(a); return Array.from(a, (b) => "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789"[b % 56]).join(""); };
+const initialsOf = (name) => String(name || "").replace(/\b(LLC|INC|CO|CORP|LTD)\b\.?/gi, "").split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]).join("").toUpperCase() || "Q";
+/* Profile fields saved in settings override the defaults. */
+function applyBrand(settings, isDefaultCompany) {
+  const base = isDefaultCompany ? JTPRO_COMPANY : BLANK_COMPANY;
+  const p = (settings && settings.profile) || {};
+  const pick = (k) => (typeof p[k] === "string" && p[k].trim() ? p[k].trim() : base[k]);
+  const name = pick("name");
+  COMPANY = {
+    name, tag: pick("tag"), area: pick("area"), cities: pick("cities"), phone: pick("phone"), email: pick("email"), site: pick("site"),
+    short: pick("short") || name.replace(/,?\s+(LLC|L\.L\.C\.|Inc\.?|Co\.?|Corp\.?|Ltd\.?)$/i, ""), signer: pick("signer"), logo: pick("logo"),
+    initials: (isDefaultCompany && !p.name) ? JTPRO_COMPANY.initials : initialsOf(name),
+  };
+}
 
 const CATEGORIES = [
   "Flooring", "Painting", "Drywall", "Kitchen Remodel", "Bath Remodel",
@@ -116,6 +140,19 @@ if (CLOUD) {
   }
 }
 
+/* ---------- which company's data ----------
+   JTProconstruction's records live in the top-level collections, exactly
+   as before. Any other company lives under companies/{id}/..., and
+   TENANT holds that id once the signed-in person's membership is read. */
+let TENANT = null;
+const fsBase = () => (TENANT ? db.collection("companies").doc(TENANT) : db);
+const col = (name) => fsBase().collection(name);
+const PRODUCT = (window.JTPQ_CONFIG && window.JTPQ_CONFIG.productName) || "JTProQuotes";
+const ALLOW_COMPANY_SIGNUP = !!(window.JTPQ_CONFIG && window.JTPQ_CONFIG.allowCompanySignup);
+// Set while a new company account is being created, so the sign-in listener
+// waits for it instead of filing the person as a JTPro associate.
+let signupInFlight = null;
+
 /* Surfaces Firestore permission problems in the console instead of
    swallowing them silently — makes rule mismatches debuggable. */
 const warn = (where) => (e) => console.warn("[JTProQuotes] " + where + ":", (e && e.message) || e);
@@ -152,7 +189,7 @@ async function sessionClear() {
 }
 async function logActivity(by, action, quoteNo) {
   if (CLOUD) {
-    try { await db.collection("activity").add({ at: new Date().toISOString(), by: by, action: action, quoteNo: quoteNo || "" }); } catch {}
+    try { await col("activity").add({ at: new Date().toISOString(), by: by, action: action, quoteNo: quoteNo || "" }); } catch {}
     return;
   }
   try {
@@ -271,7 +308,7 @@ async function enablePush(me, ask) {
   let sub = await reg.pushManager.getSubscription();
   if (!sub) sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64uToBytes(VAPID_PUBLIC) });
   const j = sub.toJSON();
-  await db.collection("pushSubs").doc(me.id).set({
+  await col("pushSubs").doc(me.id).set({
     uid: me.id, name: me.name || "", updatedAt: new Date().toISOString(),
     subs: { [deviceKey(j.endpoint)]: { endpoint: j.endpoint, keys: j.keys, ua: navigator.userAgent.slice(0, 160), at: new Date().toISOString() } },
   }, { merge: true });
@@ -415,9 +452,18 @@ function App() {
         if (!fu) { setMe(null); setPending(null); setUsers({}); setQuotes({}); setSettings(DEFAULT_SETTINGS); return; }
 
         let profile;
-        const ref = db.collection("users").doc(fu.uid);
+        // A company being created right now: let it finish first.
+        if (signupInFlight) { try { await signupInFlight; } catch {} }
+        TENANT = null;
+        try {
+          const m = await db.collection("memberships").doc(fu.uid).get();
+          if (m.exists && m.data().companyId) TENANT = m.data().companyId;
+        } catch (e) { /* no membership — a JTPro account */ }
+        applyBrand(null, !TENANT);
+        const ref = col("users").doc(fu.uid);
         try {
           let snap = await ref.get();
+          if (!snap.exists && TENANT) throw new Error("Your company profile is missing. Ask your company's owner to check your account.");
           if (!snap.exists) {
             const isTheOwner = fu.email.toLowerCase() === OWNER_EMAIL.toLowerCase();
             await ref.set({ id: fu.uid, name: fu.displayName || fu.email, username: fu.email, email: fu.email,
@@ -449,20 +495,21 @@ function App() {
         const manager = canManage(profile);
 
         // Settings are readable only once signed in, so subscribe here.
-        unsubS = db.collection("settings").doc("company").onSnapshot((d) => {
-          if (d.exists) setSettings(d.data());
+        unsubS = col("settings").doc("company").onSnapshot((d) => {
+          if (d.exists) { applyBrand(d.data(), !TENANT); setSettings(d.data()); }
           else {
             // Only the owner is allowed to seed the settings document.
-            if (owner) db.collection("settings").doc("company").set(DEFAULT_SETTINGS).catch(warn("seed settings"));
+            if (owner) col("settings").doc("company").set(DEFAULT_SETTINGS).catch(warn("seed settings"));
+            applyBrand(null, !TENANT);
             setSettings(DEFAULT_SETTINGS);
           }
         }, (e) => { warn("settings")(e); setSettings(DEFAULT_SETTINGS); });
 
-        unsubU = db.collection("users").onSnapshot((s) => {
+        unsubU = col("users").onSnapshot((s) => {
           const o = {}; s.forEach((d) => (o[d.id] = d.data())); setUsers(o);
         }, (e) => { warn("team list")(e); setUsers({ [profile.id]: profile }); });
 
-        const qref = manager ? db.collection("quotes") : db.collection("quotes").where("createdBy", "==", fu.uid);
+        const qref = manager ? col("quotes") : col("quotes").where("createdBy", "==", fu.uid);
         unsubQ = qref.onSnapshot((s) => {
           const o = {}; s.forEach((d) => (o[d.id] = d.data())); setQuotes(o);
         }, (e) => { warn("quotes")(e); setQuotes({}); });
@@ -484,24 +531,40 @@ function App() {
 
   const notify = (msg) => { setToast(msg); setTimeout(() => setToast(null), 3000); };
   const saveUsers = async (u) => {
-    if (CLOUD) { const cur = users || {}; for (const id in u) { if (JSON.stringify(u[id]) !== JSON.stringify(cur[id])) await db.collection("users").doc(id).set(u[id]); } return; }
+    if (CLOUD) { const cur = users || {}; for (const id in u) { if (JSON.stringify(u[id]) !== JSON.stringify(cur[id])) await col("users").doc(id).set(u[id]); } return; }
     setUsers(u); await sSet("jtpq:users", u);
   };
   const saveQuotes = async (q) => { setQuotes(q); await sSet("jtpq:quotes", q); };
   /* Removes a person's profile. Their quotes are untouched — those are
      permanent by design and stay attributed to their name. */
   const deleteUser = async (id) => {
-    if (CLOUD) { await db.collection("users").doc(id).delete(); return; }
+    if (CLOUD) { await col("users").doc(id).delete(); return; }
     const next = Object.assign({}, users); delete next[id];
     setUsers(next); await sSet("jtpq:users", next);
   };
   const saveSettings = async (s) => {
     if (CLOUD) {
-      await db.collection("settings").doc("company").set(s);
+      const before = settings || {};
+      await col("settings").doc("company").set(s);
+      if (TENANT) {
+        /* Another company: its team code is a public lookup key that points
+           new associates at this company. Rotating it retires the old one. */
+        const oldCode = String(before.teamCode || "").toUpperCase(), newCode = String(s.teamCode || "").toUpperCase();
+        if (newCode && newCode !== oldCode) {
+          await db.collection("joincodes").doc(newCode).set({ companyId: TENANT, companyName: (s.profile && s.profile.name) || COMPANY.name }).catch(warn("save join code"));
+          if (oldCode) await db.collection("joincodes").doc(oldCode).delete().catch(warn("retire join code"));
+        }
+        if (s.profile && s.profile.name && s.profile.name !== ((before.profile && before.profile.name) || "")) {
+          db.collection("companies").doc(TENANT).update({ name: s.profile.name, updatedAt: new Date().toISOString() }).catch(warn("rename company"));
+        }
+        applyBrand(s, false);
+        return;
+      }
       // Mirror the join gate to the public doc the sign-up screen reads.
       await db.collection("settings").doc("joincode")
         .set({ requireTeamCode: !!s.requireTeamCode, teamCode: s.teamCode || "" })
         .catch(warn("save join code"));
+      applyBrand(s, true);
       return;
     }
     setSettings(s); await sSet("jtpq:settings", s);
@@ -522,8 +585,8 @@ function App() {
   const pendingCount = managerNow && quotes ? Object.values(quotes).filter((q) => q.status === "pending").length : 0;
   const seenPending = useRef(null);
   useEffect(() => {
-    if (!me) { document.title = "JTProQuotes"; seenPending.current = null; return; }
-    document.title = (pendingCount > 0 && managerNow ? "(" + pendingCount + ") " : "") + "JTProQuotes";
+    if (!me) { document.title = PRODUCT; seenPending.current = null; return; }
+    document.title = (pendingCount > 0 && managerNow ? "(" + pendingCount + ") " : "") + (TENANT ? COMPANY.name : PRODUCT);
     if (!managerNow) return;
     // The first pass after signing in only records where things stand — it
     // must not announce quotes that were already waiting.
@@ -574,7 +637,7 @@ function App() {
   // quotes must be loaded too — rendering before it arrives crashes the dashboard.
   if (!users || !settings || (me && !quotes)) return (
     <div className="min-h-screen flex items-center justify-center" style={{ background: BRAND.navy }}>
-      <div style={{ color: BRAND.gold, fontFamily: "'Barlow Condensed', sans-serif", fontSize: 24, letterSpacing: "0.15em" }}>LOADING JTPROQUOTES…</div>
+      <div style={{ color: BRAND.gold, fontFamily: "'Barlow Condensed', sans-serif", fontSize: 24, letterSpacing: "0.15em" }}>LOADING {PRODUCT.toUpperCase()}…</div>
     </div>
   );
 
@@ -592,7 +655,7 @@ function App() {
   const upsertQuote = async (q) => {
     if (CLOUD) {
       const before = quotes && quotes[q.id];
-      await db.collection("quotes").doc(q.id).set(q);
+      await col("quotes").doc(q.id).set(q);
       /* A quote changing hands tells the right people — submitted → the
          approvers, approved or sent back → the associate. Fired after the
          save so the server reads the real stored quote, never trusting what
@@ -606,11 +669,11 @@ function App() {
   };
   /* Permanent erase. Owner only, and deliberately separate from voiding. */
   const deleteQuote = async (id) => {
-    if (CLOUD) { await db.collection("quotes").doc(id).delete(); return; }
+    if (CLOUD) { await col("quotes").doc(id).delete(); return; }
     const next = Object.assign({}, quotes); delete next[id]; await saveQuotes(next);
   };
   const logout = async () => {
-    if (CLOUD) { await fbAuth.signOut(); setMe(null); setView("dashboard"); return; }
+    if (CLOUD) { await fbAuth.signOut(); TENANT = null; applyBrand(null, true); setMe(null); setView("dashboard"); return; }
     setMe(null); setView("dashboard"); await sessionClear();
   };
 
@@ -623,10 +686,12 @@ function App() {
       <header style={{ background: BRAND.navy, borderBottom: `3px solid ${BRAND.gold}` }}>
         <div className="max-w-5xl mx-auto px-4 py-3 flex items-center justify-between flex-wrap gap-2">
           <div className="flex items-center gap-3">
-            <div style={{ width: 38, height: 38, background: BRAND.gold, borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 19, color: BRAND.navy }}>JT</div>
+            {COMPANY.logo
+              ? <img src={COMPANY.logo} alt="" style={{ width: 38, height: 38, objectFit: "contain", background: "#fff", borderRadius: 8 }} />
+              : <div style={{ width: 38, height: 38, background: BRAND.gold, borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 19, color: BRAND.navy }}>{COMPANY.initials}</div>}
             <div>
-              <div style={{ color: "#fff", fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 21, letterSpacing: "0.05em", lineHeight: 1 }}>JTPROQUOTES</div>
-              <div style={{ color: BRAND.goldBright, fontSize: 11, letterSpacing: "0.1em" }}>JTPROCONSTRUCTION LLC</div>
+              <div style={{ color: "#fff", fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 21, letterSpacing: "0.05em", lineHeight: 1 }}>{TENANT ? COMPANY.name.toUpperCase() : PRODUCT.toUpperCase()}</div>
+              <div style={{ color: BRAND.goldBright, fontSize: 11, letterSpacing: "0.1em" }}>{TENANT ? PRODUCT.toUpperCase() : COMPANY.name.toUpperCase()}</div>
             </div>
           </div>
           <nav className="flex items-center gap-1 flex-wrap">
@@ -695,8 +760,8 @@ function PendingApproval({ profile, onSignOut }) {
     <div className="min-h-screen flex items-center justify-center px-4" style={{ background: BRAND.navy }}>
       <div className="w-full" style={{ maxWidth: 440 }}>
         <div className="text-center mb-6">
-          <div style={{ display: "inline-flex", width: 56, height: 56, background: BRAND.gold, borderRadius: 12, alignItems: "center", justifyContent: "center", fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 28, color: BRAND.navy }}>JT</div>
-          <h1 style={{ color: "#fff", fontFamily: "'Barlow Condensed', sans-serif", fontSize: 34, fontWeight: 700, letterSpacing: "0.08em", margin: "12px 0 2px" }}>JTPROQUOTES</h1>
+          <div style={{ display: "inline-flex", width: 56, height: 56, background: BRAND.gold, borderRadius: 12, alignItems: "center", justifyContent: "center", fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 28, color: BRAND.navy }}>{TENANT ? "⏳" : "JT"}</div>
+          <h1 style={{ color: "#fff", fontFamily: "'Barlow Condensed', sans-serif", fontSize: 34, fontWeight: 700, letterSpacing: "0.08em", margin: "12px 0 2px" }}>{PRODUCT.toUpperCase()}</h1>
         </div>
         <div style={{ background: "#fff", borderRadius: 14, padding: 28, textAlign: "center" }}>
           <div style={{ fontSize: 40, marginBottom: 6 }}>{declined ? "🔒" : "⏳"}</div>
@@ -705,7 +770,7 @@ function PendingApproval({ profile, onSignOut }) {
           </h2>
           <p style={{ fontSize: 14, color: BRAND.sub, lineHeight: 1.55 }}>
             {declined
-              ? "This account no longer has access to JTProQuotes. Contact the owner if you think that's a mistake."
+              ? "This account no longer has access. Contact the owner if you think that's a mistake."
               : "Your account was created and the owner has been notified. Once it's approved you'll be able to build quotes — this page unlocks on its own, no need to sign in again."}
           </p>
           <div style={{ background: BRAND.paper, borderRadius: 10, padding: "12px 14px", marginTop: 16, fontSize: 13, color: BRAND.ink }}>
@@ -714,9 +779,9 @@ function PendingApproval({ profile, onSignOut }) {
           </div>
           <div className="mt-4"><Btn kind="ghost" onClick={onSignOut}>Sign out</Btn></div>
         </div>
-        <p style={{ color: "rgba(255,255,255,0.6)", fontSize: 12, textAlign: "center", marginTop: 14 }}>
+        {!TENANT && <p style={{ color: "rgba(255,255,255,0.6)", fontSize: 12, textAlign: "center", marginTop: 14 }}>
           {COMPANY.name} · {COMPANY.area}
-        </p>
+        </p>}
       </div>
     </div>
   );
@@ -724,7 +789,11 @@ function PendingApproval({ profile, onSignOut }) {
 
 /* ================= CLOUD AUTH (Firebase) ================= */
 function CloudAuth({ gate }) {
-  const [mode, setMode] = useState("login");
+  const startCompany = ALLOW_COMPANY_SIGNUP && /[?&]start\b/.test(window.location.search);
+  const [mode, setMode] = useState(startCompany ? "company" : "login");
+  const [company, setCompany] = useState("");
+  const [phone, setPhone] = useState("");
+  const [city, setCity] = useState("");
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [pw, setPw] = useState("");
@@ -739,10 +808,58 @@ function CloudAuth({ gate }) {
       if (mode === "login") {
         await fbAuth.signInWithEmailAndPassword(email.trim(), pw);
         logActivity(email.trim(), "Signed in");
+      } else if (mode === "company") {
+        /* A new company: owner account, the company, its settings and its
+           team code, all in one go. */
+        if (!company.trim()) throw new Error("Enter your company name.");
+        if (!name.trim()) throw new Error("Enter your full name.");
+        if (pw.length < 6) throw new Error("Choose a password of at least 6 characters.");
+        signupInFlight = (async () => {
+          const cred = await fbAuth.createUserWithEmailAndPassword(email.trim(), pw);
+          await cred.user.updateProfile({ displayName: name.trim() });
+          const uidNew = cred.user.uid;
+          const cid = "c" + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+          const now = new Date().toISOString();
+          const teamCode = initialsOf(company) + "-" + Math.random().toString(36).slice(2, 6).toUpperCase();
+          const b = db.batch();
+          const cref = db.collection("companies").doc(cid);
+          b.set(cref, { name: company.trim(), ownerUid: uidNew, ownerEmail: email.trim(), plan: "trial", createdAt: now, trialEnds: new Date(Date.now() + 14 * 864e5).toISOString() });
+          b.set(db.collection("memberships").doc(uidNew), { companyId: cid, at: now });
+          b.set(cref.collection("users").doc(uidNew), { id: uidNew, name: name.trim(), username: email.trim(), email: email.trim(), role: "owner", active: true, createdAt: now });
+          b.set(cref.collection("settings").doc("company"), {
+            laborRate: 45, overheadPct: 12, targetMargin: 25, minMargin: 15, requireTeamCode: true, teamCode, ingestKey: randomKey(),
+            profile: { name: company.trim(), phone: phone.trim(), email: email.trim(), area: city.trim(), cities: "", tag: "Licensed & Insured", signer: name.trim().split(/\s+/)[0], site: "", logo: "" },
+          });
+          b.set(db.collection("joincodes").doc(teamCode), { companyId: cid, companyName: company.trim() });
+          await b.commit();
+        })();
+        try { await signupInFlight; } finally { signupInFlight = null; }
       } else {
         if (!name.trim()) throw new Error("Enter your full name.");
         if (!gate) throw new Error("Still connecting — try again in a moment.");
-        if (gate.requireTeamCode && code.trim().toUpperCase() !== String(gate.teamCode || "").toUpperCase())
+        /* A team code from another company sends you to that company. */
+        const typed = code.trim().toUpperCase();
+        let joinCo = null;
+        if (typed) {
+          try { const j = await db.collection("joincodes").doc(typed).get(); if (j.exists) joinCo = Object.assign({ code: typed }, j.data()); } catch {}
+        }
+        if (joinCo) {
+          signupInFlight = (async () => {
+            const cred = await fbAuth.createUserWithEmailAndPassword(email.trim(), pw);
+            await cred.user.updateProfile({ displayName: name.trim() });
+            const now = new Date().toISOString();
+            const b = db.batch();
+            b.set(db.collection("memberships").doc(cred.user.uid), { companyId: joinCo.companyId, joinCode: joinCo.code, at: now });
+            b.set(db.collection("companies").doc(joinCo.companyId).collection("users").doc(cred.user.uid), {
+              id: cred.user.uid, name: name.trim(), username: email.trim(), email: email.trim(), role: "associate", active: false, createdAt: now,
+            });
+            await b.commit();
+          })();
+          try { await signupInFlight; } finally { signupInFlight = null; }
+          setBusy(false);
+          return;
+        }
+        if (gate.requireTeamCode && typed !== String(gate.teamCode || "").toUpperCase())
           throw new Error("Invalid team code. Ask the owner for the current code.");
         const isTheOwner = email.trim().toLowerCase() === OWNER_EMAIL.toLowerCase();
         const cred = await fbAuth.createUserWithEmailAndPassword(email.trim(), pw);
@@ -772,25 +889,40 @@ function CloudAuth({ gate }) {
     <div className="min-h-screen flex items-center justify-center px-4" style={{ background: BRAND.navy }}>
       <div className="w-full" style={{ maxWidth: 420 }}>
         <div className="text-center mb-6">
-          <div style={{ display: "inline-flex", width: 56, height: 56, background: BRAND.gold, borderRadius: 12, alignItems: "center", justifyContent: "center", fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 28, color: BRAND.navy }}>JT</div>
-          <h1 style={{ color: "#fff", fontFamily: "'Barlow Condensed', sans-serif", fontSize: 34, fontWeight: 700, letterSpacing: "0.08em", margin: "12px 0 2px" }}>JTPROQUOTES</h1>
-          <p style={{ color: BRAND.goldBright, fontSize: 13, letterSpacing: "0.08em" }}>PROFESSIONAL QUOTES · JTPROCONSTRUCTION LLC</p>
+          <div style={{ display: "inline-flex", width: 56, height: 56, background: BRAND.gold, borderRadius: 12, alignItems: "center", justifyContent: "center", fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 28, color: BRAND.navy }}>{mode === "company" ? "AI" : "JT"}</div>
+          <h1 style={{ color: "#fff", fontFamily: "'Barlow Condensed', sans-serif", fontSize: 34, fontWeight: 700, letterSpacing: "0.08em", margin: "12px 0 2px" }}>{PRODUCT.toUpperCase()}</h1>
+          <p style={{ color: BRAND.goldBright, fontSize: 13, letterSpacing: "0.08em" }}>{mode === "company" ? "AI QUOTES FOR CONTRACTORS · 14-DAY FREE TRIAL" : "PROFESSIONAL QUOTES · " + JTPRO_COMPANY.name.toUpperCase()}</p>
         </div>
         <div style={{ background: "#fff", borderRadius: 14, padding: 26 }}>
-          {mode === "register" && <Field label="Full name"><input style={inputStyle} value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Stephanie Snead" /></Field>}
+          {mode === "company" && <React.Fragment>
+            <h2 style={{ fontFamily: "'Barlow Condensed', sans-serif", fontSize: 22, fontWeight: 700, color: BRAND.navy, marginBottom: 4 }}>START YOUR COMPANY ACCOUNT</h2>
+            <p style={{ fontSize: 13, color: BRAND.sub, marginBottom: 14 }}>Photo-to-quote AI, branded PDF quotes with your name and logo, and a lead inbox — set up in two minutes. No card needed for the trial.</p>
+            <Field label="Company name"><input style={inputStyle} value={company} onChange={(e) => setCompany(e.target.value)} placeholder="e.g. Lone Star Remodeling LLC" /></Field>
+            <div className="grid grid-cols-2 gap-x-3">
+              <Field label="Business phone"><input style={inputStyle} value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="(281) 000-0000" /></Field>
+              <Field label="City, State"><input style={inputStyle} value={city} onChange={(e) => setCity(e.target.value)} placeholder="Katy, TX" /></Field>
+            </div>
+          </React.Fragment>}
+          {(mode === "register" || mode === "company") && <Field label={mode === "company" ? "Your full name" : "Full name"}><input style={inputStyle} value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Stephanie Snead" /></Field>}
           <Field label="Email"><input style={inputStyle} type="email" autoCapitalize="none" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@email.com" /></Field>
           <Field label="Password" hint={mode === "register" ? "At least 6 characters." : null}>
             <input style={inputStyle} type="password" value={pw} onChange={(e) => setPw(e.target.value)} placeholder="••••••••" />
           </Field>
-          {mode === "register" && gate && gate.requireTeamCode && <Field label="Team code" hint="Provided by the owner."><input style={inputStyle} value={code} onChange={(e) => setCode(e.target.value)} placeholder="JTPRO-XXXX" /></Field>}
+          {mode === "register" && <Field label="Team code" hint="Provided by your company's owner."><input style={inputStyle} value={code} onChange={(e) => setCode(e.target.value)} placeholder="ABC-XXXX" /></Field>}
           {mode === "register" && <div style={{ background: "#FBF3DE", color: BRAND.amber, borderRadius: 8, padding: "10px 12px", fontSize: 12.5, fontWeight: 600, marginBottom: 12 }}>New accounts need the owner's approval before you can build quotes.</div>}
           {err && <div style={{ color: BRAND.red, fontSize: 13, fontWeight: 600, marginBottom: 12 }}>{err}</div>}
           {msg && <div style={{ color: BRAND.green, fontSize: 13, fontWeight: 600, marginBottom: 12 }}>{msg}</div>}
-          <Btn kind="gold" onClick={submit} disabled={busy}>{busy ? "Please wait…" : mode === "login" ? "Sign in" : "Create account"}</Btn>
+          <Btn kind="gold" onClick={submit} disabled={busy}>{busy ? "Please wait…" : mode === "login" ? "Sign in" : mode === "company" ? "Start free trial" : "Create account"}</Btn>
           <button onClick={() => { setMode(mode === "login" ? "register" : "login"); setErr(""); setMsg(""); }}
             style={{ display: "block", marginTop: 14, background: "none", border: "none", color: BRAND.navySoft, fontSize: 13, cursor: "pointer", textDecoration: "underline", padding: 0 }}>
-            {mode === "login" ? "New associate? Create your profile" : "Already have an account? Sign in"}
+            {mode === "login" ? "New team member? Create your profile" : "Already have an account? Sign in"}
           </button>
+          {ALLOW_COMPANY_SIGNUP && mode !== "company" && (
+            <button onClick={() => { setMode("company"); setErr(""); setMsg(""); }}
+              style={{ display: "block", marginTop: 8, background: "none", border: "none", color: BRAND.sub, fontSize: 12, cursor: "pointer", textDecoration: "underline", padding: 0 }}>
+              Own a contracting business? Start your company's free trial
+            </button>
+          )}
           {mode === "login" && (
             <button onClick={resetPw} style={{ display: "block", marginTop: 8, background: "none", border: "none", color: BRAND.sub, fontSize: 12, cursor: "pointer", textDecoration: "underline", padding: 0 }}>
               Forgot your password? Email me a reset link
@@ -2075,10 +2207,10 @@ function QuoteForm({ me, isOwner, isManager, settings, notify, existing, onSave,
   const startReply = () => {
     setDirty(true);
     const first = (q.clientName || "").split(" ")[0];
-    set("replyTemplate", "Hey" + (first ? " " + first : " there") + "! Joel with JTProconstruction — happy to help with your " + (q.jobTitle || "project").toLowerCase() + ".\n\n"
+    set("replyTemplate", "Hey" + (first ? " " + first : " there") + "! " + (COMPANY.signer ? COMPANY.signer + " with " : "") + COMPANY.name + " — happy to help with your " + (q.jobTitle || "project").toLowerCase() + ".\n\n"
       + "Based on what you sent, jobs like this start at just {{PRICE_FROM}}. Most contractors around here charge {{MARKET_RANGE}}.\n"
       + "Licensed & insured, written itemized quote, 90-day workmanship warranty. I'd lock in the exact price after a quick look — could go up a bit depending on what we find.\n\n"
-      + "When's a good time for me to swing by?\n— Joel");
+      + "When's a good time for me to swing by?\n— " + (COMPANY.signer || COMPANY.name));
   };
 
 
@@ -2287,7 +2419,7 @@ function QuoteForm({ me, isOwner, isManager, settings, notify, existing, onSave,
                   <Btn small kind="gold" onClick={async () => { await copyReply(); window.open(q.leadUrl || "https://www.thumbtack.com/", "_blank", "noopener"); }}>{q.leadUrl ? "Copy & open this lead" : "Copy & open Thumbtack"}</Btn>
                   <Btn small kind="ghost" onClick={copyReply}>Copy only</Btn>
                   {phoneDigits && <a href={"sms:" + phoneDigits + "?&body=" + encodeURIComponent(replyText)} style={{ textDecoration: "none" }}><Btn small kind="ghost">Text it</Btn></a>}
-                  {q.clientEmail && <a href={"mailto:" + q.clientEmail + "?subject=" + encodeURIComponent("Your project quote from JTProconstruction (" + q.quoteNo + ")") + "&body=" + encodeURIComponent(replyText)} style={{ textDecoration: "none" }}><Btn small kind="ghost">Email it</Btn></a>}
+                  {q.clientEmail && <a href={"mailto:" + q.clientEmail + "?subject=" + encodeURIComponent("Your project quote from " + COMPANY.name + " (" + q.quoteNo + ")") + "&body=" + encodeURIComponent(replyText)} style={{ textDecoration: "none" }}><Btn small kind="ghost">Email it</Btn></a>}
                 </div>
               ) : (
                 <div style={{ background: "#FBF3DE", color: BRAND.amber, borderRadius: 8, padding: "8px 12px", fontSize: 12.5, fontWeight: 700 }}>Sending unlocks after owner approval — the reply carries a price.</div>
@@ -2387,7 +2519,7 @@ function TeamView({ quotes, users, settings, me, onUpdateQuote, onSaveUsers, onD
   const [activity, setActivity] = useState([]);
   useEffect(() => {
     if (CLOUD) {
-      const un = db.collection("activity").orderBy("at", "desc").limit(300)
+      const un = col("activity").orderBy("at", "desc").limit(300)
         .onSnapshot((s) => { const a = []; s.forEach((d) => a.push(d.data())); setActivity(a); }, () => {});
       return () => un();
     }
@@ -2405,7 +2537,7 @@ function TeamView({ quotes, users, settings, me, onUpdateQuote, onSaveUsers, onD
      rotates it, so in practice a code gets one person in and then dies.
      (A true rotate-on-signup would need a server-side function.) */
   const rotateTeamCode = async (reason) => {
-    const fresh = "JTPRO-" + Math.random().toString(36).slice(2, 6).toUpperCase();
+    const fresh = (TENANT ? initialsOf(COMPANY.name) : "JTPRO") + "-" + Math.random().toString(36).slice(2, 6).toUpperCase();
     try {
       await onSaveSettings(Object.assign({}, settings, { teamCode: fresh }));
       logActivity(who, "Team code rotated" + (reason ? " (" + reason + ")" : ""));
@@ -2848,17 +2980,105 @@ function TeamView({ quotes, users, settings, me, onUpdateQuote, onSaveUsers, onD
 }
 
 /* ================= OWNER: SETTINGS ================= */
+/* A logo for the letterhead: shrunk to fit and kept small enough to live in
+   the settings record. */
+function shrinkLogo(file) {
+  return new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => {
+      const img = new Image();
+      img.onload = () => {
+        const k = Math.min(1, 480 / img.width, 200 / img.height);
+        const c = document.createElement("canvas");
+        c.width = Math.max(1, Math.round(img.width * k)); c.height = Math.max(1, Math.round(img.height * k));
+        c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
+        let out = c.toDataURL("image/png");
+        if (out.length > 160000) { const g = c.getContext("2d"); const bg = document.createElement("canvas"); bg.width = c.width; bg.height = c.height; const bx = bg.getContext("2d"); bx.fillStyle = "#fff"; bx.fillRect(0, 0, c.width, c.height); bx.drawImage(c, 0, 0); out = bg.toDataURL("image/jpeg", 0.85); }
+        if (out.length > 200000) return reject(new Error("That logo is too detailed. Try a simpler PNG or JPG."));
+        resolve(out);
+      };
+      img.onerror = () => reject(new Error("Couldn't read that image."));
+      img.src = r.result;
+    };
+    r.onerror = () => reject(new Error("Couldn't read that file."));
+    r.readAsDataURL(file);
+  });
+}
+
+function CompanyProfileCard({ s, setS }) {
+  const p = Object.assign({}, JTPRO_DEFAULTS_FOR(s), s.profile || {});
+  const setP = (k, v) => setS(Object.assign({}, s, { profile: Object.assign({}, s.profile || {}, { [k]: v }) }));
+  const [err, setErr] = useState("");
+  const logoRef = useRef(null);
+  const row = (k, label, ph, hint) => <Field label={label} hint={hint}><input style={inputStyle} value={p[k] || ""} onChange={(e) => setP(k, e.target.value)} placeholder={ph} /></Field>;
+  return (
+    <Card style={{ marginBottom: 14 }}>
+      <h3 style={{ fontFamily: "'Barlow Condensed', sans-serif", fontSize: 20, fontWeight: 700, color: BRAND.navy, marginBottom: 4 }}>COMPANY PROFILE</h3>
+      <div style={{ fontSize: 12.5, color: BRAND.sub, marginBottom: 12 }}>This is what clients see on every quote, PDF and reply.</div>
+      <div className="flex items-center gap-3" style={{ marginBottom: 14 }}>
+        {p.logo
+          ? <img src={p.logo} alt="Logo" style={{ maxHeight: 60, maxWidth: 180, objectFit: "contain", border: "1px solid " + BRAND.line, borderRadius: 8, padding: 4, background: "#fff" }} />
+          : <div style={{ width: 60, height: 60, background: BRAND.gold, borderRadius: 10, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 24, color: BRAND.navy }}>{initialsOf(p.name)}</div>}
+        <div className="flex gap-2 flex-wrap">
+          <Btn small kind="ghost" onClick={() => logoRef.current && logoRef.current.click()}>{p.logo ? "Change logo" : "Upload logo"}</Btn>
+          {p.logo && <Btn small kind="ghost" onClick={() => setP("logo", "")}>Remove</Btn>}
+        </div>
+        <input ref={logoRef} type="file" accept="image/*" style={{ display: "none" }} onChange={async (e) => {
+          setErr(""); const f = e.target.files && e.target.files[0]; e.target.value = "";
+          if (!f) return; try { setP("logo", await shrinkLogo(f)); } catch (x) { setErr(x.message); }
+        }} />
+      </div>
+      {err && <div style={{ color: BRAND.red, fontSize: 12.5, marginBottom: 10 }}>{err}</div>}
+      {row("name", "Company name", "Lone Star Remodeling LLC")}
+      {row("tag", "Tagline", "Licensed & Insured · Residential & Commercial")}
+      <div className="grid md-grid-cols-2 gap-x-4">
+        {row("phone", "Phone", "(281) 000-0000")}
+        {row("email", "Email", "office@yourcompany.com")}
+        {row("site", "Website", "yourcompany.com")}
+        {row("signer", "Sign replies as", "First name", "Ends every client reply, e.g. '— Mike'.")}
+      </div>
+      {row("area", "Base / service area", "Katy, TX · Serving Greater Houston")}
+      {row("cities", "Cities served (optional)", "Houston · Katy · Sugar Land · Cypress", "Prints under your name on the quote, and tells the AI where you work.")}
+    </Card>
+  );
+}
+/* Another company's lead inbox: their own Gmail script files Thumbtack (and
+   other) lead emails straight into their quotes with this key. */
+function LeadInboxCard({ s, setS }) {
+  const key = s.ingestKey ? TENANT + "." + s.ingestKey : "";
+  const [copied, setCopied] = useState("");
+  const copy = async (txt, what) => { try { await navigator.clipboard.writeText(txt); setCopied(what); setTimeout(() => setCopied(""), 2000); } catch { window.prompt("Copy:", txt); } };
+  const endpoint = window.location.origin + "/api/ingest-lead";
+  return (
+    <Card style={{ marginBottom: 14 }}>
+      <h3 style={{ fontFamily: "'Barlow Condensed', sans-serif", fontSize: 20, fontWeight: 700, color: BRAND.navy, marginBottom: 4 }}>LEAD INBOX (THUMBTACK, ANGI, EMAIL)</h3>
+      <div style={{ fontSize: 12.5, color: BRAND.sub, marginBottom: 10 }}>New lead emails become AI-drafted quotes with a reply ready to send. Set up once in your Gmail: script.google.com → New project → paste the lead script → set the two lines below → run it once → add a 5-minute trigger.</div>
+      {key ? (
+        <React.Fragment>
+          <Field label="ENDPOINT"><div className="flex gap-2"><input style={inputStyle} readOnly value={endpoint} /><Btn small kind="ghost" onClick={() => copy(endpoint, "e")}>{copied === "e" ? "Copied" : "Copy"}</Btn></div></Field>
+          <Field label="COMPANY_KEY" hint="Keep it private — it lets lead emails into your account. Make a new one if it ever leaks (then update your script)."><div className="flex gap-2"><input style={inputStyle} readOnly value={key} /><Btn small kind="ghost" onClick={() => copy(key, "k")}>{copied === "k" ? "Copied" : "Copy"}</Btn></div></Field>
+          <Btn small kind="ghost" onClick={() => { if (window.confirm("Make a new key? Your Gmail script stops filing leads until you paste the new one in. Save settings after.")) setS(Object.assign({}, s, { ingestKey: randomKey() })); }}>Make a new key</Btn>
+        </React.Fragment>
+      ) : <Btn small kind="gold" onClick={() => setS(Object.assign({}, s, { ingestKey: randomKey() }))}>Create my lead-inbox key</Btn>}
+    </Card>
+  );
+}
+// JTProconstruction's own workspace starts from its existing letterhead.
+const JTPRO_DEFAULTS_FOR = (s) => (TENANT ? {} : { name: JTPRO_COMPANY.name, tag: JTPRO_COMPANY.tag, phone: JTPRO_COMPANY.phone, email: JTPRO_COMPANY.email, site: JTPRO_COMPANY.site, signer: JTPRO_COMPANY.signer, area: JTPRO_COMPANY.area, cities: JTPRO_COMPANY.cities });
+
 function SettingsView({ settings, onSave }) {
   const [s, setS] = useState(settings);
   return (
     <div style={{ maxWidth: 560 }}>
       <h2 style={{ fontFamily: "'Barlow Condensed', sans-serif", fontSize: 26, fontWeight: 700, color: BRAND.navy, letterSpacing: "0.03em", marginBottom: 14 }}>COMPANY SETTINGS</h2>
+      <CompanyProfileCard s={s} setS={setS} />
+      {TENANT && <LeadInboxCard s={s} setS={setS} />}
       <Card>
         <Field label="Default labor rate ($/hr per crew member)"><input style={inputStyle} type="number" value={s.laborRate} onChange={(e) => setS(Object.assign({}, s, { laborRate: Number(e.target.value) }))} /></Field>
         <Field label="Default overhead %" hint="Applied on top of labor + materials before profit."><input style={inputStyle} type="number" value={s.overheadPct} onChange={(e) => setS(Object.assign({}, s, { overheadPct: Number(e.target.value) }))} /></Field>
         <Field label="Default profit margin %"><input style={inputStyle} type="number" value={s.targetMargin} onChange={(e) => setS(Object.assign({}, s, { targetMargin: Number(e.target.value) }))} /></Field>
         <Field label="Minimum profit margin %" hint="'Price to win' never goes below this, even to beat the market. Default 15%."><input style={inputStyle} type="number" value={s.minMargin != null ? s.minMargin : 15} onChange={(e) => setS(Object.assign({}, s, { minMargin: Number(e.target.value) }))} /></Field>
-        <div style={{ background: BRAND.paper, borderRadius: 8, padding: 12, marginBottom: 16 }}>
+        {!TENANT && <div style={{ background: BRAND.paper, borderRadius: 8, padding: 12, marginBottom: 16 }}>
           <label style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer" }}>
             <input type="checkbox" style={{ width: 18, height: 18 }} checked={!!s.requireTeamCode} onChange={(e) => setS(Object.assign({}, s, { requireTeamCode: e.target.checked }))} />
             <span style={{ fontWeight: 700, fontSize: 14 }}>Require a team code to create an account</span>
@@ -2868,8 +3088,8 @@ function SettingsView({ settings, onSave }) {
               ? "ON — new associates must enter the code below. Recommended once you go live."
               : "OFF — anyone who opens the app can create an account. Fine while you're testing; turn this on before you deploy."}
           </div>
-        </div>
-        <Field label="Team code" hint="Used only when the setting above is ON. Change it any time to lock out unwanted signups.">
+        </div>}
+        <Field label="Team code" hint={TENANT ? "Give this to your team: they choose 'New team member' on the sign-in screen and type it in. You approve each one. Change it any time to stop new sign-ups." : "Used only when the setting above is ON. Change it any time to lock out unwanted signups."}>
           <input style={inputStyle} value={s.teamCode} onChange={(e) => setS(Object.assign({}, s, { teamCode: e.target.value.toUpperCase() }))} />
         </Field>
         <Field label="Owner recovery key" hint="Set this now and write it down somewhere safe. If you ever forget your PIN, this is how you get back in without erasing your quotes. Keep it private — do not give it to associates.">
@@ -2911,7 +3131,7 @@ function PreviewModal({ quote, settings, users, me, onClose }) {
   /* A real PDF file, ready to attach to a text, email or Thumbtack message. */
   const [pdfBusy, setPdfBusy] = useState("");
   const [pdfErr, setPdfErr] = useState("");
-  const fileName = (quote.quoteNo + " " + (quote.clientName || "Client") + " - JTProconstruction Quote").replace(/[^\w .\-]+/g, "").trim() + ".pdf";
+  const fileName = (quote.quoteNo + " " + (quote.clientName || "Client") + " - " + COMPANY.name + " Quote").replace(/[^\w .\-]+/g, "").trim() + ".pdf";
   /* The page behind this window is often scrolled (a quote opened from far
      down the dashboard). The PDF maker measures from the top of the page, so
      a scrolled page came out as blank sheets. Capture from the top, then put
@@ -2958,7 +3178,7 @@ function PreviewModal({ quote, settings, users, me, onClose }) {
       const first = (quote.clientName || "").split(" ")[0];
       await navigator.share({
         files: [file], title: fileName,
-        text: "Hi" + (first ? " " + first : "") + ", here is your quote from JTProconstruction (" + quote.quoteNo + "). Let me know if you have any questions. — Joel",
+        text: "Hi" + (first ? " " + first : "") + ", here is your quote from " + COMPANY.name + " (" + quote.quoteNo + "). Let me know if you have any questions. — " + (COMPANY.signer || COMPANY.name),
       });
       logActivity(me ? me.name : "Unknown", "Shared PDF", quote.quoteNo);
     } catch (e) {
@@ -3012,11 +3232,12 @@ function PreviewModal({ quote, settings, users, me, onClose }) {
           {/* Letterhead */}
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", borderBottom: `4px solid ${BRAND.gold}`, paddingBottom: 18, flexWrap: "wrap", gap: 12 }}>
             <div>
+              {COMPANY.logo && <img src={COMPANY.logo} alt="" style={{ maxHeight: 56, maxWidth: 220, objectFit: "contain", display: "block", marginBottom: 4 }} />}
               <div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontSize: 30, fontWeight: 700, color: BRAND.navy, letterSpacing: "0.04em" }}>{COMPANY.name.toUpperCase()}</div>
               <div style={{ fontSize: 12, color: BRAND.sub }}>{COMPANY.tag}</div>
-              <div style={{ fontSize: 12, color: BRAND.sub }}>{COMPANY.area}</div>
-              <div style={{ fontSize: 12, color: BRAND.navy, fontWeight: 600 }}>{COMPANY.cities}</div>
-              <div style={{ fontSize: 12, color: BRAND.sub }}>{COMPANY.phone} · {COMPANY.email} · {COMPANY.site}</div>
+              {COMPANY.area && <div style={{ fontSize: 12, color: BRAND.sub }}>{COMPANY.area}</div>}
+              {COMPANY.cities && <div style={{ fontSize: 12, color: BRAND.navy, fontWeight: 600 }}>{COMPANY.cities}</div>}
+              <div style={{ fontSize: 12, color: BRAND.sub }}>{[COMPANY.phone, COMPANY.email, COMPANY.site].filter(Boolean).join(" · ")}</div>
             </div>
             <div style={{ textAlign: "right" }}>
               <div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontSize: 24, fontWeight: 700, color: BRAND.gold, letterSpacing: "0.1em" }}>QUOTE</div>
@@ -3042,7 +3263,7 @@ function PreviewModal({ quote, settings, users, me, onClose }) {
               <div style={{ fontSize: 13, color: BRAND.sub }}>{isLaborOnly(quote) ? "Labor only — materials supplied by client" : "Labor & materials"}</div>
             </div>
             <div style={{ flex: "1 1 180px" }}>
-              <div style={goldLabel}>YOUR JTPRO CONTACT</div>
+              <div style={goldLabel}>{"YOUR " + (COMPANY.short || "PROJECT").toUpperCase() + " CONTACT"}</div>
               <div style={{ fontWeight: 700, fontSize: 15 }}>{preparer.name || COMPANY.name}</div>
               <div style={{ fontSize: 13 }}>{COMPANY.phone}</div>
               <div style={{ fontSize: 13 }}>{COMPANY.email}</div>
@@ -3150,7 +3371,7 @@ function PreviewModal({ quote, settings, users, me, onClose }) {
                     <div style={{ fontSize: 17, fontWeight: 700, color: BRAND.sub }}>{money(m.low).replace(".00", "")} – {money(m.high).replace(".00", "")}</div>
                   </div>
                   <div>
-                    <div style={{ fontSize: 11.5, color: BRAND.sub }}>Your JTPro price</div>
+                    <div style={{ fontSize: 11.5, color: BRAND.sub }}>{"Your " + (COMPANY.short || "") + " price"}</div>
                     <div style={{ fontSize: 17, fontWeight: 700, color: BRAND.navy }}>{money(c.total)}</div>
                   </div>
                   {savePct >= 3 && <div style={{ background: BRAND.navy, color: "#fff", borderRadius: 6, padding: "6px 10px", fontSize: 13, fontWeight: 700 }}>About {savePct}% below the typical midpoint</div>}
@@ -3161,7 +3382,7 @@ function PreviewModal({ quote, settings, users, me, onClose }) {
           })()}
 
           <div style={{ marginTop: 16, breakInside: "avoid" }}>
-            <div style={Object.assign({}, goldLabel, { marginBottom: 6 })}>WHY HOMEOWNERS CHOOSE JTPROCONSTRUCTION</div>
+            <div style={Object.assign({}, goldLabel, { marginBottom: 6 })}>{"WHY HOMEOWNERS CHOOSE " + COMPANY.name.toUpperCase()}</div>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: "6px 18px", fontSize: 12.5, lineHeight: 1.45 }}>
               {[
                 ["Licensed & insured", "Your home and our crew are covered on every job."],
@@ -3169,7 +3390,7 @@ function PreviewModal({ quote, settings, users, me, onClose }) {
                 ["90-day workmanship warranty", "If our work isn't right, we come back and make it right."],
                 ["Changes approved in writing", "Nothing extra is done or billed without your OK."],
                 ["Clean site, every day", "We protect your space and clean up before we leave."],
-                ["One point of contact", (preparer.name || "Your JTPro contact") + " stays with your project start to finish."],
+                ["One point of contact", (preparer.name || "Your " + (COMPANY.short || "project") + " contact") + " stays with your project start to finish."],
               ].map(([t, d]) => (
                 <div key={t}><span style={{ color: BRAND.gold, fontWeight: 700 }}>✓ </span><strong>{t}</strong> — <span style={{ color: BRAND.sub }}>{d}</span></div>
               ))}

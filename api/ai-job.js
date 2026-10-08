@@ -25,7 +25,8 @@ module.exports = async (req, res) => {
   try { caller = await verifyCaller(idToken); } catch { return bad(res, 503, "Couldn't check your sign-in."); }
   if (!caller) return bad(res, 403, "Your account isn't approved.");
   const isManager = caller.role === "owner" || caller.role === "assistant";
-  const mine = (j) => j && (j.uid === caller.uid || isManager);
+  const sameCompany = (j) => (j.companyId || "") === (caller.companyId || "");
+  const mine = (j) => j && (j.uid === caller.uid || (isManager && sameCompany(j)));
 
   try {
     const jobId = typeof body.jobId === "string" && /^[\w-]{6,40}$/.test(body.jobId) ? body.jobId : "";
@@ -41,7 +42,8 @@ module.exports = async (req, res) => {
     }
     const quoteId = typeof body.quoteId === "string" ? body.quoteId.slice(0, 60) : "";
     if (!quoteId) return bad(res, 400, "Name a job or a quote.");
-    const jobs = (await queryAsServer("aiJobs", { quoteId, uid: caller.uid })).filter(mine);
+    // Managers see a draft anyone on their team started for this quote.
+    const jobs = (await queryAsServer("aiJobs", isManager ? { quoteId } : { quoteId, uid: caller.uid })).filter(mine);
     jobs.sort((a, b) => String(b.at || "").localeCompare(String(a.at || "")));
     return res.status(200).json({ job: jobs[0] || null });
   } catch (e) {

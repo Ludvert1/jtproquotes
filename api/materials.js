@@ -6,7 +6,7 @@
    returns only what's missing.
 ============================================================ */
 
-const { bad, parseBody, verifyCaller, detectMaterials, checkImages } = require("./_lib");
+const { bad, parseBody, verifyCaller, detectMaterials, checkImages, getDocAs, companyFor } = require("./_lib");
 
 module.exports = async (req, res) => {
   if (req.method !== "POST") return bad(res, 405, "POST only.");
@@ -37,7 +37,9 @@ module.exports = async (req, res) => {
   const existing = list(body.existing, 40, 200);
 
   try {
-    const out = await detectMaterials({ quote, images: checked.images, existing });
+    let settings = null;
+    try { settings = await getDocAs(idToken, caller.p("settings/company")); } catch { /* defaults */ }
+    const out = await detectMaterials({ quote, images: checked.images, existing, company: companyFor(settings, !caller.companyId) });
     console.log("[materials] ok uid=" + caller.uid + " items=" + out.items.length + " existing=" + existing.length + " photos=" + checked.images.length);
     return res.status(200).json(out);
   } catch (e) {

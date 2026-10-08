@@ -18,7 +18,7 @@
    the moment it's back, even after a full reload.
 ============================================================ */
 
-const { bad, parseBody, verifyCaller, getDocAs, setDocAs, setDocAsServer, listDocsAs, draftQuote, checkImages } = require("./_lib");
+const { bad, parseBody, verifyCaller, getDocAs, setDocAs, setDocAsServer, listDocsAs, draftQuote, checkImages, companyFor } = require("./_lib");
 const { sendToPeople } = require("./_push");
 const { cleanProperty } = require("./_property");
 
@@ -56,7 +56,7 @@ module.exports = async (req, res) => {
 
   // The company's own numbers go into the brief so labor is sized against them.
   let settings = null;
-  try { settings = await getDocAs(idToken, "settings/company"); } catch { /* defaults are fine */ }
+  try { settings = await getDocAs(idToken, caller.p("settings/company")); } catch { /* defaults are fine */ }
 
   const jobId = typeof body.jobId === "string" && /^[\w-]{6,40}$/.test(body.jobId) ? body.jobId : "";
   const quoteId = typeof body.quoteId === "string" ? body.quoteId.slice(0, 60) : "";
@@ -71,18 +71,18 @@ module.exports = async (req, res) => {
       : (path, data) => setDocAs(idToken, path, data);
     try {
       await write("aiJobs/" + jobId, Object.assign({
-        uid: caller.uid, quoteId, quoteNo, attIds, photoCount: images.length, startedAt: new Date().toISOString(),
+        uid: caller.uid, companyId: caller.companyId || "", quoteId, quoteNo, attIds, photoCount: images.length, startedAt: new Date().toISOString(),
       }, fields));
     } catch (e) { console.error("[ai-quote] couldn't save job " + jobId + ":", e.message); }
   };
   await saveJob({ status: "running", at: new Date().toISOString() });
 
   try {
-    const out = await draftQuote({ text, images, settings, property });
+    const out = await draftQuote({ text, images, settings, property, company: companyFor(settings, !caller.companyId) });
     await saveJob({ status: "done", at: new Date().toISOString(), draft: out.draft, applied: false });
     // Let the phone know, in case the app isn't on screen any more.
     try {
-      const subs = await listDocsAs(idToken, "pushSubs");
+      const subs = await listDocsAs(idToken, caller.p("pushSubs"));
       await sendToPeople(subs, [caller.uid], {
         title: "AI quote ready ✅",
         body: (out.draft.jobTitle || out.draft.category) + (quoteNo ? " · " + quoteNo : "") + " — tap to review and apply.",

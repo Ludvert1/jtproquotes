@@ -20,7 +20,7 @@
 const crypto = require("crypto");
 const {
   bad, uid, parseBody, extractLead, sendEmail, verifyGoogleSender, priceFrom,
-  STANDARD_EXCLUSIONS, createDocAsServer, listDocsAsServer, queryAsServer,
+  STANDARD_EXCLUSIONS, createDocAsServer, listDocsAsServer, queryAsServer, getDocAsServer, companyFor,
   draftQuote, draftToQuoteFields, quoteTotal, renderReply, priceRange, priceToWin,
   uploadImageAsServer, checkImages,
 } = require("./_lib");
@@ -40,22 +40,45 @@ function secretMatches(given) {
   return crypto.timingSafeEqual(a, b);
 }
 
+/* Another company's Gmail script sends its lead-inbox key ("companyId.key",
+   shown in that company's Settings). It must match the key stored in that
+   company's settings. Returns the company, or null. */
+async function companyFromKey(given) {
+  const m = /^(c[a-z0-9]{6,40})\.([A-Za-z0-9]{16,64})$/.exec(String(given || ""));
+  if (!m) return null;
+  const [, cid, key] = m;
+  const settings = await getDocAsServer("companies/" + cid + "/settings/company");
+  const want = settings && typeof settings.ingestKey === "string" ? settings.ingestKey : "";
+  if (!want || want.length !== key.length || !crypto.timingSafeEqual(Buffer.from(want), Buffer.from(key))) return null;
+  const co = await getDocAsServer("companies/" + cid);
+  if (!co) return null;
+  return { cid, settings, ownerUid: co.ownerUid || "" };
+}
+
 module.exports = async (req, res) => {
   if (req.method !== "POST") return bad(res, 405, "POST only.");
-  /* Either the Gmail script's Google identity (preferred — nothing secret to
-     copy around) or the older shared secret. */
-  const auth = String(req.headers.authorization || "");
-  let sender = null;
-  if (auth.startsWith("Bearer ")) {
-    try { sender = await verifyGoogleSender(auth.slice(7)); } catch { sender = null; }
-  }
-  if (!sender && !secretMatches(req.headers["x-ingest-secret"])) {
-    return bad(res, 401, "Not an approved lead inbox. Run the script from ludvert@gmail.com, or set INGEST_EMAILS in Vercel.");
-  }
   if (!process.env.FIREBASE_SERVICE_ACCOUNT) return bad(res, 503, "Lead ingest needs FIREBASE_SERVICE_ACCOUNT in Vercel.");
-
   const body = parseBody(req);
   if (!body) return bad(res, 400, "Missing or invalid request body.");
+
+  /* Whose inbox: another company proves itself with its lead-inbox key;
+     JTProconstruction with the Gmail script's Google identity (or the older
+     shared secret). */
+  let tenant = null;
+  if (body.companyKey) {
+    try { tenant = await companyFromKey(body.companyKey); } catch (e) { console.error("[ingest-lead] key check failed:", e.message); }
+    if (!tenant) return bad(res, 401, "That lead-inbox key isn't valid. Copy it again from Settings → Lead inbox.");
+  } else {
+    const auth = String(req.headers.authorization || "");
+    let sender = null;
+    if (auth.startsWith("Bearer ")) {
+      try { sender = await verifyGoogleSender(auth.slice(7)); } catch { sender = null; }
+    }
+    if (!sender && !secretMatches(req.headers["x-ingest-secret"])) {
+      return bad(res, 401, "Not an approved lead inbox. Run the script from ludvert@gmail.com, or set INGEST_EMAILS in Vercel.");
+    }
+  }
+  const base = tenant ? "companies/" + tenant.cid + "/" : "";
 
   const subject = typeof body.subject === "string" ? body.subject.slice(0, 500) : "";
   const from = typeof body.from === "string" ? body.from.slice(0, 300) : "";
@@ -72,16 +95,18 @@ module.exports = async (req, res) => {
 
   /* The draft has to belong to somebody. It goes to the owner, who can
      reassign it by hand — an automated lead is not any associate's work. */
-  let ownerUid = process.env.OWNER_UID || "";
+  let ownerUid = tenant ? tenant.ownerUid : (process.env.OWNER_UID || "");
   let ownerName = "Owner";
-  let settings = null;
+  let settings = tenant ? tenant.settings : null;
   try {
-    const users = await listDocsAsServer("users");
-    const owner = users.find((u) => u && u.role === "owner");
+    const users = await listDocsAsServer(base + "users");
+    const owner = tenant ? users.find((u) => u && u.id === ownerUid) : users.find((u) => u && u.role === "owner");
     if (owner) { ownerUid = ownerUid || owner.id; ownerName = owner.name || ownerName; }
     if (!ownerUid) return bad(res, 503, "No owner account was found to file the lead under.");
-    const all = await listDocsAsServer("settings");
-    settings = all.find((s) => s && (s.laborRate != null || s.targetMargin != null)) || null;
+    if (!tenant) {
+      const all = await listDocsAsServer("settings");
+      settings = all.find((s) => s && (s.laborRate != null || s.targetMargin != null)) || null;
+    }
   } catch (e) {
     console.error("[ingest-lead] setup read failed:", e.message);
     return bad(res, 503, "Couldn't reach the database. " + e.message);
@@ -92,7 +117,7 @@ module.exports = async (req, res) => {
   // The same email filed twice (e.g. the script re-ran) is ignored.
   if (messageId) {
     try {
-      const dupes = await queryAsServer("quotes", { leadMessageId: messageId });
+      const dupes = await queryAsServer(base + "quotes", { leadMessageId: messageId });
       if (dupes.length) return res.status(200).json({ ok: true, duplicate: true, quoteNo: dupes[0].quoteNo, id: dupes[0].id });
     } catch { /* carry on */ }
   }
@@ -105,7 +130,7 @@ module.exports = async (req, res) => {
      back to the plain read so the lead is never lost. */
   let d = null;
   try {
-    d = (await draftQuote({ text: leadText, images, settings })).draft;
+    d = (await draftQuote({ text: leadText, images, settings, company: companyFor(settings, !tenant) })).draft;
   } catch (e) {
     console.error("[ingest-lead] draft failed, falling back to a plain read:", e.message);
   }
@@ -207,14 +232,14 @@ module.exports = async (req, res) => {
   }
 
   try {
-    await createDocAsServer("quotes", id, quote);
+    await createDocAsServer(base + "quotes", id, quote);
   } catch (e) {
     console.error("[ingest-lead] write failed:", e.message);
     return bad(res, 502, "Couldn't save the draft. " + e.message);
   }
 
   try {
-    await createDocAsServer("activity", uid() + uid(), {
+    await createDocAsServer(base + "activity", uid() + uid(), {
       at: now, who: "Lead inbox", action: "Filed a lead as a draft quote", quoteNo,
     });
   } catch { /* the log is useful, not essential */ }
@@ -223,7 +248,8 @@ module.exports = async (req, res) => {
   const reply = d ? renderReply(quote.replyTemplate, total, d.confidence, quote.pricingMode === "labor", d.market) : "";
 
   // Tell the team a lead landed, with the reply ready to paste into Thumbtack.
-  await sendEmail({
+  // (Email copies go to JTProconstruction's inbox; other companies get phone alerts.)
+  if (!tenant) await sendEmail({
     subject: d
       ? `New lead drafted — ${quote.clientName} · ${quote.category} · ${priceRange(total, d.confidence)}`
       : `New lead filed — ${quote.clientName} · ${quote.category}`,
@@ -249,7 +275,7 @@ module.exports = async (req, res) => {
 
   // Phone alert to the owner and assistants.
   try {
-    const [users, subs] = await Promise.all([listDocsAsServer("users"), listDocsAsServer("pushSubs")]);
+    const [users, subs] = await Promise.all([listDocsAsServer(base + "users"), listDocsAsServer(base + "pushSubs")]);
     const managers = users.filter((u) => u && u.active === true && (u.role === "owner" || u.role === "assistant")).map((u) => u.id);
     await sendToPeople(subs, managers, {
       title: "New Thumbtack lead · " + (d ? "from " + priceFrom(total, d.confidence) : quote.category),

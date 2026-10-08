@@ -333,3 +333,13 @@ Type the job address and press **Look up property** (it also runs on its own bef
 The AI uses all of this when it drafts, and labels roof numbers "measured from satellite". Owner names, sale prices and mailing addresses are never requested. Lead emails that include a street address get the facts attached on their own.
 
 Setup: create a Google Cloud API key with **Geocoding, Routes, Solar, Street View Static and Maps Static** APIs enabled, then add it in Vercel as `GOOGLE_MAPS_API_KEY` and redeploy. Without the key, the button explains that it isn't switched on and AI drafts carry on without it.
+
+## Other contractors (multi-company)
+
+Any contractor can start their own company account at `/?start` (or "Start your company's free trial" on the sign-in screen). Each company gets a completely separate workspace:
+
+- **Data:** JTProconstruction keeps the top-level collections; every other company lives under `companies/{id}/` (users, quotes, settings, activity, pushSubs). `memberships/{uid}` says which company an account belongs to. The security rules (tested with the Firestore emulator) stop any company from reading another's data.
+- **Branding:** Settings → Company profile — name, logo, tagline, phone, email, website, service area, cities, and the name replies are signed with. Used on the app header, the PDF letterhead, the client replies, and in the AI's instructions.
+- **Team:** each company has its own team code. New team members choose "New team member" and type the code; the owner approves them.
+- **Lead inbox:** Settings → Lead inbox shows the ENDPOINT and COMPANY_KEY to paste into their copy of `integrations/gmail-thumbtack.gs`.
+- New companies start on a 14-day `trial` (stored on `companies/{id}`; billing is not wired yet).

@@ -33,6 +33,9 @@
 
 // ---- SETTINGS -------------------------------------------------
 var ENDPOINT = "https://jtproquotes.vercel.app/api/ingest-lead";
+// Other companies: paste the COMPANY_KEY from Settings → Lead inbox (and the
+// ENDPOINT shown there). JTProconstruction leaves this empty.
+var COMPANY_KEY = "";
 // Only needed if you ever switch back to a shared secret (INGEST_SECRET).
 var SECRET = "";
 
@@ -101,6 +104,7 @@ function fileOneLead(msg) {
     leadUrl: leadLinkFrom(msg),
     images: photosFrom(msg)
   };
+  if (COMPANY_KEY) payload.companyKey = COMPANY_KEY;
 
   try {
     var res = UrlFetchApp.fetch(ENDPOINT, {

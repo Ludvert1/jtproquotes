@@ -32,6 +32,15 @@ window.JTPQ_CONFIG = {
   // the private half is VAPID_PRIVATE_KEY in Vercel. Change both together.
   vapidPublicKey: "BHJZrgFysdU8GUtlP0FM04D_brRVTjfNOdYX-VBnEBzWewiM0g7tpksbZkKF0snEyVBHPxPcxAK31Frtap6bMSY",
 
+  // Name of the app on the sign-in screen (other companies see their own
+  // company name once signed in).
+  productName: "JTProQuotes",
+
+  // Lets other contractors start their own company account from the
+  // sign-in screen ("Start your company's free trial", or link straight to
+  // /?start). Each company's data is kept completely separate.
+  allowCompanySignup: true,
+
   // This email address gets Owner rights. Everyone else is an associate.
   ownerEmail: "info@jtproconstruction.com",
 };
