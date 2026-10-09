@@ -898,7 +898,7 @@ function CloudAuth({ gate }) {
         <div className="text-center mb-6">
           <div style={{ display: "inline-flex", width: 56, height: 56, background: BRAND.gold, borderRadius: 12, alignItems: "center", justifyContent: "center", fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 28, color: BRAND.navy }}>SI</div>
           <h1 style={{ color: "#fff", fontFamily: "'Barlow Condensed', sans-serif", fontSize: 34, fontWeight: 700, letterSpacing: "0.08em", margin: "12px 0 2px" }}>{PRODUCT.toUpperCase()}</h1>
-          <p style={{ color: BRAND.goldBright, fontSize: 13, letterSpacing: "0.08em" }}>{mode === "company" ? "AI QUOTES FOR CONTRACTORS · 14-DAY FREE TRIAL" : "AI QUOTES FOR CONTRACTORS"}</p>
+          <p style={{ color: BRAND.goldBright, fontSize: 13, letterSpacing: "0.08em" }}>{mode === "company" ? "FAST QUOTES AND LEADS WINNER · 14-DAY FREE TRIAL" : "FAST QUOTES AND LEADS WINNER"}</p>
         </div>
         <div style={{ background: "#fff", borderRadius: 14, padding: 26 }}>
           {mode === "company" && <React.Fragment>
