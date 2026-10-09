@@ -80,6 +80,11 @@ module.exports = async (req, res) => {
   }
   const base = tenant ? "companies/" + tenant.cid + "/" : "";
 
+  // The lead script's connection check: key is valid, nothing to file.
+  if (body.ping === true) {
+    return res.status(200).json({ ok: true, connected: true, company: companyFor(tenant ? tenant.settings : null, !tenant).name });
+  }
+
   const subject = typeof body.subject === "string" ? body.subject.slice(0, 500) : "";
   const from = typeof body.from === "string" ? body.from.slice(0, 300) : "";
   const text = typeof body.text === "string" ? body.text.slice(0, 20000) : "";

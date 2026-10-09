@@ -17,7 +17,8 @@
      4. In the menu next to "Debug", choose  setup  and click Run.
      5. Google asks you to allow access → choose your account →
         Advanced → Go to project → Allow.
-   Done. It now checks for new leads every 5 minutes.
+   The log shows "✅ CONNECTED" within a few seconds. Done — it checks
+   for new leads every 5 minutes in the background.
 ============================================================ */
 
 var ENDPOINT = "PASTE_ENDPOINT_HERE";
@@ -33,30 +34,43 @@ var SEARCHES = [
 
 var LABEL_DONE = "SIQ-Filed";
 var LABEL_FAILED = "SIQ-Failed";
-var MAX_PER_RUN = 10;
+var MAX_PER_RUN = 5;
+var TIME_BUDGET_MS = 4 * 60 * 1000; // Google stops a run at 6 minutes
 var MAX_PHOTOS = 4, MIN_PHOTO_BYTES = 15000, MAX_PHOTO_BYTES = 800000;
 
-/* Run this once. It checks the connection and starts the 5-minute timer. */
+/* Run this once. It checks the connection and starts the 5-minute timer.
+   It finishes in a few seconds — the leads themselves are picked up by the
+   timer in the background, so there's nothing to wait for here. */
 function setup() {
   if (ENDPOINT.indexOf("http") !== 0 || COMPANY_KEY.indexOf(".") < 0) {
     throw new Error("Paste the script from S-I-Quotespro → Settings → Lead inbox (Copy my lead script) — the two lines at the top are not filled in.");
   }
+  GmailApp.getInboxUnreadCount(); // makes sure Gmail access was allowed
+  var res = UrlFetchApp.fetch(ENDPOINT, {
+    method: "post", contentType: "application/json",
+    payload: JSON.stringify({ companyKey: COMPANY_KEY, ping: true }), muteHttpExceptions: true
+  });
+  if (res.getResponseCode() !== 200) {
+    throw new Error("S-I-Quotespro didn't accept this script (" + res.getResponseCode() + "). Copy a fresh script from Settings → Lead inbox and try again.");
+  }
+  var who = "";
+  try { who = JSON.parse(res.getContentText()).company || ""; } catch (e) {}
   ScriptApp.getProjectTriggers().forEach(function (t) {
     if (t.getHandlerFunction() === "checkForLeads") ScriptApp.deleteTrigger(t);
   });
   ScriptApp.newTrigger("checkForLeads").timeBased().everyMinutes(5).create();
-  var result = checkForLeads();
-  Logger.log("Connected. Checking for new leads every 5 minutes.\n" + result);
-  return result;
+  var msg = "✅ CONNECTED" + (who ? " to " + who : "") + ". New leads will appear in S-I-Quotespro within about 5 minutes. You can close this page.";
+  Logger.log(msg);
+  return msg;
 }
 
 /* The timer calls this. */
 function checkForLeads() {
   var done = labelNamed(LABEL_DONE), failed = labelNamed(LABEL_FAILED);
-  var handled = 0, report = [];
+  var handled = 0, report = [], started = Date.now();
   for (var s = 0; s < SEARCHES.length; s++) {
     var threads = GmailApp.search(SEARCHES[s], 0, MAX_PER_RUN);
-    for (var t = 0; t < threads.length && handled < MAX_PER_RUN; t++) {
+    for (var t = 0; t < threads.length && handled < MAX_PER_RUN && Date.now() - started < TIME_BUDGET_MS; t++) {
       var msgs = threads[t].getMessages();
       var msg = msgs[msgs.length - 1];
       handled++;

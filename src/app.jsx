@@ -3141,7 +3141,7 @@ function ThumbtackSetup({ settings, onPatch, quotes, compact, onDismiss }) {
             <a href="https://script.google.com/home/projects/create" target="_blank" rel="noopener" style={{ textDecoration: "none" }}><Btn small kind="ghost">Open Google Apps Script ↗</Btn></a>
           </div>
           {err && <div style={{ color: BRAND.red, fontSize: 12.5, marginTop: 6 }}>{err}</div>}
-          <div style={{ fontSize: 11.5, color: BRAND.sub, marginTop: 8 }}>The log should say "Connected". From then on it checks every 5 minutes. Leads show up on your dashboard with an AI-DRAFTED tag and a phone alert. To stop it later, run <strong>stopConnector</strong> in the same project.</div>
+          <div style={{ fontSize: 11.5, color: BRAND.sub, marginTop: 8 }}>Within a few seconds the log says "✅ CONNECTED" — then you can close the page; it checks every 5 minutes in the background. Easiest on a computer: Google's script editor is hard to use on a phone. Leads show up on your dashboard with an AI-DRAFTED tag and a phone alert. To stop it later, run <strong>stopConnector</strong> in the same project.</div>
         </div>
 
         {mode === "auto" && <div style={box}>
