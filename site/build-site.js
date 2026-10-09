@@ -22,4 +22,5 @@ else {
 }
 const dest = preview ? process.argv[process.argv.indexOf("--preview") + 1] || path.join(dir, "preview.html") : path.join(dir, "index.html");
 fs.writeFileSync(dest, out);
+if (!preview) fs.writeFileSync(path.join(dir, "..", "index.html"), out); // s-i-quotespro.com/ is the website
 console.log("wrote", dest, (out.length / 1024).toFixed(0) + " KB");

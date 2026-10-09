@@ -17,7 +17,7 @@ const babel = require("@babel/core");
 const root = __dirname;
 const jsxPath = path.join(root, "src", "app.jsx");
 const tplPath = path.join(root, "src", "index.template.html");
-const outPath = path.join(root, "index.html");
+const outPath = path.join(root, "app.html"); // the app lives at /app; / is the website (site/build-site.js)
 
 // The scope templates are shared with the server (api/_lib.js), so they live
 // in their own plain-JS file and are placed ahead of the app code here.
@@ -58,4 +58,4 @@ const html = template.replace("/*__APP__*/", safe);
 fs.writeFileSync(outPath, html);
 
 const kb = (n) => (n / 1024).toFixed(1) + " KB";
-console.log("Built index.html  (" + kb(html.length) + ", app " + kb(safe.length) + ")");
+console.log("Built app.html  (" + kb(html.length) + ", app " + kb(safe.length) + ")");

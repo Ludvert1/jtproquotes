@@ -48,7 +48,7 @@
       ]
     },
     {
-      "source": "/index.html",
+      "source": "/app",
       "headers": [
         {
           "key": "Cache-Control",
@@ -113,136 +113,108 @@
       "maxDuration": 15
     }
   },
-  "rewrites": [
-    {
-      "source": "/",
-      "has": [
-        {
-          "type": "host",
-          "value": "www.s-i-quotespro.com"
-        }
-      ],
-      "missing": [
-        {
-          "type": "query",
-          "key": "start"
-        },
-        {
-          "type": "query",
-          "key": "login"
-        },
-        {
-          "type": "query",
-          "key": "quote"
-        },
-        {
-          "type": "query",
-          "key": "billing"
-        },
-        {
-          "type": "query",
-          "key": "admin"
-        },
-        {
-          "type": "query",
-          "key": "session_id"
-        },
-        {
-          "type": "query",
-          "key": "app"
-        }
-      ],
-      "destination": "/site/index.html"
-    },
-    {
-      "source": "/",
-      "has": [
-        {
-          "type": "host",
-          "value": "s-i-quotespro.com"
-        }
-      ],
-      "missing": [
-        {
-          "type": "query",
-          "key": "start"
-        },
-        {
-          "type": "query",
-          "key": "login"
-        },
-        {
-          "type": "query",
-          "key": "quote"
-        },
-        {
-          "type": "query",
-          "key": "billing"
-        },
-        {
-          "type": "query",
-          "key": "admin"
-        },
-        {
-          "type": "query",
-          "key": "session_id"
-        },
-        {
-          "type": "query",
-          "key": "app"
-        }
-      ],
-      "destination": "/site/index.html"
-    },
-    {
-      "source": "/app",
-      "destination": "/index.html"
-    }
-  ],
   "redirects": [
     {
-      "source": "/help",
-      "destination": "/#help",
-      "permanent": false,
+      "source": "/",
       "has": [
+        {
+          "type": "query",
+          "key": "start"
+        }
+      ],
+      "destination": "/app",
+      "permanent": false
+    },
+    {
+      "source": "/",
+      "has": [
+        {
+          "type": "query",
+          "key": "login"
+        }
+      ],
+      "destination": "/app",
+      "permanent": false
+    },
+    {
+      "source": "/",
+      "has": [
+        {
+          "type": "query",
+          "key": "quote"
+        }
+      ],
+      "destination": "/app",
+      "permanent": false
+    },
+    {
+      "source": "/",
+      "has": [
+        {
+          "type": "query",
+          "key": "billing"
+        }
+      ],
+      "destination": "/app",
+      "permanent": false
+    },
+    {
+      "source": "/",
+      "has": [
+        {
+          "type": "query",
+          "key": "admin"
+        }
+      ],
+      "destination": "/app",
+      "permanent": false
+    },
+    {
+      "source": "/",
+      "has": [
+        {
+          "type": "query",
+          "key": "session_id"
+        }
+      ],
+      "destination": "/app",
+      "permanent": false
+    },
+    {
+      "source": "/",
+      "has": [
+        {
+          "type": "query",
+          "key": "app"
+        }
+      ],
+      "destination": "/app",
+      "permanent": false
+    },
+    {
+      "source": "/",
+      "missing": [
         {
           "type": "host",
           "value": "www.s-i-quotespro.com"
-        }
-      ]
-    },
-    {
-      "source": "/help",
-      "destination": "/#help",
-      "permanent": false,
-      "has": [
+        },
         {
           "type": "host",
           "value": "s-i-quotespro.com"
         }
-      ]
+      ],
+      "destination": "/app",
+      "permanent": false
+    },
+    {
+      "source": "/help",
+      "destination": "/#help",
+      "permanent": false
     },
     {
       "source": "/support",
       "destination": "/#help",
-      "permanent": false,
-      "has": [
-        {
-          "type": "host",
-          "value": "www.s-i-quotespro.com"
-        }
-      ]
-    },
-    {
-      "source": "/support",
-      "destination": "/#help",
-      "permanent": false,
-      "has": [
-        {
-          "type": "host",
-          "value": "s-i-quotespro.com"
-        }
-      ]
+      "permanent": false
     }
   ]
 }

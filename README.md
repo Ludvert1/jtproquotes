@@ -26,7 +26,8 @@ It runs in one of two modes, decided by `config.js`:
 
 | File | What it is |
 | --- | --- |
-| `index.html` | The built app that Vercel serves. **Generated — do not edit by hand.** |
+| `app.html` | The built app, served at `/app`. **Generated — do not edit by hand.** |
+| `index.html` | The S-I-Quotespro website (built from `site/src/home.html` by `node site/build-site.js`). On every other domain `/` redirects to `/app`. |
 | `config.js` | Firebase settings and the owner's email. The one file you edit to go live. |
 | `firestore.rules` | Database security rules. Paste these into Firebase. |
 | `src/scope-templates.js` | Standard scope steps and exclusions — shared by the app and the AI. Edit here, then `npm run build`. |
@@ -42,7 +43,7 @@ It runs in one of two modes, decided by `config.js`:
 | `integrations/gmail-thumbtack.gs` | Google Apps Script that watches Gmail for leads. Setup steps are in the file. |
 | `src/app.jsx` | The app source. Edit this, then run `npm run build`. |
 | `src/index.template.html` | Page shell (fonts, styles, script tags). |
-| `build.js` | Compiles `src/app.jsx` into `index.html`. |
+| `build.js` | Compiles `src/app.jsx` into `app.html`. |
 | `vercel.json` | Caching and security headers. |
 
 ---
@@ -297,7 +298,7 @@ Firebase's paid plan.
 ```bash
 npm install      # once
 # edit src/app.jsx
-npm run build    # regenerates index.html
+npm run build    # regenerates app.html
 git commit -am "..." && git push
 ```
 
