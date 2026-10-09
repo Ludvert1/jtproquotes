@@ -1217,7 +1217,7 @@ function App() {
       sessionId = qs.get("session_id") || "";
     if (flag) {
       try {
-        window.history.replaceState(null, "", window.location.pathname);
+        window.history.replaceState(null, "", window.location.pathname === "/" ? "/app" : window.location.pathname);
       } catch {}
     }
     const load = async () => {
@@ -1253,7 +1253,7 @@ function App() {
     setAdminOpen(a);
     setView("admin");
     try {
-      window.history.replaceState(null, "", window.location.pathname);
+      window.history.replaceState(null, "", window.location.pathname === "/" ? "/app" : window.location.pathname);
     } catch {}
   }, [me && me.id]);
   useEffect(() => {
@@ -1266,7 +1266,7 @@ function App() {
       setView("edit");
     }
     try {
-      window.history.replaceState(null, "", window.location.pathname);
+      window.history.replaceState(null, "", window.location.pathname === "/" ? "/app" : window.location.pathname);
     } catch {}
   }, [me && me.id, !!quotes]);
   useEffect(() => {

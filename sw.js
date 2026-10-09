@@ -16,7 +16,7 @@ self.addEventListener("push", (event) => {
     renotify: !!d.tag,
     requireInteraction: false,
     vibrate: [200, 100, 200, 100, 300],
-    data: { url: d.url || "/" },
+    data: { url: d.url || "/app" },
   };
   event.waitUntil((async () => {
     await self.registration.showNotification(title, opts);
@@ -32,7 +32,7 @@ self.addEventListener("push", (event) => {
 
 self.addEventListener("notificationclick", (event) => {
   event.notification.close();
-  const url = new URL((event.notification.data && event.notification.data.url) || "/", self.location.origin).href;
+  const url = new URL((event.notification.data && event.notification.data.url) || "/app", self.location.origin).href;
   event.waitUntil((async () => {
     const list = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
     for (const c of list) {

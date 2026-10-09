@@ -2,7 +2,7 @@
   "name": "S-I-Quotespro",
   "short_name": "S-I-Quotes",
   "description": "Quotes for JTProconstruction LLC",
-  "start_url": "/",
+  "start_url": "/app",
   "scope": "/",
   "display": "standalone",
   "background_color": "#0B1F3A",

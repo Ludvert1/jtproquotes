@@ -610,7 +610,7 @@ function App() {
     let live = true;
     const qs = new URLSearchParams(window.location.search);
     const flag = qs.get("billing"), sessionId = qs.get("session_id") || "";
-    if (flag) { try { window.history.replaceState(null, "", window.location.pathname); } catch {} }
+    if (flag) { try { window.history.replaceState(null, "", window.location.pathname === "/" ? "/app" : window.location.pathname); } catch {} }
     const load = async () => {
       try {
         let b;
@@ -633,7 +633,7 @@ function App() {
     const a = new URLSearchParams(window.location.search).get("admin");
     if (!a) return;
     setAdminOpen(a); setView("admin");
-    try { window.history.replaceState(null, "", window.location.pathname); } catch {}
+    try { window.history.replaceState(null, "", window.location.pathname === "/" ? "/app" : window.location.pathname); } catch {}
   }, [me && me.id]);
 
   /* Tapping a notification opens the quote it was about (?quote=<id>). */
@@ -643,7 +643,7 @@ function App() {
     if (!id) return;
     const target = quotes[id];
     if (target) { setActiveQuote(target); setView("edit"); }
-    try { window.history.replaceState(null, "", window.location.pathname); } catch {}
+    try { window.history.replaceState(null, "", window.location.pathname === "/" ? "/app" : window.location.pathname); } catch {}
   }, [me && me.id, !!quotes]);
   useEffect(() => {
     if (!("serviceWorker" in navigator)) return;
