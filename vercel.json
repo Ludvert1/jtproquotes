@@ -93,6 +93,9 @@
     },
     "api/materials.js": {
       "maxDuration": 90
+    },
+    "api/billing.js": {
+      "maxDuration": 30
     }
   }
 }

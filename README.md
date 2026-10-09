@@ -343,3 +343,23 @@ Any contractor can start their own company account at `/?start` (or "Start your 
 - **Team:** each company has its own team code. New team members choose "New team member" and type the code; the owner approves them.
 - **Lead inbox:** Settings → Lead inbox shows the ENDPOINT and COMPANY_KEY to paste into their copy of `integrations/gmail-thumbtack.gs`.
 - New companies start on a 14-day `trial` (stored on `companies/{id}`; billing is not wired yet).
+
+## Plans & billing (Stripe)
+
+Companies that sign up at `/?start` get a 14-day free trial and pick a plan
+(Starter $49, Pro $99, Team $199 a month) right after sign-up. Stripe
+Checkout saves their card; nothing is charged until the trial ends. The card
+is checked with a **$1 hold that is released straight away** (authorized,
+never captured). Owners manage card, plan and cancellation in
+Settings → Plan & billing (Stripe's customer portal). When a trial ends
+without a plan, or a subscription stops, the company sees a "choose a plan"
+screen (team members see "ask your owner"); their data is untouched.
+JTProconstruction's own workspace is never billed.
+
+Setup: put the Stripe secret key in Vercel as `STRIPE_SECRET_KEY`
+(`sk_test_…` to test, `sk_live_…` to go live) and redeploy. Products, prices
+(lookup keys `siq_{plan}_monthly`) and the portal settings are created in
+Stripe automatically the first time they're needed. No webhook is required:
+the app re-reads the subscription from Stripe after checkout and every few
+hours. Without the key, billing stays off and nobody is gated.
+Test card: 4242 4242 4242 4242, any future date, any CVC.

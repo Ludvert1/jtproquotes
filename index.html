@@ -976,6 +976,7 @@ function App() {
   const [joinGate, setJoinGate] = useState(null);
   const [pending, setPending] = useState(null);
   const [leadLater, setLeadLater] = useState(false);
+  const [billing, setBilling] = useState(null);
   const DEFAULT_SETTINGS = {
     laborRate: 35,
     overheadPct: 10,
@@ -1204,6 +1205,46 @@ function App() {
     seenPending.current = pendingCount;
   }, [pendingCount, managerNow, me]);
   useEffect(() => {
+    if (!CLOUD || !me || !TENANT) {
+      setBilling(null);
+      return;
+    }
+    let live = true;
+    const qs = new URLSearchParams(window.location.search);
+    const flag = qs.get("billing"),
+      sessionId = qs.get("session_id") || "";
+    if (flag) {
+      try {
+        window.history.replaceState(null, "", window.location.pathname);
+      } catch {}
+    }
+    const load = async () => {
+      try {
+        let b;
+        if (flag === "done" && sessionId) {
+          b = await billingCall("sync", {
+            sessionId
+          });
+          if (live) notify(b.billingStatus === "trialing" ? "You're all set — free trial running. The $1 hold was released." : "Your plan is active. Thank you!");
+        } else b = await billingCall("status");
+        if (flag === "cancel" && live) notify("Checkout canceled — nothing was charged.");
+        if (live) setBilling(b);
+      } catch (e) {
+        warn("billing")(e);
+        if (live) setBilling({
+          access: "ok",
+          error: e.message
+        });
+      }
+    };
+    load();
+    const t = setInterval(load, 30 * 60 * 1000);
+    return () => {
+      live = false;
+      clearInterval(t);
+    };
+  }, [me && me.id]);
+  useEffect(() => {
     if (!me || !quotes) return;
     const id = new URLSearchParams(window.location.search).get("quote");
     if (!id) return;
@@ -1331,6 +1372,27 @@ function App() {
     setView("dashboard");
     await sessionClear();
   };
+  if (TENANT && billing && billing.access && billing.access !== "ok" && (isOwner || billing.access === "locked")) {
+    return React.createElement(React.Fragment, null, React.createElement(BillingGate, {
+      billing: billing,
+      isOwner: isOwner,
+      onSignOut: logout,
+      notify: notify
+    }), toast && React.createElement("div", {
+      style: {
+        position: "fixed",
+        bottom: 20,
+        left: "50%",
+        transform: "translateX(-50%)",
+        background: BRAND.navy,
+        color: "#fff",
+        padding: "10px 18px",
+        borderRadius: 8,
+        fontSize: 14,
+        zIndex: 50
+      }
+    }, toast));
+  }
   const navItems = [["dashboard", "Dashboard"], ["new", "New quote"]];
   if (isManager) navItems.push(["team", "Team & review"]);
   if (isOwner) navItems.push(["settings", "Settings"]);
@@ -1503,6 +1565,8 @@ function App() {
   }), view === "settings" && isOwner && React.createElement(SettingsView, {
     settings: settings,
     quotes: quotes,
+    billing: billing,
+    notify: notify,
     onSave: async s => {
       await saveSettings(s);
       notify("Settings saved");
@@ -6408,10 +6472,304 @@ const JTPRO_DEFAULTS_FOR = s => TENANT ? {} : {
   area: JTPRO_COMPANY.area,
   cities: JTPRO_COMPANY.cities
 };
+async function billingCall(action, extra) {
+  const idToken = await fbAuth.currentUser.getIdToken();
+  const r = await fetch("/api/billing", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify(Object.assign({
+      idToken,
+      action
+    }, extra || {}))
+  });
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(data.error || "Billing didn't respond. Try again.");
+  return data;
+}
+const fmtDay = iso => {
+  try {
+    return new Date(iso).toLocaleDateString(undefined, {
+      month: "short",
+      day: "numeric",
+      year: "numeric"
+    });
+  } catch {
+    return "";
+  }
+};
+const PLAN_LABEL = {
+  starter: "Starter",
+  pro: "Pro",
+  team: "Team",
+  trial: "Free trial"
+};
+const BILL_STATUS = {
+  trialing: "Free trial",
+  active: "Active",
+  past_due: "Payment failed — update your card",
+  canceled: "Canceled",
+  unpaid: "Unpaid",
+  incomplete: "Card not confirmed"
+};
+function PlanPicker({
+  billing,
+  onError
+}) {
+  const [busy, setBusy] = useState("");
+  const plans = billing && billing.plans || [];
+  const trial = billing && billing.access !== "locked" && billing.trialDaysLeft > 0;
+  const go = async plan => {
+    setBusy(plan);
+    try {
+      const r = await billingCall("checkout", {
+        plan
+      });
+      window.location.href = r.url;
+    } catch (e) {
+      setBusy("");
+      onError && onError(e.message);
+    }
+  };
+  return React.createElement("div", null, React.createElement("div", {
+    className: "grid gap-3",
+    style: {
+      gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))"
+    }
+  }, plans.map(p => React.createElement("div", {
+    key: p.id,
+    style: {
+      border: `2px solid ${p.id === "pro" ? BRAND.gold : BRAND.line}`,
+      borderRadius: 12,
+      padding: 16,
+      background: "#fff",
+      display: "flex",
+      flexDirection: "column"
+    }
+  }, p.id === "pro" && React.createElement("div", {
+    style: {
+      fontSize: 11,
+      fontWeight: 700,
+      color: BRAND.amber,
+      letterSpacing: "0.08em",
+      marginBottom: 4
+    }
+  }, "MOST POPULAR"), React.createElement("div", {
+    style: {
+      fontFamily: "'Barlow Condensed', sans-serif",
+      fontSize: 22,
+      fontWeight: 700,
+      color: BRAND.navy
+    }
+  }, PLAN_LABEL[p.id] || p.name), React.createElement("div", {
+    style: {
+      fontSize: 26,
+      fontWeight: 800,
+      color: BRAND.ink
+    }
+  }, "$", p.price, React.createElement("span", {
+    style: {
+      fontSize: 13,
+      fontWeight: 500,
+      color: BRAND.sub
+    }
+  }, "/month")), React.createElement("div", {
+    style: {
+      fontSize: 13,
+      color: BRAND.sub,
+      margin: "6px 0 12px",
+      flex: 1
+    }
+  }, p.blurb), React.createElement(Btn, {
+    kind: p.id === "pro" ? "gold" : "primary",
+    disabled: !!busy,
+    onClick: () => go(p.id)
+  }, busy === p.id ? "Opening…" : trial ? "Start free trial" : "Choose " + (PLAN_LABEL[p.id] || ""))))), React.createElement("p", {
+    style: {
+      fontSize: 12.5,
+      color: BRAND.sub,
+      marginTop: 12,
+      lineHeight: 1.5
+    }
+  }, trial ? React.createElement(React.Fragment, null, "Nothing is charged today. To confirm your card we place a ", React.createElement("strong", null, "$1 hold that's released right away"), " (it may show as pending for a few days, then disappears). Your plan starts automatically after your ", billing.trialDaysLeft, "-day free trial \u2014 cancel any time before then and you pay nothing.") : React.createElement(React.Fragment, null, "Your plan starts today and renews monthly. Cancel any time in Manage billing."), " ", "Secure checkout by Stripe."), billing && billing.testMode && React.createElement("p", {
+    style: {
+      fontSize: 12,
+      color: BRAND.amber,
+      marginTop: 6
+    }
+  }, "TEST MODE \u2014 use card 4242 4242 4242 4242, any future date, any CVC. No real money moves."));
+}
+function BillingGate({
+  billing,
+  isOwner,
+  onSignOut,
+  notify
+}) {
+  const locked = billing.access === "locked";
+  return React.createElement("div", {
+    className: "min-h-screen px-4 py-10",
+    style: {
+      background: BRAND.navy
+    }
+  }, React.createElement("div", {
+    className: "mx-auto",
+    style: {
+      maxWidth: 760
+    }
+  }, React.createElement("div", {
+    className: "text-center mb-6"
+  }, React.createElement("h1", {
+    style: {
+      color: "#fff",
+      fontFamily: "'Barlow Condensed', sans-serif",
+      fontSize: 32,
+      fontWeight: 700,
+      letterSpacing: "0.06em",
+      margin: 0
+    }
+  }, COMPANY.name.toUpperCase()), React.createElement("div", {
+    style: {
+      color: BRAND.goldBright,
+      fontSize: 12,
+      letterSpacing: "0.12em"
+    }
+  }, PRODUCT.toUpperCase())), React.createElement("div", {
+    style: {
+      background: BRAND.paper,
+      borderRadius: 14,
+      padding: 24
+    }
+  }, React.createElement("h2", {
+    style: {
+      fontFamily: "'Barlow Condensed', sans-serif",
+      fontSize: 26,
+      fontWeight: 700,
+      color: BRAND.navy,
+      marginBottom: 6
+    }
+  }, !isOwner ? "YOUR COMPANY'S PLAN NEEDS ATTENTION" : locked ? billing.hasCard ? "YOUR PLAN IS NOT ACTIVE" : "YOUR FREE TRIAL HAS ENDED" : "START YOUR FREE TRIAL — " + billing.trialDaysLeft + " DAYS FREE"), !isOwner ? React.createElement("p", {
+    style: {
+      fontSize: 14,
+      color: BRAND.sub
+    }
+  }, "Your quotes are safe. Ask your company's owner to sign in and choose a plan \u2014 the app unlocks for everyone as soon as they do.") : locked && billing.hasCard ? React.createElement(React.Fragment, null, React.createElement("p", {
+    style: {
+      fontSize: 14,
+      color: BRAND.sub,
+      marginBottom: 14
+    }
+  }, "Status: ", React.createElement("strong", null, BILL_STATUS[billing.billingStatus] || billing.billingStatus || "not active"), ". Your quotes are safe \u2014 update your card or pick a plan again to unlock."), React.createElement("div", {
+    className: "flex gap-2 flex-wrap mb-5"
+  }, React.createElement(ManageBillingBtn, {
+    notify: notify
+  })), React.createElement(PlanPicker, {
+    billing: billing,
+    onError: notify
+  })) : React.createElement(React.Fragment, null, React.createElement("p", {
+    style: {
+      fontSize: 14,
+      color: BRAND.sub,
+      marginBottom: 14
+    }
+  }, locked ? "Pick a plan to keep using the app. Your quotes and settings are all still here." : "Pick the plan that fits your crew. You won't be charged until your trial ends, and you can switch or cancel any time."), React.createElement(PlanPicker, {
+    billing: billing,
+    onError: notify
+  })), React.createElement("div", {
+    className: "mt-5"
+  }, React.createElement(Btn, {
+    kind: "ghost",
+    small: true,
+    onClick: onSignOut
+  }, "Sign out")))));
+}
+function ManageBillingBtn({
+  notify
+}) {
+  const [busy, setBusy] = useState(false);
+  return React.createElement(Btn, {
+    kind: "ghost",
+    disabled: busy,
+    onClick: async () => {
+      setBusy(true);
+      try {
+        const r = await billingCall("portal");
+        window.location.href = r.url;
+      } catch (e) {
+        setBusy(false);
+        notify && notify(e.message);
+      }
+    }
+  }, busy ? "Opening…" : "Manage billing");
+}
+function BillingCard({
+  billing,
+  notify
+}) {
+  if (!billing || billing.exempt || !billing.enabled) return null;
+  const card = {
+    check: {
+      ok: "Card confirmed ($1 hold released)",
+      declined: "Card was declined on the $1 check — update it",
+      needs_auth: "Your bank wants to confirm the card — update it",
+      failed: "Card check didn't go through — update it"
+    }
+  };
+  return React.createElement(Card, null, React.createElement("div", {
+    style: {
+      fontFamily: "'Barlow Condensed', sans-serif",
+      fontSize: 20,
+      fontWeight: 700,
+      color: BRAND.navy,
+      marginBottom: 6
+    }
+  }, "PLAN & BILLING"), billing.hasCard ? React.createElement(React.Fragment, null, React.createElement("div", {
+    style: {
+      fontSize: 14,
+      lineHeight: 1.7
+    }
+  }, React.createElement("div", null, "Plan: ", React.createElement("strong", null, PLAN_LABEL[billing.plan] || billing.plan), " \xB7 ", BILL_STATUS[billing.billingStatus] || billing.billingStatus), billing.billingStatus === "trialing" && billing.trialEnds && React.createElement("div", null, "Free until ", React.createElement("strong", null, fmtDay(billing.trialEnds)), " \u2014 first charge that day."), billing.billingStatus === "active" && billing.currentPeriodEnd && React.createElement("div", null, billing.cancelAtPeriodEnd ? "Ends" : "Renews", " on ", React.createElement("strong", null, fmtDay(billing.currentPeriodEnd)), "."), billing.cancelAtPeriodEnd && billing.billingStatus === "trialing" && React.createElement("div", {
+    style: {
+      color: BRAND.amber
+    }
+  }, "Set to cancel \u2014 you won't be charged."), billing.cardCheck && React.createElement("div", {
+    style: {
+      color: billing.cardCheck === "ok" ? BRAND.green : BRAND.red,
+      fontSize: 13
+    }
+  }, card.check[billing.cardCheck] || "")), React.createElement("div", {
+    className: "mt-3"
+  }, React.createElement(ManageBillingBtn, {
+    notify: notify
+  })), React.createElement("p", {
+    style: {
+      fontSize: 12,
+      color: BRAND.sub,
+      marginTop: 8
+    }
+  }, "Change card, switch plan, see invoices or cancel.")) : React.createElement(React.Fragment, null, React.createElement("p", {
+    style: {
+      fontSize: 13.5,
+      color: BRAND.sub,
+      marginBottom: 12
+    }
+  }, billing.trialDaysLeft > 0 ? billing.trialDaysLeft + " days left in your free trial." : "Your free trial has ended."), React.createElement(PlanPicker, {
+    billing: billing,
+    onError: notify
+  })), billing.testMode && React.createElement("p", {
+    style: {
+      fontSize: 12,
+      color: BRAND.amber,
+      marginTop: 8
+    }
+  }, "Billing is in TEST MODE."));
+}
 function SettingsView({
   settings,
   onSave,
-  quotes
+  quotes,
+  billing,
+  notify
 }) {
   const [s, setS] = useState(settings);
   return React.createElement("div", {
@@ -6427,7 +6785,10 @@ function SettingsView({
       letterSpacing: "0.03em",
       marginBottom: 14
     }
-  }, "COMPANY SETTINGS"), React.createElement(CompanyProfileCard, {
+  }, "COMPANY SETTINGS"), TENANT && React.createElement(BillingCard, {
+    billing: billing,
+    notify: notify
+  }), React.createElement(CompanyProfileCard, {
     s: s,
     setS: setS
   }), TENANT && React.createElement(ThumbtackSetup, {

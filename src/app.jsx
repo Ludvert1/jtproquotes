@@ -432,6 +432,7 @@ function App() {
   const [joinGate, setJoinGate] = useState(null);
   const [pending, setPending] = useState(null);
   const [leadLater, setLeadLater] = useState(false);
+  const [billing, setBilling] = useState(null);
 
   const DEFAULT_SETTINGS ={ laborRate: 35, overheadPct: 10, targetMargin: 25, requireTeamCode: false, teamCode: "JTPRO-" + Math.random().toString(36).slice(2, 6).toUpperCase() };
 
@@ -600,6 +601,30 @@ function App() {
     seenPending.current = pendingCount;
   }, [pendingCount, managerNow, me]);
 
+  /* Plan & billing for companies other than JTProconstruction. Coming back
+     from Stripe Checkout (?billing=done) saves the new plan straight away. */
+  useEffect(() => {
+    if (!CLOUD || !me || !TENANT) { setBilling(null); return; }
+    let live = true;
+    const qs = new URLSearchParams(window.location.search);
+    const flag = qs.get("billing"), sessionId = qs.get("session_id") || "";
+    if (flag) { try { window.history.replaceState(null, "", window.location.pathname); } catch {} }
+    const load = async () => {
+      try {
+        let b;
+        if (flag === "done" && sessionId) {
+          b = await billingCall("sync", { sessionId });
+          if (live) notify(b.billingStatus === "trialing" ? "You're all set — free trial running. The $1 hold was released." : "Your plan is active. Thank you!");
+        } else b = await billingCall("status");
+        if (flag === "cancel" && live) notify("Checkout canceled — nothing was charged.");
+        if (live) setBilling(b);
+      } catch (e) { warn("billing")(e); if (live) setBilling({ access: "ok", error: e.message }); }
+    };
+    load();
+    const t = setInterval(load, 30 * 60 * 1000);
+    return () => { live = false; clearInterval(t); };
+  }, [me && me.id]);
+
   /* Tapping a notification opens the quote it was about (?quote=<id>). */
   useEffect(() => {
     if (!me || !quotes) return;
@@ -678,6 +703,11 @@ function App() {
     setMe(null); setView("dashboard"); await sessionClear();
   };
 
+  // A plan is needed: owners pick one (card + $1 hold), others wait for the owner.
+  if (TENANT && billing && billing.access && billing.access !== "ok" && (isOwner || billing.access === "locked")) {
+    return <><BillingGate billing={billing} isOwner={isOwner} onSignOut={logout} notify={notify} />{toast && <div style={{ position: "fixed", bottom: 20, left: "50%", transform: "translateX(-50%)", background: BRAND.navy, color: "#fff", padding: "10px 18px", borderRadius: 8, fontSize: 14, zIndex: 50 }}>{toast}</div>}</>;
+  }
+
   const navItems = [["dashboard", "Dashboard"], ["new", "New quote"]];
   if (isManager) navItems.push(["team", "Team & review"]);
   if (isOwner) navItems.push(["settings", "Settings"]);
@@ -747,7 +777,7 @@ function App() {
           onUpdateQuote={upsertQuote} onSaveUsers={saveUsers} onDeleteUser={deleteUser} onDeleteQuote={deleteQuote} onSaveSettings={saveSettings} onPreview={setPreviewQuote}
           onOpen={(q) => { setActiveQuote(q); setView("edit"); }} notify={notify} />}
 
-        {view === "settings" && isOwner && <SettingsView settings={settings} quotes={quotes} onSave={async (s) => { await saveSettings(s); notify("Settings saved"); }} />}
+        {view === "settings" && isOwner && <SettingsView settings={settings} quotes={quotes} billing={billing} notify={notify} onSave={async (s) => { await saveSettings(s); notify("Settings saved"); }} />}
       </main>
 
       {previewQuote && <PreviewModal quote={previewQuote} settings={settings} users={users} me={me} onClose={() => setPreviewQuote(null)} />}
@@ -3168,11 +3198,130 @@ function ThumbtackSetup({ settings, onPatch, quotes, compact, onDismiss }) {
 // JTProconstruction's own workspace starts from its existing letterhead.
 const JTPRO_DEFAULTS_FOR = (s) => (TENANT ? {} : { name: JTPRO_COMPANY.name, tag: JTPRO_COMPANY.tag, phone: JTPRO_COMPANY.phone, email: JTPRO_COMPANY.email, site: JTPRO_COMPANY.site, signer: JTPRO_COMPANY.signer, area: JTPRO_COMPANY.area, cities: JTPRO_COMPANY.cities });
 
-function SettingsView({ settings, onSave, quotes }) {
+/* ---------- billing (other companies only; JTProconstruction is never billed) ---------- */
+async function billingCall(action, extra) {
+  const idToken = await fbAuth.currentUser.getIdToken();
+  const r = await fetch("/api/billing", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(Object.assign({ idToken, action }, extra || {})) });
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(data.error || "Billing didn't respond. Try again.");
+  return data;
+}
+const fmtDay = (iso) => { try { return new Date(iso).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" }); } catch { return ""; } };
+const PLAN_LABEL = { starter: "Starter", pro: "Pro", team: "Team", trial: "Free trial" };
+const BILL_STATUS = { trialing: "Free trial", active: "Active", past_due: "Payment failed — update your card", canceled: "Canceled", unpaid: "Unpaid", incomplete: "Card not confirmed" };
+
+function PlanPicker({ billing, onError }) {
+  const [busy, setBusy] = useState("");
+  const plans = (billing && billing.plans) || [];
+  const trial = billing && billing.access !== "locked" && billing.trialDaysLeft > 0;
+  const go = async (plan) => {
+    setBusy(plan);
+    try { const r = await billingCall("checkout", { plan }); window.location.href = r.url; }
+    catch (e) { setBusy(""); onError && onError(e.message); }
+  };
+  return (
+    <div>
+      <div className="grid gap-3" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))" }}>
+        {plans.map((p) => (
+          <div key={p.id} style={{ border: `2px solid ${p.id === "pro" ? BRAND.gold : BRAND.line}`, borderRadius: 12, padding: 16, background: "#fff", display: "flex", flexDirection: "column" }}>
+            {p.id === "pro" && <div style={{ fontSize: 11, fontWeight: 700, color: BRAND.amber, letterSpacing: "0.08em", marginBottom: 4 }}>MOST POPULAR</div>}
+            <div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontSize: 22, fontWeight: 700, color: BRAND.navy }}>{PLAN_LABEL[p.id] || p.name}</div>
+            <div style={{ fontSize: 26, fontWeight: 800, color: BRAND.ink }}>${p.price}<span style={{ fontSize: 13, fontWeight: 500, color: BRAND.sub }}>/month</span></div>
+            <div style={{ fontSize: 13, color: BRAND.sub, margin: "6px 0 12px", flex: 1 }}>{p.blurb}</div>
+            <Btn kind={p.id === "pro" ? "gold" : "primary"} disabled={!!busy} onClick={() => go(p.id)}>{busy === p.id ? "Opening…" : trial ? "Start free trial" : "Choose " + (PLAN_LABEL[p.id] || "")}</Btn>
+          </div>
+        ))}
+      </div>
+      <p style={{ fontSize: 12.5, color: BRAND.sub, marginTop: 12, lineHeight: 1.5 }}>
+        {trial
+          ? <>Nothing is charged today. To confirm your card we place a <strong>$1 hold that's released right away</strong> (it may show as pending for a few days, then disappears). Your plan starts automatically after your {billing.trialDaysLeft}-day free trial — cancel any time before then and you pay nothing.</>
+          : <>Your plan starts today and renews monthly. Cancel any time in Manage billing.</>}
+        {" "}Secure checkout by Stripe.
+      </p>
+      {billing && billing.testMode && <p style={{ fontSize: 12, color: BRAND.amber, marginTop: 6 }}>TEST MODE — use card 4242 4242 4242 4242, any future date, any CVC. No real money moves.</p>}
+    </div>
+  );
+}
+
+/* Full screen shown instead of the app when a plan is needed. */
+function BillingGate({ billing, isOwner, onSignOut, notify }) {
+  const locked = billing.access === "locked";
+  return (
+    <div className="min-h-screen px-4 py-10" style={{ background: BRAND.navy }}>
+      <div className="mx-auto" style={{ maxWidth: 760 }}>
+        <div className="text-center mb-6">
+          <h1 style={{ color: "#fff", fontFamily: "'Barlow Condensed', sans-serif", fontSize: 32, fontWeight: 700, letterSpacing: "0.06em", margin: 0 }}>{COMPANY.name.toUpperCase()}</h1>
+          <div style={{ color: BRAND.goldBright, fontSize: 12, letterSpacing: "0.12em" }}>{PRODUCT.toUpperCase()}</div>
+        </div>
+        <div style={{ background: BRAND.paper, borderRadius: 14, padding: 24 }}>
+          <h2 style={{ fontFamily: "'Barlow Condensed', sans-serif", fontSize: 26, fontWeight: 700, color: BRAND.navy, marginBottom: 6 }}>
+            {!isOwner ? "YOUR COMPANY'S PLAN NEEDS ATTENTION" : locked ? (billing.hasCard ? "YOUR PLAN IS NOT ACTIVE" : "YOUR FREE TRIAL HAS ENDED") : "START YOUR FREE TRIAL — " + billing.trialDaysLeft + " DAYS FREE"}
+          </h2>
+          {!isOwner ? (
+            <p style={{ fontSize: 14, color: BRAND.sub }}>Your quotes are safe. Ask your company's owner to sign in and choose a plan — the app unlocks for everyone as soon as they do.</p>
+          ) : locked && billing.hasCard ? (
+            <>
+              <p style={{ fontSize: 14, color: BRAND.sub, marginBottom: 14 }}>Status: <strong>{BILL_STATUS[billing.billingStatus] || billing.billingStatus || "not active"}</strong>. Your quotes are safe — update your card or pick a plan again to unlock.</p>
+              <div className="flex gap-2 flex-wrap mb-5"><ManageBillingBtn notify={notify} /></div>
+              <PlanPicker billing={billing} onError={notify} />
+            </>
+          ) : (
+            <>
+              <p style={{ fontSize: 14, color: BRAND.sub, marginBottom: 14 }}>{locked ? "Pick a plan to keep using the app. Your quotes and settings are all still here." : "Pick the plan that fits your crew. You won't be charged until your trial ends, and you can switch or cancel any time."}</p>
+              <PlanPicker billing={billing} onError={notify} />
+            </>
+          )}
+          <div className="mt-5"><Btn kind="ghost" small onClick={onSignOut}>Sign out</Btn></div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ManageBillingBtn({ notify }) {
+  const [busy, setBusy] = useState(false);
+  return <Btn kind="ghost" disabled={busy} onClick={async () => {
+    setBusy(true);
+    try { const r = await billingCall("portal"); window.location.href = r.url; }
+    catch (e) { setBusy(false); notify && notify(e.message); }
+  }}>{busy ? "Opening…" : "Manage billing"}</Btn>;
+}
+
+function BillingCard({ billing, notify }) {
+  if (!billing || billing.exempt || !billing.enabled) return null;
+  const card = { check: { ok: "Card confirmed ($1 hold released)", declined: "Card was declined on the $1 check — update it", needs_auth: "Your bank wants to confirm the card — update it", failed: "Card check didn't go through — update it" } };
+  return (
+    <Card>
+      <div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontSize: 20, fontWeight: 700, color: BRAND.navy, marginBottom: 6 }}>PLAN & BILLING</div>
+      {billing.hasCard ? (
+        <>
+          <div style={{ fontSize: 14, lineHeight: 1.7 }}>
+            <div>Plan: <strong>{PLAN_LABEL[billing.plan] || billing.plan}</strong> · {BILL_STATUS[billing.billingStatus] || billing.billingStatus}</div>
+            {billing.billingStatus === "trialing" && billing.trialEnds && <div>Free until <strong>{fmtDay(billing.trialEnds)}</strong> — first charge that day.</div>}
+            {billing.billingStatus === "active" && billing.currentPeriodEnd && <div>{billing.cancelAtPeriodEnd ? "Ends" : "Renews"} on <strong>{fmtDay(billing.currentPeriodEnd)}</strong>.</div>}
+            {billing.cancelAtPeriodEnd && billing.billingStatus === "trialing" && <div style={{ color: BRAND.amber }}>Set to cancel — you won't be charged.</div>}
+            {billing.cardCheck && <div style={{ color: billing.cardCheck === "ok" ? BRAND.green : BRAND.red, fontSize: 13 }}>{card.check[billing.cardCheck] || ""}</div>}
+          </div>
+          <div className="mt-3"><ManageBillingBtn notify={notify} /></div>
+          <p style={{ fontSize: 12, color: BRAND.sub, marginTop: 8 }}>Change card, switch plan, see invoices or cancel.</p>
+        </>
+      ) : (
+        <>
+          <p style={{ fontSize: 13.5, color: BRAND.sub, marginBottom: 12 }}>{billing.trialDaysLeft > 0 ? billing.trialDaysLeft + " days left in your free trial." : "Your free trial has ended."}</p>
+          <PlanPicker billing={billing} onError={notify} />
+        </>
+      )}
+      {billing.testMode && <p style={{ fontSize: 12, color: BRAND.amber, marginTop: 8 }}>Billing is in TEST MODE.</p>}
+    </Card>
+  );
+}
+
+function SettingsView({ settings, onSave, quotes, billing, notify }) {
   const [s, setS] = useState(settings);
   return (
     <div style={{ maxWidth: 560 }}>
       <h2 style={{ fontFamily: "'Barlow Condensed', sans-serif", fontSize: 26, fontWeight: 700, color: BRAND.navy, letterSpacing: "0.03em", marginBottom: 14 }}>COMPANY SETTINGS</h2>
+      {TENANT && <BillingCard billing={billing} notify={notify} />}
       <CompanyProfileCard s={s} setS={setS} />
       {TENANT && <ThumbtackSetup settings={s} quotes={quotes} onPatch={async (p) => { await mergeSettings(p); setS((x) => Object.assign({}, x, p)); }} />}
       <Card>

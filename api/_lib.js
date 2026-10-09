@@ -268,12 +268,15 @@ async function setDocAsServer(path, data) {
   if (!r.ok) throw new Error("Firestore refused the write (" + r.status + ")");
   return true;
 }
-async function getDocAsServer(path) {
+async function getDocAsServer(path, opts) {
   const token = await adminToken();
   const r = await fetch(`${DOCS}/${path}`, { headers: { Authorization: "Bearer " + token } });
   if (!r.ok) return null;
   const d = await r.json();
-  return d && d.fields ? fromFields(d.fields) : null;
+  const data = d && d.fields ? fromFields(d.fields) : null;
+  // { meta: true } also returns when Firestore itself created the document,
+  // which (unlike fields the browser wrote) can't be faked.
+  return opts && opts.meta ? (data ? { data, createTime: d.createTime || "" } : null) : data;
 }
 async function queryAsServer(collection, equals) {
   const token = await adminToken();
