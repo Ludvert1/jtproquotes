@@ -96,6 +96,9 @@
     },
     "api/billing.js": {
       "maxDuration": 30
+    },
+    "api/admin.js": {
+      "maxDuration": 60
     }
   }
 }

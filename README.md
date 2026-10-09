@@ -363,3 +363,20 @@ Stripe automatically the first time they're needed. No webhook is required:
 the app re-reads the subscription from Stripe after checkout and every few
 hours. Without the key, billing stays off and nobody is gated.
 Test card: 4242 4242 4242 4242, any future date, any CVC.
+
+## Admin portal & help requests
+
+Signed in as JTProconstruction's owner, the **Admin** tab lists every
+company that signed up: plan and trial status, owner contact, team size,
+quotes, whether the lead inbox is connected, and open help requests. Open a
+company to edit its profile, approve/turn off people, change roles, email a
+password-reset link, add free trial days (also moves the Stripe trial), put
+the account on hold, see recent quotes and activity, and keep private
+support notes (stored in `companies/{id}/supportNotes`, readable by no one
+but the server).
+
+Contractors get a **Help** button with their 6-character Support ID, the
+support phone/email from `config.js` (`supportPhone`, `supportEmail`) and a
+"send us a message" form. Each request sends you a phone alert (opens that
+company in Admin) and an email. Optional: `ADMIN_EMAILS` in Vercel narrows
+admin access to specific sign-in emails.

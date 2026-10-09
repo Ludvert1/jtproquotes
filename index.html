@@ -977,6 +977,8 @@ function App() {
   const [pending, setPending] = useState(null);
   const [leadLater, setLeadLater] = useState(false);
   const [billing, setBilling] = useState(null);
+  const [helpOpen, setHelpOpen] = useState(false);
+  const [adminOpen, setAdminOpen] = useState("");
   const DEFAULT_SETTINGS = {
     laborRate: 35,
     overheadPct: 10,
@@ -1245,6 +1247,16 @@ function App() {
     };
   }, [me && me.id]);
   useEffect(() => {
+    if (!me || TENANT) return;
+    const a = new URLSearchParams(window.location.search).get("admin");
+    if (!a) return;
+    setAdminOpen(a);
+    setView("admin");
+    try {
+      window.history.replaceState(null, "", window.location.pathname);
+    } catch {}
+  }, [me && me.id]);
+  useEffect(() => {
     if (!me || !quotes) return;
     const id = new URLSearchParams(window.location.search).get("quote");
     if (!id) return;
@@ -1372,7 +1384,7 @@ function App() {
     setView("dashboard");
     await sessionClear();
   };
-  if (TENANT && billing && billing.access && billing.access !== "ok" && (isOwner || billing.access === "locked")) {
+  if (TENANT && billing && billing.access && billing.access !== "ok" && (isOwner || billing.access !== "needs_card")) {
     return React.createElement(React.Fragment, null, React.createElement(BillingGate, {
       billing: billing,
       isOwner: isOwner,
@@ -1396,6 +1408,7 @@ function App() {
   const navItems = [["dashboard", "Dashboard"], ["new", "New quote"]];
   if (isManager) navItems.push(["team", "Team & review"]);
   if (isOwner) navItems.push(["settings", "Settings"]);
+  if (!TENANT && isOwner && CLOUD) navItems.push(["admin", "Admin"]);
   return React.createElement("div", {
     className: "min-h-screen",
     style: {
@@ -1468,7 +1481,19 @@ function App() {
       fontSize: 14,
       cursor: "pointer"
     }
-  }, l)), React.createElement(AlertsBell, {
+  }, l)), TENANT && React.createElement("button", {
+    onClick: () => setHelpOpen(true),
+    style: {
+      background: "transparent",
+      color: BRAND.goldBright,
+      border: `1px solid ${BRAND.gold}`,
+      padding: "6px 12px",
+      borderRadius: 7,
+      fontWeight: 700,
+      fontSize: 13,
+      cursor: "pointer"
+    }
+  }, "Help"), React.createElement(AlertsBell, {
     me: me
   }), React.createElement("button", {
     onClick: logout,
@@ -1562,6 +1587,9 @@ function App() {
       setView("edit");
     },
     notify: notify
+  }), view === "admin" && !TENANT && isOwner && React.createElement(AdminView, {
+    notify: notify,
+    openCid: adminOpen
   }), view === "settings" && isOwner && React.createElement(SettingsView, {
     settings: settings,
     quotes: quotes,
@@ -1577,6 +1605,10 @@ function App() {
     users: users,
     me: me,
     onClose: () => setPreviewQuote(null)
+  }), helpOpen && React.createElement(HelpModal, {
+    me: me,
+    notify: notify,
+    onClose: () => setHelpOpen(false)
   }), toast && React.createElement("div", {
     style: {
       position: "fixed",
@@ -6472,6 +6504,730 @@ const JTPRO_DEFAULTS_FOR = s => TENANT ? {} : {
   area: JTPRO_COMPANY.area,
   cities: JTPRO_COMPANY.cities
 };
+const SUPPORT = {
+  phone: window.JTPQ_CONFIG && window.JTPQ_CONFIG.supportPhone || JTPRO_COMPANY.phone,
+  email: window.JTPQ_CONFIG && window.JTPQ_CONFIG.supportEmail || JTPRO_COMPANY.email
+};
+const supportIdOf = cid => cid ? String(cid).slice(1, 7).toUpperCase() : "";
+async function adminCall(action, extra) {
+  const idToken = await fbAuth.currentUser.getIdToken();
+  const r = await fetch("/api/admin", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify(Object.assign({
+      idToken,
+      action
+    }, extra || {}))
+  });
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(data.error || "That didn't go through. Try again.");
+  return data;
+}
+const ago = iso => {
+  if (!iso) return "";
+  const m = Math.round((Date.now() - new Date(iso).getTime()) / 60000);
+  if (m < 60) return m <= 1 ? "just now" : m + " min ago";
+  const h = Math.round(m / 60);
+  if (h < 36) return h + " h ago";
+  return Math.round(h / 24) + " days ago";
+};
+function HelpModal({
+  me,
+  onClose,
+  notify
+}) {
+  const [msg, setMsg] = useState("");
+  const [phone, setPhone] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [sent, setSent] = useState(false);
+  const sid = supportIdOf(TENANT);
+  return React.createElement("div", {
+    onClick: onClose,
+    style: {
+      position: "fixed",
+      inset: 0,
+      background: "rgba(11,31,58,0.55)",
+      zIndex: 60,
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "center",
+      padding: 16
+    }
+  }, React.createElement("div", {
+    onClick: e => e.stopPropagation(),
+    style: {
+      background: "#fff",
+      borderRadius: 14,
+      padding: 22,
+      width: "100%",
+      maxWidth: 440
+    }
+  }, React.createElement("div", {
+    style: {
+      fontFamily: "'Barlow Condensed', sans-serif",
+      fontSize: 24,
+      fontWeight: 700,
+      color: BRAND.navy
+    }
+  }, "NEED A HAND?"), React.createElement("div", {
+    style: {
+      background: BRAND.paper,
+      borderRadius: 10,
+      padding: "10px 12px",
+      margin: "10px 0 14px",
+      fontSize: 14
+    }
+  }, "Your Support ID: ", React.createElement("strong", {
+    style: {
+      fontSize: 18,
+      letterSpacing: "0.08em",
+      color: BRAND.navy
+    }
+  }, sid), React.createElement("div", {
+    style: {
+      fontSize: 12,
+      color: BRAND.sub
+    }
+  }, "Read this to us when you call, so we can find your account fast.")), React.createElement("div", {
+    className: "flex gap-2 flex-wrap mb-4"
+  }, React.createElement("a", {
+    href: "tel:" + SUPPORT.phone.replace(/[^\d+]/g, ""),
+    style: {
+      textDecoration: "none"
+    }
+  }, React.createElement(Btn, {
+    kind: "gold"
+  }, "Call ", SUPPORT.phone)), React.createElement("a", {
+    href: "mailto:" + SUPPORT.email + "?subject=" + encodeURIComponent("Help — Support ID " + sid),
+    style: {
+      textDecoration: "none"
+    }
+  }, React.createElement(Btn, {
+    kind: "ghost"
+  }, "Email us"))), sent ? React.createElement("p", {
+    style: {
+      fontSize: 14,
+      color: BRAND.green
+    }
+  }, "Got it \u2014 we've been notified and will get back to you shortly.") : React.createElement(React.Fragment, null, React.createElement(Field, {
+    label: "Or send us a message"
+  }, React.createElement("textarea", {
+    style: Object.assign({}, inputStyle, {
+      minHeight: 90
+    }),
+    value: msg,
+    onChange: e => setMsg(e.target.value),
+    placeholder: "What's going on? e.g. my Thumbtack leads aren't showing up"
+  })), React.createElement(Field, {
+    label: "Best number to call you back (optional)"
+  }, React.createElement("input", {
+    style: inputStyle,
+    value: phone,
+    onChange: e => setPhone(e.target.value),
+    placeholder: "(555) 555-5555"
+  })), React.createElement("div", {
+    className: "flex gap-2"
+  }, React.createElement(Btn, {
+    disabled: busy || msg.trim().length < 3,
+    onClick: async () => {
+      setBusy(true);
+      try {
+        await adminCall("help", {
+          message: msg,
+          phone
+        });
+        setSent(true);
+      } catch (e) {
+        notify(e.message);
+      }
+      setBusy(false);
+    }
+  }, busy ? "Sending…" : "Send"), React.createElement(Btn, {
+    kind: "ghost",
+    onClick: onClose
+  }, "Close"))), sent && React.createElement("div", {
+    className: "mt-3"
+  }, React.createElement(Btn, {
+    kind: "ghost",
+    onClick: onClose
+  }, "Close"))));
+}
+const PILL = (bg, color) => ({
+  background: bg,
+  color,
+  padding: "2px 9px",
+  borderRadius: 99,
+  fontSize: 11.5,
+  fontWeight: 700,
+  whiteSpace: "nowrap"
+});
+function planPill(c) {
+  if (c.suspended) return React.createElement("span", {
+    style: PILL("#F9E5E3", BRAND.red)
+  }, "On hold");
+  if (c.hasCard) {
+    const st = c.billingStatus;
+    if (st === "active") return React.createElement("span", {
+      style: PILL("#D7EEDF", BRAND.green)
+    }, "Paying \xB7 ", PLAN_LABEL[c.plan] || c.plan);
+    if (st === "trialing") return React.createElement("span", {
+      style: PILL("#E4EBF6", BRAND.navySoft)
+    }, "Trial + card \xB7 ", PLAN_LABEL[c.plan] || c.plan);
+    return React.createElement("span", {
+      style: PILL("#F9E5E3", BRAND.red)
+    }, BILL_STATUS[st] || st);
+  }
+  const left = Math.ceil((new Date(c.trialEnds).getTime() - Date.now()) / 864e5);
+  return left > 0 ? React.createElement("span", {
+    style: PILL("#FBF3DE", BRAND.amber)
+  }, "Trial \xB7 ", left, "d left \xB7 no card") : React.createElement("span", {
+    style: PILL("#ECEEF1", BRAND.sub)
+  }, "Trial ended");
+}
+function AdminView({
+  notify,
+  openCid
+}) {
+  const [data, setData] = useState(null);
+  const [err, setErr] = useState("");
+  const [q, setQ] = useState("");
+  const [filter, setFilter] = useState("all");
+  const [cid, setCid] = useState(openCid || "");
+  const load = async () => {
+    setErr("");
+    try {
+      setData(await adminCall("overview"));
+    } catch (e) {
+      setErr(e.message);
+    }
+  };
+  useEffect(() => {
+    load();
+  }, []);
+  if (cid) return React.createElement(AdminCompany, {
+    cid: cid,
+    notify: notify,
+    onBack: () => {
+      setCid("");
+      load();
+    }
+  });
+  const rows = (data && data.companies || []).filter(c => {
+    const t = q.trim().toLowerCase();
+    if (t && ![c.name, c.ownerName, c.ownerEmail, c.phone, c.supportId].join(" ").toLowerCase().includes(t)) return false;
+    if (filter === "help") return c.openHelp > 0;
+    if (filter === "paying") return c.billingStatus === "active";
+    if (filter === "trial") return !c.hasCard || c.billingStatus === "trialing";
+    if (filter === "setup") return !c.leadConnected;
+    return true;
+  });
+  const all = data && data.companies || [];
+  const week = all.filter(c => Date.now() - new Date(c.createdAt).getTime() < 7 * 864e5).length;
+  const tiles = [["Companies", all.length], ["New this week", week], ["Paying", all.filter(c => c.billingStatus === "active").length], ["Card on file (trial)", all.filter(c => c.billingStatus === "trialing").length], ["Open help requests", all.reduce((n, c) => n + (c.openHelp || 0), 0)]];
+  return React.createElement("div", null, React.createElement("div", {
+    className: "flex items-center justify-between flex-wrap gap-2 mb-3"
+  }, React.createElement("h2", {
+    style: {
+      fontFamily: "'Barlow Condensed', sans-serif",
+      fontSize: 26,
+      fontWeight: 700,
+      color: BRAND.navy,
+      letterSpacing: "0.03em"
+    }
+  }, PRODUCT.toUpperCase(), " ADMIN"), React.createElement(Btn, {
+    kind: "ghost",
+    small: true,
+    onClick: load
+  }, "Refresh")), err && React.createElement(Card, {
+    style: {
+      borderColor: BRAND.red,
+      color: BRAND.red,
+      marginBottom: 12
+    }
+  }, err), !data && !err && React.createElement("p", {
+    style: {
+      color: BRAND.sub
+    }
+  }, "Loading every company\u2026"), data && React.createElement(React.Fragment, null, React.createElement("div", {
+    className: "grid gap-3 mb-4",
+    style: {
+      gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))"
+    }
+  }, tiles.map(([l, n]) => React.createElement(Card, {
+    key: l,
+    style: {
+      padding: 14
+    }
+  }, React.createElement("div", {
+    style: {
+      fontSize: 11.5,
+      fontWeight: 700,
+      color: BRAND.sub,
+      letterSpacing: "0.06em",
+      textTransform: "uppercase"
+    }
+  }, l), React.createElement("div", {
+    style: {
+      fontFamily: "'Barlow Condensed', sans-serif",
+      fontSize: 30,
+      fontWeight: 700,
+      color: l.startsWith("Open") && n ? BRAND.red : BRAND.navy
+    }
+  }, n)))), data.testMode && React.createElement("p", {
+    style: {
+      fontSize: 12,
+      color: BRAND.amber,
+      marginBottom: 8
+    }
+  }, "Stripe is in TEST MODE."), React.createElement("div", {
+    className: "flex gap-2 flex-wrap mb-3"
+  }, React.createElement("input", {
+    style: Object.assign({}, inputStyle, {
+      maxWidth: 340
+    }),
+    value: q,
+    onChange: e => setQ(e.target.value),
+    placeholder: "Search name, email, phone or Support ID"
+  }), React.createElement("select", {
+    style: Object.assign({}, inputStyle, {
+      maxWidth: 220
+    }),
+    value: filter,
+    onChange: e => setFilter(e.target.value)
+  }, React.createElement("option", {
+    value: "all"
+  }, "All companies"), React.createElement("option", {
+    value: "help"
+  }, "Needs help"), React.createElement("option", {
+    value: "trial"
+  }, "In trial"), React.createElement("option", {
+    value: "paying"
+  }, "Paying"), React.createElement("option", {
+    value: "setup"
+  }, "Lead inbox not connected"))), rows.length === 0 && React.createElement("p", {
+    style: {
+      color: BRAND.sub
+    }
+  }, all.length ? "No company matches that." : "No contractors have signed up yet. Share s-i-quotespro.com/?start"), React.createElement("div", {
+    className: "grid gap-2"
+  }, rows.map(c => React.createElement("button", {
+    key: c.cid,
+    onClick: () => setCid(c.cid),
+    style: {
+      textAlign: "left",
+      background: "#fff",
+      border: `1.5px solid ${c.openHelp ? BRAND.red : BRAND.line}`,
+      borderRadius: 12,
+      padding: "12px 14px",
+      cursor: "pointer"
+    }
+  }, React.createElement("div", {
+    className: "flex items-center justify-between flex-wrap gap-2"
+  }, React.createElement("div", {
+    style: {
+      fontWeight: 800,
+      color: BRAND.ink,
+      fontSize: 16
+    }
+  }, c.name, " ", React.createElement("span", {
+    style: {
+      fontWeight: 600,
+      color: BRAND.sub,
+      fontSize: 12
+    }
+  }, "\xB7 ID ", c.supportId)), React.createElement("div", {
+    className: "flex gap-1 flex-wrap"
+  }, c.openHelp > 0 && React.createElement("span", {
+    style: PILL("#F9E5E3", BRAND.red)
+  }, c.openHelp, " help request", c.openHelp > 1 ? "s" : ""), planPill(c))), React.createElement("div", {
+    style: {
+      fontSize: 13,
+      color: BRAND.sub,
+      marginTop: 3
+    }
+  }, c.ownerName || "Owner", " \xB7 ", c.ownerEmail, c.phone ? " · " + c.phone : ""), React.createElement("div", {
+    style: {
+      fontSize: 12.5,
+      color: BRAND.sub,
+      marginTop: 2
+    }
+  }, "Signed up ", fmtDay(c.createdAt), " \xB7 ", c.users, " user", c.users === 1 ? "" : "s", c.pendingUsers ? " (" + c.pendingUsers + " waiting)" : "", " \xB7 ", c.quotes == null ? "?" : c.quotes, " quotes \xB7 Leads ", c.leadConnected ? "connected" + (c.leadReplyMode ? " (" + c.leadReplyMode + ")" : "") : React.createElement("b", {
+    style: {
+      color: BRAND.amber
+    }
+  }, "not connected")))))));
+}
+function AdminCompany({
+  cid,
+  onBack,
+  notify
+}) {
+  const [d, setD] = useState(null);
+  const [err, setErr] = useState("");
+  const [prof, setProf] = useState(null);
+  const [noteText, setNoteText] = useState("");
+  const [busy, setBusy] = useState("");
+  const load = async () => {
+    setErr("");
+    try {
+      const x = await adminCall("company", {
+        cid
+      });
+      setD(x);
+      setProf(x.profile || {});
+    } catch (e) {
+      setErr(e.message);
+    }
+  };
+  useEffect(() => {
+    load();
+  }, [cid]);
+  const act = async (label, action, extra, okMsg) => {
+    setBusy(label);
+    try {
+      const r = await adminCall(action, Object.assign({
+        cid
+      }, extra));
+      notify(typeof okMsg === "function" ? okMsg(r) : okMsg || "Done");
+      await load();
+    } catch (e) {
+      notify(e.message);
+    }
+    setBusy("");
+  };
+  const H = ({
+    children
+  }) => React.createElement("div", {
+    style: {
+      fontFamily: "'Barlow Condensed', sans-serif",
+      fontSize: 19,
+      fontWeight: 700,
+      color: BRAND.navy,
+      marginBottom: 8,
+      letterSpacing: "0.03em"
+    }
+  }, children);
+  if (err) return React.createElement("div", null, React.createElement(Btn, {
+    kind: "ghost",
+    small: true,
+    onClick: onBack
+  }, "\u2190 All companies"), React.createElement(Card, {
+    style: {
+      marginTop: 12,
+      color: BRAND.red
+    }
+  }, err));
+  if (!d) return React.createElement("div", null, React.createElement(Btn, {
+    kind: "ghost",
+    small: true,
+    onClick: onBack
+  }, "\u2190 All companies"), React.createElement("p", {
+    style: {
+      color: BRAND.sub,
+      marginTop: 12
+    }
+  }, "Loading\u2026"));
+  const s = d.summary,
+    co = d.company;
+  const openHelp = (d.help || []).filter(h => !h.resolved);
+  return React.createElement("div", {
+    className: "grid gap-4"
+  }, React.createElement("div", {
+    className: "flex items-center justify-between flex-wrap gap-2"
+  }, React.createElement(Btn, {
+    kind: "ghost",
+    small: true,
+    onClick: onBack
+  }, "\u2190 All companies"), React.createElement(Btn, {
+    kind: "ghost",
+    small: true,
+    onClick: load
+  }, "Refresh")), React.createElement(Card, null, React.createElement("div", {
+    className: "flex items-start justify-between flex-wrap gap-2"
+  }, React.createElement("div", null, React.createElement("div", {
+    style: {
+      fontFamily: "'Barlow Condensed', sans-serif",
+      fontSize: 28,
+      fontWeight: 700,
+      color: BRAND.navy,
+      lineHeight: 1
+    }
+  }, s.name), React.createElement("div", {
+    style: {
+      fontSize: 13,
+      color: BRAND.sub,
+      marginTop: 4
+    }
+  }, "Support ID ", React.createElement("b", {
+    style: {
+      color: BRAND.ink,
+      letterSpacing: "0.06em"
+    }
+  }, s.supportId), " \xB7 signed up ", fmtDay(s.createdAt), " (", ago(s.createdAt), ")"), React.createElement("div", {
+    style: {
+      fontSize: 14,
+      marginTop: 6
+    }
+  }, s.ownerName, " \xB7 ", React.createElement("a", {
+    href: "mailto:" + s.ownerEmail,
+    style: {
+      color: BRAND.navySoft
+    }
+  }, s.ownerEmail), s.phone && React.createElement(React.Fragment, null, " \xB7 ", React.createElement("a", {
+    href: "tel:" + s.phone.replace(/[^\d+]/g, ""),
+    style: {
+      color: BRAND.navySoft
+    }
+  }, s.phone)))), React.createElement("div", null, planPill(s))), co.suspended && React.createElement("div", {
+    style: {
+      marginTop: 10,
+      background: "#F9E5E3",
+      color: BRAND.red,
+      borderRadius: 8,
+      padding: "8px 10px",
+      fontSize: 13
+    }
+  }, "On hold", co.suspendReason ? ": " + co.suspendReason : "", ". They see a \"contact support\" screen.")), openHelp.length > 0 && React.createElement(Card, {
+    style: {
+      borderColor: BRAND.red
+    }
+  }, React.createElement(H, null, "HELP REQUESTS"), openHelp.map(h => React.createElement("div", {
+    key: h.id,
+    style: {
+      borderTop: `1px solid ${BRAND.line}`,
+      padding: "10px 0"
+    }
+  }, React.createElement("div", {
+    style: {
+      fontSize: 13,
+      color: BRAND.sub
+    }
+  }, h.byName, " (", h.role, ") \xB7 ", ago(h.at), h.phone && React.createElement(React.Fragment, null, " \xB7 call back ", React.createElement("a", {
+    href: "tel:" + h.phone.replace(/[^\d+]/g, ""),
+    style: {
+      color: BRAND.navySoft,
+      fontWeight: 700
+    }
+  }, h.phone))), React.createElement("div", {
+    style: {
+      fontSize: 14.5,
+      margin: "4px 0 8px",
+      whiteSpace: "pre-wrap"
+    }
+  }, h.message), React.createElement(Btn, {
+    small: true,
+    kind: "ghost",
+    disabled: !!busy,
+    onClick: () => act("h" + h.id, "resolveHelp", {
+      id: h.id
+    }, "Marked as handled")
+  }, "Mark handled")))), React.createElement(Card, null, React.createElement(H, null, "ACCOUNT & PLAN"), React.createElement("div", {
+    style: {
+      fontSize: 14,
+      lineHeight: 1.8
+    }
+  }, React.createElement("div", null, "Plan: ", React.createElement("b", null, PLAN_LABEL[co.plan] || co.plan || "trial"), " \xB7 ", co.billingStatus ? BILL_STATUS[co.billingStatus] || co.billingStatus : "no card yet"), React.createElement("div", null, "Trial ", new Date(s.trialEnds).getTime() > Date.now() ? "ends" : "ended", ": ", React.createElement("b", null, fmtDay(s.trialEnds)), co.trialOverride ? " (extended)" : ""), co.currentPeriodEnd && co.billingStatus === "active" && React.createElement("div", null, co.cancelAtPeriodEnd ? "Cancels" : "Renews", ": ", fmtDay(co.currentPeriodEnd)), co.cardCheck && React.createElement("div", null, "$1 card check: ", co.cardCheck)), React.createElement("div", {
+    className: "flex gap-2 flex-wrap mt-3"
+  }, [7, 14, 30].map(n => React.createElement(Btn, {
+    key: n,
+    small: true,
+    kind: "ghost",
+    disabled: !!busy,
+    onClick: () => act("t" + n, "extendTrial", {
+      days: n
+    }, r => "Trial now ends " + fmtDay(r.trialEnds))
+  }, "+", n, " days trial")), d.stripeUrl && React.createElement("a", {
+    href: d.stripeUrl,
+    target: "_blank",
+    rel: "noopener",
+    style: {
+      textDecoration: "none"
+    }
+  }, React.createElement(Btn, {
+    small: true,
+    kind: "ghost"
+  }, "Open in Stripe \u2197")), co.suspended ? React.createElement(Btn, {
+    small: true,
+    kind: "gold",
+    disabled: !!busy,
+    onClick: () => act("s", "suspend", {
+      on: false
+    }, "Hold lifted — they're back in")
+  }, "Lift hold") : React.createElement(Btn, {
+    small: true,
+    kind: "danger",
+    disabled: !!busy,
+    onClick: () => {
+      const reason = window.prompt("Put " + s.name + " on hold? They'll be locked out and see 'contact support'.\n\nReason (only you see this):", "");
+      if (reason !== null) act("s", "suspend", {
+        on: true,
+        reason
+      }, "Account on hold");
+    }
+  }, "Put on hold"))), React.createElement(Card, null, React.createElement(H, null, "LEAD INBOX & SETUP"), React.createElement("div", {
+    style: {
+      fontSize: 14,
+      lineHeight: 1.8
+    }
+  }, React.createElement("div", null, "Thumbtack: ", d.usesThumbtack === false ? "doesn't use it" : d.leadSetup.done ? React.createElement("b", {
+    style: {
+      color: BRAND.green
+    }
+  }, "connected") : React.createElement("b", {
+    style: {
+      color: BRAND.amber
+    }
+  }, "not connected yet"), d.leadReplyMode ? " · reply mode: " + d.leadReplyMode : ""), React.createElement("div", null, "Team code: ", React.createElement("b", null, d.teamCode || "—")), React.createElement("div", null, "Quotes: ", React.createElement("b", null, s.quotes == null ? "?" : s.quotes), d.quotes[0] ? " · last one " + ago(d.quotes[0].createdAt) : ""))), React.createElement(Card, null, React.createElement(H, null, "COMPANY PROFILE"), [["name", "Company name"], ["phone", "Phone"], ["email", "Email"], ["site", "Website"], ["area", "Based in"], ["cities", "Cities served"], ["signer", "Signs quotes as"]].map(([k, l]) => React.createElement(Field, {
+    key: k,
+    label: l
+  }, React.createElement("input", {
+    style: inputStyle,
+    value: prof && prof[k] || "",
+    onChange: e => setProf(Object.assign({}, prof, {
+      [k]: e.target.value
+    }))
+  }))), React.createElement(Btn, {
+    disabled: !!busy,
+    onClick: () => act("p", "saveProfile", {
+      profile: prof
+    }, "Profile saved")
+  }, busy === "p" ? "Saving…" : "Save profile")), React.createElement(Card, null, React.createElement(H, null, "PEOPLE (", d.users.length, ")"), d.users.map(u => React.createElement("div", {
+    key: u.id,
+    style: {
+      borderTop: `1px solid ${BRAND.line}`,
+      padding: "10px 0"
+    },
+    className: "flex items-center justify-between flex-wrap gap-2"
+  }, React.createElement("div", null, React.createElement("div", {
+    style: {
+      fontWeight: 700
+    }
+  }, u.name, " ", !u.active && React.createElement("span", {
+    style: PILL(u.declined ? "#F9E5E3" : "#FBF3DE", u.declined ? BRAND.red : BRAND.amber)
+  }, u.declined ? "Turned off" : "Waiting approval")), React.createElement("div", {
+    style: {
+      fontSize: 12.5,
+      color: BRAND.sub
+    }
+  }, u.email, " \xB7 joined ", fmtDay(u.createdAt))), React.createElement("div", {
+    className: "flex gap-2 flex-wrap items-center"
+  }, React.createElement("select", {
+    value: u.role,
+    disabled: !!busy,
+    onChange: e => act("r" + u.id, "setUser", {
+      uid: u.id,
+      role: e.target.value
+    }, "Role changed"),
+    style: Object.assign({}, inputStyle, {
+      width: "auto",
+      padding: "6px 8px",
+      fontSize: 13
+    })
+  }, ["owner", "assistant", "associate"].map(r => React.createElement("option", {
+    key: r,
+    value: r
+  }, ROLE_LABEL[r] || r))), React.createElement(Btn, {
+    small: true,
+    kind: u.active ? "danger" : "gold",
+    disabled: !!busy,
+    onClick: () => act("a" + u.id, "setUser", {
+      uid: u.id,
+      active: !u.active
+    }, u.active ? "Turned off" : "Turned on")
+  }, u.active ? "Turn off" : "Turn on"), React.createElement(Btn, {
+    small: true,
+    kind: "ghost",
+    disabled: !!busy,
+    onClick: () => {
+      if (window.confirm("Email " + u.email + " a link to reset their password?")) act("pw" + u.id, "resetPassword", {
+        uid: u.id
+      }, r => "Reset link sent to " + r.email);
+    }
+  }, "Reset password"))))), React.createElement(Card, null, React.createElement(H, null, "RECENT QUOTES"), d.quotes.length === 0 ? React.createElement("p", {
+    style: {
+      fontSize: 13.5,
+      color: BRAND.sub
+    }
+  }, "No quotes yet.") : d.quotes.map(x => React.createElement("div", {
+    key: x.id,
+    style: {
+      fontSize: 13.5,
+      borderTop: `1px solid ${BRAND.line}`,
+      padding: "7px 0"
+    },
+    className: "flex justify-between gap-2 flex-wrap"
+  }, React.createElement("span", null, React.createElement("b", null, x.quoteNo), " \xB7 ", x.clientName || "—", " \xB7 ", x.jobTitle || "", x.fromInbox ? " · from lead" : ""), React.createElement("span", {
+    style: {
+      color: BRAND.sub
+    }
+  }, (STATUS[x.status] || {}).label || x.status, " \xB7 ", ago(x.createdAt)))), d.activity.length > 0 && React.createElement(React.Fragment, null, React.createElement("div", {
+    style: {
+      fontSize: 12,
+      fontWeight: 700,
+      color: BRAND.sub,
+      margin: "14px 0 4px",
+      letterSpacing: "0.06em"
+    }
+  }, "ACTIVITY"), d.activity.map((a, i) => React.createElement("div", {
+    key: i,
+    style: {
+      fontSize: 12.5,
+      color: BRAND.sub
+    }
+  }, ago(a.at), " \xB7 ", a.who, " \xB7 ", a.what, " ", a.detail)))), React.createElement(Card, null, React.createElement(H, null, "SUPPORT NOTES ", React.createElement("span", {
+    style: {
+      fontSize: 12,
+      color: BRAND.sub,
+      fontFamily: "'Barlow', sans-serif",
+      fontWeight: 500
+    }
+  }, "(only you see these)")), React.createElement("textarea", {
+    style: Object.assign({}, inputStyle, {
+      minHeight: 70
+    }),
+    value: noteText,
+    onChange: e => setNoteText(e.target.value),
+    placeholder: "e.g. Called 10/9 \u2014 helped connect Thumbtack, wants Pro plan next month"
+  }), React.createElement("div", {
+    className: "mt-2"
+  }, React.createElement(Btn, {
+    small: true,
+    disabled: !!busy || !noteText.trim(),
+    onClick: async () => {
+      await act("n", "note", {
+        text: noteText
+      }, "Note saved");
+      setNoteText("");
+    }
+  }, "Add note")), React.createElement("div", {
+    className: "mt-3"
+  }, (d.notes || []).map(n => React.createElement("div", {
+    key: n.id,
+    style: {
+      borderTop: `1px solid ${BRAND.line}`,
+      padding: "7px 0",
+      fontSize: 13.5
+    }
+  }, React.createElement("span", {
+    style: {
+      color: BRAND.sub,
+      fontSize: 12
+    }
+  }, fmtDay(n.at), " \xB7 ", n.by, n.kind === "action" ? " · action" : ""), React.createElement("div", {
+    style: {
+      whiteSpace: "pre-wrap",
+      color: n.kind === "action" ? BRAND.sub : BRAND.ink
+    }
+  }, n.text))), (d.help || []).filter(h => h.resolved).length > 0 && React.createElement("div", {
+    style: {
+      fontSize: 12,
+      color: BRAND.sub,
+      marginTop: 8
+    }
+  }, (d.help || []).filter(h => h.resolved).length, " earlier help request(s) handled."))));
+}
 async function billingCall(action, extra) {
   const idToken = await fbAuth.currentUser.getIdToken();
   const r = await fetch("/api/billing", {
@@ -6648,7 +7404,24 @@ function BillingGate({
       color: BRAND.navy,
       marginBottom: 6
     }
-  }, !isOwner ? "YOUR COMPANY'S PLAN NEEDS ATTENTION" : locked ? billing.hasCard ? "YOUR PLAN IS NOT ACTIVE" : "YOUR FREE TRIAL HAS ENDED" : "START YOUR FREE TRIAL — " + billing.trialDaysLeft + " DAYS FREE"), !isOwner ? React.createElement("p", {
+  }, billing.access === "suspended" ? "YOUR ACCOUNT IS ON HOLD" : !isOwner ? "YOUR COMPANY'S PLAN NEEDS ATTENTION" : locked ? billing.hasCard ? "YOUR PLAN IS NOT ACTIVE" : "YOUR FREE TRIAL HAS ENDED" : "START YOUR FREE TRIAL — " + billing.trialDaysLeft + " DAYS FREE"), billing.access === "suspended" ? React.createElement("p", {
+    style: {
+      fontSize: 14,
+      color: BRAND.sub
+    }
+  }, "Your quotes are safe. Please contact ", PRODUCT, " support at ", React.createElement("a", {
+    href: "tel:" + SUPPORT.phone.replace(/[^\d+]/g, ""),
+    style: {
+      color: BRAND.navySoft,
+      fontWeight: 700
+    }
+  }, SUPPORT.phone), " or ", React.createElement("a", {
+    href: "mailto:" + SUPPORT.email,
+    style: {
+      color: BRAND.navySoft,
+      fontWeight: 700
+    }
+  }, SUPPORT.email), " \u2014 Support ID ", React.createElement("b", null, supportIdOf(TENANT)), ".") : !isOwner ? React.createElement("p", {
     style: {
       fontSize: 14,
       color: BRAND.sub

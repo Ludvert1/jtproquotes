@@ -30,7 +30,8 @@ async function loadCompany(cid) {
   /* The free trial is 14 days from when the company was really created —
      the trialEnds the browser wrote at sign-up can't stretch it. */
   const born = got.createTime ? new Date(got.createTime).getTime() : Date.now();
-  const cap = born + TRIAL_DAYS * DAY;
+  let cap = born + TRIAL_DAYS * DAY;
+  if (co.trialOverride) cap = Math.max(cap, new Date(co.trialOverride).getTime() || 0); // extra days given by S-I-Quotespro support
   const claimed = co.trialEnds ? new Date(co.trialEnds).getTime() : cap;
   if (!co.stripeSubscriptionId) co.trialEnds = new Date(Math.min(cap, isNaN(claimed) ? cap : claimed)).toISOString();
   return co;
@@ -44,6 +45,7 @@ async function saveCompany(cid, patch) {
 
 /* Can this company use the app right now? */
 function accessOf(co) {
+  if (co.suspended) return "suspended"; // put on hold by S-I-Quotespro support
   if (!stripeOn()) return "ok"; // billing not switched on yet
   if (co.stripeSubscriptionId) return ["trialing", "active", "past_due"].includes(co.billingStatus) ? "ok" : "locked";
   return new Date(co.trialEnds).getTime() > Date.now() ? "needs_card" : "locked";

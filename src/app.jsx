@@ -433,6 +433,8 @@ function App() {
   const [pending, setPending] = useState(null);
   const [leadLater, setLeadLater] = useState(false);
   const [billing, setBilling] = useState(null);
+  const [helpOpen, setHelpOpen] = useState(false);
+  const [adminOpen, setAdminOpen] = useState("");
 
   const DEFAULT_SETTINGS ={ laborRate: 35, overheadPct: 10, targetMargin: 25, requireTeamCode: false, teamCode: "JTPRO-" + Math.random().toString(36).slice(2, 6).toUpperCase() };
 
@@ -625,6 +627,15 @@ function App() {
     return () => { live = false; clearInterval(t); };
   }, [me && me.id]);
 
+  /* A help-request alert opens that company in the admin portal (?admin=<cid>). */
+  useEffect(() => {
+    if (!me || TENANT) return;
+    const a = new URLSearchParams(window.location.search).get("admin");
+    if (!a) return;
+    setAdminOpen(a); setView("admin");
+    try { window.history.replaceState(null, "", window.location.pathname); } catch {}
+  }, [me && me.id]);
+
   /* Tapping a notification opens the quote it was about (?quote=<id>). */
   useEffect(() => {
     if (!me || !quotes) return;
@@ -704,13 +715,14 @@ function App() {
   };
 
   // A plan is needed: owners pick one (card + $1 hold), others wait for the owner.
-  if (TENANT && billing && billing.access && billing.access !== "ok" && (isOwner || billing.access === "locked")) {
+  if (TENANT && billing && billing.access && billing.access !== "ok" && (isOwner || billing.access !== "needs_card")) {
     return <><BillingGate billing={billing} isOwner={isOwner} onSignOut={logout} notify={notify} />{toast && <div style={{ position: "fixed", bottom: 20, left: "50%", transform: "translateX(-50%)", background: BRAND.navy, color: "#fff", padding: "10px 18px", borderRadius: 8, fontSize: 14, zIndex: 50 }}>{toast}</div>}</>;
   }
 
   const navItems = [["dashboard", "Dashboard"], ["new", "New quote"]];
   if (isManager) navItems.push(["team", "Team & review"]);
   if (isOwner) navItems.push(["settings", "Settings"]);
+  if (!TENANT && isOwner && CLOUD) navItems.push(["admin", "Admin"]);
 
   return (
     <div className="min-h-screen" style={{ background: BRAND.paper, color: BRAND.ink }}>
@@ -730,6 +742,7 @@ function App() {
               <button key={k} onClick={() => { setView(k); setActiveQuote(null); }}
                 style={{ background: view === k ? BRAND.gold : "transparent", color: view === k ? BRAND.navy : "#D8DEE9", border: "none", padding: "7px 14px", borderRadius: 7, fontWeight: 600, fontSize: 14, cursor: "pointer" }}>{l}</button>
             ))}
+            {TENANT && <button onClick={() => setHelpOpen(true)} style={{ background: "transparent", color: BRAND.goldBright, border: `1px solid ${BRAND.gold}`, padding: "6px 12px", borderRadius: 7, fontWeight: 700, fontSize: 13, cursor: "pointer" }}>Help</button>}
             <AlertsBell me={me} />
             <button onClick={logout} style={{ background: "transparent", color: "#8FA0B8", border: "none", padding: "7px 10px", fontSize: 13, cursor: "pointer" }}>Sign out</button>
           </nav>
@@ -777,10 +790,12 @@ function App() {
           onUpdateQuote={upsertQuote} onSaveUsers={saveUsers} onDeleteUser={deleteUser} onDeleteQuote={deleteQuote} onSaveSettings={saveSettings} onPreview={setPreviewQuote}
           onOpen={(q) => { setActiveQuote(q); setView("edit"); }} notify={notify} />}
 
+        {view === "admin" && !TENANT && isOwner && <AdminView notify={notify} openCid={adminOpen} />}
         {view === "settings" && isOwner && <SettingsView settings={settings} quotes={quotes} billing={billing} notify={notify} onSave={async (s) => { await saveSettings(s); notify("Settings saved"); }} />}
       </main>
 
       {previewQuote && <PreviewModal quote={previewQuote} settings={settings} users={users} me={me} onClose={() => setPreviewQuote(null)} />}
+      {helpOpen && <HelpModal me={me} notify={notify} onClose={() => setHelpOpen(false)} />}
 
       {toast && <div style={{ position: "fixed", bottom: 20, left: "50%", transform: "translateX(-50%)", background: BRAND.navy, color: BRAND.goldBright, padding: "10px 22px", borderRadius: 99, fontWeight: 600, fontSize: 14, boxShadow: "0 6px 20px rgba(0,0,0,0.25)", zIndex: 60 }}>{toast}</div>}
     </div>
@@ -3198,6 +3213,268 @@ function ThumbtackSetup({ settings, onPatch, quotes, compact, onDismiss }) {
 // JTProconstruction's own workspace starts from its existing letterhead.
 const JTPRO_DEFAULTS_FOR = (s) => (TENANT ? {} : { name: JTPRO_COMPANY.name, tag: JTPRO_COMPANY.tag, phone: JTPRO_COMPANY.phone, email: JTPRO_COMPANY.email, site: JTPRO_COMPANY.site, signer: JTPRO_COMPANY.signer, area: JTPRO_COMPANY.area, cities: JTPRO_COMPANY.cities });
 
+/* ================= HELP & ADMIN PORTAL =================
+   Contractors: a Help button (Support ID, call/email, "request help").
+   JTProconstruction's owner: an Admin tab to see every company that
+   signed up, fix their profile, manage their people and plan, and keep
+   private support notes. Everything goes through /api/admin. */
+const SUPPORT = { phone: (window.JTPQ_CONFIG && window.JTPQ_CONFIG.supportPhone) || JTPRO_COMPANY.phone, email: (window.JTPQ_CONFIG && window.JTPQ_CONFIG.supportEmail) || JTPRO_COMPANY.email };
+const supportIdOf = (cid) => (cid ? String(cid).slice(1, 7).toUpperCase() : "");
+async function adminCall(action, extra) {
+  const idToken = await fbAuth.currentUser.getIdToken();
+  const r = await fetch("/api/admin", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(Object.assign({ idToken, action }, extra || {})) });
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(data.error || "That didn't go through. Try again.");
+  return data;
+}
+const ago = (iso) => {
+  if (!iso) return "";
+  const m = Math.round((Date.now() - new Date(iso).getTime()) / 60000);
+  if (m < 60) return m <= 1 ? "just now" : m + " min ago";
+  const h = Math.round(m / 60); if (h < 36) return h + " h ago";
+  return Math.round(h / 24) + " days ago";
+};
+
+function HelpModal({ me, onClose, notify }) {
+  const [msg, setMsg] = useState("");
+  const [phone, setPhone] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [sent, setSent] = useState(false);
+  const sid = supportIdOf(TENANT);
+  return (
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(11,31,58,0.55)", zIndex: 60, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+      <div onClick={(e) => e.stopPropagation()} style={{ background: "#fff", borderRadius: 14, padding: 22, width: "100%", maxWidth: 440 }}>
+        <div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontSize: 24, fontWeight: 700, color: BRAND.navy }}>NEED A HAND?</div>
+        <div style={{ background: BRAND.paper, borderRadius: 10, padding: "10px 12px", margin: "10px 0 14px", fontSize: 14 }}>
+          Your Support ID: <strong style={{ fontSize: 18, letterSpacing: "0.08em", color: BRAND.navy }}>{sid}</strong>
+          <div style={{ fontSize: 12, color: BRAND.sub }}>Read this to us when you call, so we can find your account fast.</div>
+        </div>
+        <div className="flex gap-2 flex-wrap mb-4">
+          <a href={"tel:" + SUPPORT.phone.replace(/[^\d+]/g, "")} style={{ textDecoration: "none" }}><Btn kind="gold">Call {SUPPORT.phone}</Btn></a>
+          <a href={"mailto:" + SUPPORT.email + "?subject=" + encodeURIComponent("Help — Support ID " + sid)} style={{ textDecoration: "none" }}><Btn kind="ghost">Email us</Btn></a>
+        </div>
+        {sent ? (
+          <p style={{ fontSize: 14, color: BRAND.green }}>Got it — we've been notified and will get back to you shortly.</p>
+        ) : (
+          <>
+            <Field label="Or send us a message"><textarea style={Object.assign({}, inputStyle, { minHeight: 90 })} value={msg} onChange={(e) => setMsg(e.target.value)} placeholder="What's going on? e.g. my Thumbtack leads aren't showing up" /></Field>
+            <Field label="Best number to call you back (optional)"><input style={inputStyle} value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="(555) 555-5555" /></Field>
+            <div className="flex gap-2">
+              <Btn disabled={busy || msg.trim().length < 3} onClick={async () => {
+                setBusy(true);
+                try { await adminCall("help", { message: msg, phone }); setSent(true); }
+                catch (e) { notify(e.message); }
+                setBusy(false);
+              }}>{busy ? "Sending…" : "Send"}</Btn>
+              <Btn kind="ghost" onClick={onClose}>Close</Btn>
+            </div>
+          </>
+        )}
+        {sent && <div className="mt-3"><Btn kind="ghost" onClick={onClose}>Close</Btn></div>}
+      </div>
+    </div>
+  );
+}
+
+const PILL = (bg, color) => ({ background: bg, color, padding: "2px 9px", borderRadius: 99, fontSize: 11.5, fontWeight: 700, whiteSpace: "nowrap" });
+function planPill(c) {
+  if (c.suspended) return <span style={PILL("#F9E5E3", BRAND.red)}>On hold</span>;
+  if (c.hasCard) {
+    const st = c.billingStatus;
+    if (st === "active") return <span style={PILL("#D7EEDF", BRAND.green)}>Paying · {PLAN_LABEL[c.plan] || c.plan}</span>;
+    if (st === "trialing") return <span style={PILL("#E4EBF6", BRAND.navySoft)}>Trial + card · {PLAN_LABEL[c.plan] || c.plan}</span>;
+    return <span style={PILL("#F9E5E3", BRAND.red)}>{BILL_STATUS[st] || st}</span>;
+  }
+  const left = Math.ceil((new Date(c.trialEnds).getTime() - Date.now()) / 864e5);
+  return left > 0 ? <span style={PILL("#FBF3DE", BRAND.amber)}>Trial · {left}d left · no card</span> : <span style={PILL("#ECEEF1", BRAND.sub)}>Trial ended</span>;
+}
+
+function AdminView({ notify, openCid }) {
+  const [data, setData] = useState(null);
+  const [err, setErr] = useState("");
+  const [q, setQ] = useState("");
+  const [filter, setFilter] = useState("all");
+  const [cid, setCid] = useState(openCid || "");
+  const load = async () => { setErr(""); try { setData(await adminCall("overview")); } catch (e) { setErr(e.message); } };
+  useEffect(() => { load(); }, []);
+  if (cid) return <AdminCompany cid={cid} notify={notify} onBack={() => { setCid(""); load(); }} />;
+  const rows = ((data && data.companies) || []).filter((c) => {
+    const t = q.trim().toLowerCase();
+    if (t && ![c.name, c.ownerName, c.ownerEmail, c.phone, c.supportId].join(" ").toLowerCase().includes(t)) return false;
+    if (filter === "help") return c.openHelp > 0;
+    if (filter === "paying") return c.billingStatus === "active";
+    if (filter === "trial") return !c.hasCard || c.billingStatus === "trialing";
+    if (filter === "setup") return !c.leadConnected;
+    return true;
+  });
+  const all = (data && data.companies) || [];
+  const week = all.filter((c) => Date.now() - new Date(c.createdAt).getTime() < 7 * 864e5).length;
+  const tiles = [["Companies", all.length], ["New this week", week], ["Paying", all.filter((c) => c.billingStatus === "active").length], ["Card on file (trial)", all.filter((c) => c.billingStatus === "trialing").length], ["Open help requests", all.reduce((n, c) => n + (c.openHelp || 0), 0)]];
+  return (
+    <div>
+      <div className="flex items-center justify-between flex-wrap gap-2 mb-3">
+        <h2 style={{ fontFamily: "'Barlow Condensed', sans-serif", fontSize: 26, fontWeight: 700, color: BRAND.navy, letterSpacing: "0.03em" }}>{PRODUCT.toUpperCase()} ADMIN</h2>
+        <Btn kind="ghost" small onClick={load}>Refresh</Btn>
+      </div>
+      {err && <Card style={{ borderColor: BRAND.red, color: BRAND.red, marginBottom: 12 }}>{err}</Card>}
+      {!data && !err && <p style={{ color: BRAND.sub }}>Loading every company…</p>}
+      {data && <>
+        <div className="grid gap-3 mb-4" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))" }}>
+          {tiles.map(([l, n]) => <Card key={l} style={{ padding: 14 }}><div style={{ fontSize: 11.5, fontWeight: 700, color: BRAND.sub, letterSpacing: "0.06em", textTransform: "uppercase" }}>{l}</div><div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontSize: 30, fontWeight: 700, color: l.startsWith("Open") && n ? BRAND.red : BRAND.navy }}>{n}</div></Card>)}
+        </div>
+        {data.testMode && <p style={{ fontSize: 12, color: BRAND.amber, marginBottom: 8 }}>Stripe is in TEST MODE.</p>}
+        <div className="flex gap-2 flex-wrap mb-3">
+          <input style={Object.assign({}, inputStyle, { maxWidth: 340 })} value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search name, email, phone or Support ID" />
+          <select style={Object.assign({}, inputStyle, { maxWidth: 220 })} value={filter} onChange={(e) => setFilter(e.target.value)}>
+            <option value="all">All companies</option><option value="help">Needs help</option><option value="trial">In trial</option><option value="paying">Paying</option><option value="setup">Lead inbox not connected</option>
+          </select>
+        </div>
+        {rows.length === 0 && <p style={{ color: BRAND.sub }}>{all.length ? "No company matches that." : "No contractors have signed up yet. Share s-i-quotespro.com/?start"}</p>}
+        <div className="grid gap-2">
+          {rows.map((c) => (
+            <button key={c.cid} onClick={() => setCid(c.cid)} style={{ textAlign: "left", background: "#fff", border: `1.5px solid ${c.openHelp ? BRAND.red : BRAND.line}`, borderRadius: 12, padding: "12px 14px", cursor: "pointer" }}>
+              <div className="flex items-center justify-between flex-wrap gap-2">
+                <div style={{ fontWeight: 800, color: BRAND.ink, fontSize: 16 }}>{c.name} <span style={{ fontWeight: 600, color: BRAND.sub, fontSize: 12 }}>· ID {c.supportId}</span></div>
+                <div className="flex gap-1 flex-wrap">{c.openHelp > 0 && <span style={PILL("#F9E5E3", BRAND.red)}>{c.openHelp} help request{c.openHelp > 1 ? "s" : ""}</span>}{planPill(c)}</div>
+              </div>
+              <div style={{ fontSize: 13, color: BRAND.sub, marginTop: 3 }}>{c.ownerName || "Owner"} · {c.ownerEmail}{c.phone ? " · " + c.phone : ""}</div>
+              <div style={{ fontSize: 12.5, color: BRAND.sub, marginTop: 2 }}>Signed up {fmtDay(c.createdAt)} · {c.users} user{c.users === 1 ? "" : "s"}{c.pendingUsers ? " (" + c.pendingUsers + " waiting)" : ""} · {c.quotes == null ? "?" : c.quotes} quotes · Leads {c.leadConnected ? "connected" + (c.leadReplyMode ? " (" + c.leadReplyMode + ")" : "") : <b style={{ color: BRAND.amber }}>not connected</b>}</div>
+            </button>
+          ))}
+        </div>
+      </>}
+    </div>
+  );
+}
+
+function AdminCompany({ cid, onBack, notify }) {
+  const [d, setD] = useState(null);
+  const [err, setErr] = useState("");
+  const [prof, setProf] = useState(null);
+  const [noteText, setNoteText] = useState("");
+  const [busy, setBusy] = useState("");
+  const load = async () => { setErr(""); try { const x = await adminCall("company", { cid }); setD(x); setProf(x.profile || {}); } catch (e) { setErr(e.message); } };
+  useEffect(() => { load(); }, [cid]);
+  const act = async (label, action, extra, okMsg) => {
+    setBusy(label);
+    try { const r = await adminCall(action, Object.assign({ cid }, extra)); notify(typeof okMsg === "function" ? okMsg(r) : okMsg || "Done"); await load(); }
+    catch (e) { notify(e.message); }
+    setBusy("");
+  };
+  const H = ({ children }) => <div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontSize: 19, fontWeight: 700, color: BRAND.navy, marginBottom: 8, letterSpacing: "0.03em" }}>{children}</div>;
+  if (err) return <div><Btn kind="ghost" small onClick={onBack}>← All companies</Btn><Card style={{ marginTop: 12, color: BRAND.red }}>{err}</Card></div>;
+  if (!d) return <div><Btn kind="ghost" small onClick={onBack}>← All companies</Btn><p style={{ color: BRAND.sub, marginTop: 12 }}>Loading…</p></div>;
+  const s = d.summary, co = d.company;
+  const openHelp = (d.help || []).filter((h) => !h.resolved);
+  return (
+    <div className="grid gap-4">
+      <div className="flex items-center justify-between flex-wrap gap-2">
+        <Btn kind="ghost" small onClick={onBack}>← All companies</Btn>
+        <Btn kind="ghost" small onClick={load}>Refresh</Btn>
+      </div>
+      <Card>
+        <div className="flex items-start justify-between flex-wrap gap-2">
+          <div>
+            <div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontSize: 28, fontWeight: 700, color: BRAND.navy, lineHeight: 1 }}>{s.name}</div>
+            <div style={{ fontSize: 13, color: BRAND.sub, marginTop: 4 }}>Support ID <b style={{ color: BRAND.ink, letterSpacing: "0.06em" }}>{s.supportId}</b> · signed up {fmtDay(s.createdAt)} ({ago(s.createdAt)})</div>
+            <div style={{ fontSize: 14, marginTop: 6 }}>{s.ownerName} · <a href={"mailto:" + s.ownerEmail} style={{ color: BRAND.navySoft }}>{s.ownerEmail}</a>{s.phone && <> · <a href={"tel:" + s.phone.replace(/[^\d+]/g, "")} style={{ color: BRAND.navySoft }}>{s.phone}</a></>}</div>
+          </div>
+          <div>{planPill(s)}</div>
+        </div>
+        {co.suspended && <div style={{ marginTop: 10, background: "#F9E5E3", color: BRAND.red, borderRadius: 8, padding: "8px 10px", fontSize: 13 }}>On hold{co.suspendReason ? ": " + co.suspendReason : ""}. They see a "contact support" screen.</div>}
+      </Card>
+
+      {openHelp.length > 0 && <Card style={{ borderColor: BRAND.red }}>
+        <H>HELP REQUESTS</H>
+        {openHelp.map((h) => (
+          <div key={h.id} style={{ borderTop: `1px solid ${BRAND.line}`, padding: "10px 0" }}>
+            <div style={{ fontSize: 13, color: BRAND.sub }}>{h.byName} ({h.role}) · {ago(h.at)}{h.phone && <> · call back <a href={"tel:" + h.phone.replace(/[^\d+]/g, "")} style={{ color: BRAND.navySoft, fontWeight: 700 }}>{h.phone}</a></>}</div>
+            <div style={{ fontSize: 14.5, margin: "4px 0 8px", whiteSpace: "pre-wrap" }}>{h.message}</div>
+            <Btn small kind="ghost" disabled={!!busy} onClick={() => act("h" + h.id, "resolveHelp", { id: h.id }, "Marked as handled")}>Mark handled</Btn>
+          </div>
+        ))}
+      </Card>}
+
+      <Card>
+        <H>ACCOUNT & PLAN</H>
+        <div style={{ fontSize: 14, lineHeight: 1.8 }}>
+          <div>Plan: <b>{PLAN_LABEL[co.plan] || co.plan || "trial"}</b> · {co.billingStatus ? BILL_STATUS[co.billingStatus] || co.billingStatus : "no card yet"}</div>
+          <div>Trial {new Date(s.trialEnds).getTime() > Date.now() ? "ends" : "ended"}: <b>{fmtDay(s.trialEnds)}</b>{co.trialOverride ? " (extended)" : ""}</div>
+          {co.currentPeriodEnd && co.billingStatus === "active" && <div>{co.cancelAtPeriodEnd ? "Cancels" : "Renews"}: {fmtDay(co.currentPeriodEnd)}</div>}
+          {co.cardCheck && <div>$1 card check: {co.cardCheck}</div>}
+        </div>
+        <div className="flex gap-2 flex-wrap mt-3">
+          {[7, 14, 30].map((n) => <Btn key={n} small kind="ghost" disabled={!!busy} onClick={() => act("t" + n, "extendTrial", { days: n }, (r) => "Trial now ends " + fmtDay(r.trialEnds))}>+{n} days trial</Btn>)}
+          {d.stripeUrl && <a href={d.stripeUrl} target="_blank" rel="noopener" style={{ textDecoration: "none" }}><Btn small kind="ghost">Open in Stripe ↗</Btn></a>}
+          {co.suspended
+            ? <Btn small kind="gold" disabled={!!busy} onClick={() => act("s", "suspend", { on: false }, "Hold lifted — they're back in")}>Lift hold</Btn>
+            : <Btn small kind="danger" disabled={!!busy} onClick={() => { const reason = window.prompt("Put " + s.name + " on hold? They'll be locked out and see 'contact support'.\n\nReason (only you see this):", ""); if (reason !== null) act("s", "suspend", { on: true, reason }, "Account on hold"); }}>Put on hold</Btn>}
+        </div>
+      </Card>
+
+      <Card>
+        <H>LEAD INBOX & SETUP</H>
+        <div style={{ fontSize: 14, lineHeight: 1.8 }}>
+          <div>Thumbtack: {d.usesThumbtack === false ? "doesn't use it" : d.leadSetup.done ? <b style={{ color: BRAND.green }}>connected</b> : <b style={{ color: BRAND.amber }}>not connected yet</b>}{d.leadReplyMode ? " · reply mode: " + d.leadReplyMode : ""}</div>
+          <div>Team code: <b>{d.teamCode || "—"}</b></div>
+          <div>Quotes: <b>{s.quotes == null ? "?" : s.quotes}</b>{d.quotes[0] ? " · last one " + ago(d.quotes[0].createdAt) : ""}</div>
+        </div>
+      </Card>
+
+      <Card>
+        <H>COMPANY PROFILE</H>
+        {[["name", "Company name"], ["phone", "Phone"], ["email", "Email"], ["site", "Website"], ["area", "Based in"], ["cities", "Cities served"], ["signer", "Signs quotes as"]].map(([k, l]) => (
+          <Field key={k} label={l}><input style={inputStyle} value={(prof && prof[k]) || ""} onChange={(e) => setProf(Object.assign({}, prof, { [k]: e.target.value }))} /></Field>
+        ))}
+        <Btn disabled={!!busy} onClick={() => act("p", "saveProfile", { profile: prof }, "Profile saved")}>{busy === "p" ? "Saving…" : "Save profile"}</Btn>
+      </Card>
+
+      <Card>
+        <H>PEOPLE ({d.users.length})</H>
+        {d.users.map((u) => (
+          <div key={u.id} style={{ borderTop: `1px solid ${BRAND.line}`, padding: "10px 0" }} className="flex items-center justify-between flex-wrap gap-2">
+            <div>
+              <div style={{ fontWeight: 700 }}>{u.name} {!u.active && <span style={PILL(u.declined ? "#F9E5E3" : "#FBF3DE", u.declined ? BRAND.red : BRAND.amber)}>{u.declined ? "Turned off" : "Waiting approval"}</span>}</div>
+              <div style={{ fontSize: 12.5, color: BRAND.sub }}>{u.email} · joined {fmtDay(u.createdAt)}</div>
+            </div>
+            <div className="flex gap-2 flex-wrap items-center">
+              <select value={u.role} disabled={!!busy} onChange={(e) => act("r" + u.id, "setUser", { uid: u.id, role: e.target.value }, "Role changed")} style={Object.assign({}, inputStyle, { width: "auto", padding: "6px 8px", fontSize: 13 })}>
+                {["owner", "assistant", "associate"].map((r) => <option key={r} value={r}>{ROLE_LABEL[r] || r}</option>)}
+              </select>
+              <Btn small kind={u.active ? "danger" : "gold"} disabled={!!busy} onClick={() => act("a" + u.id, "setUser", { uid: u.id, active: !u.active }, u.active ? "Turned off" : "Turned on")}>{u.active ? "Turn off" : "Turn on"}</Btn>
+              <Btn small kind="ghost" disabled={!!busy} onClick={() => { if (window.confirm("Email " + u.email + " a link to reset their password?")) act("pw" + u.id, "resetPassword", { uid: u.id }, (r) => "Reset link sent to " + r.email); }}>Reset password</Btn>
+            </div>
+          </div>
+        ))}
+      </Card>
+
+      <Card>
+        <H>RECENT QUOTES</H>
+        {d.quotes.length === 0 ? <p style={{ fontSize: 13.5, color: BRAND.sub }}>No quotes yet.</p> : d.quotes.map((x) => (
+          <div key={x.id} style={{ fontSize: 13.5, borderTop: `1px solid ${BRAND.line}`, padding: "7px 0" }} className="flex justify-between gap-2 flex-wrap">
+            <span><b>{x.quoteNo}</b> · {x.clientName || "—"} · {x.jobTitle || ""}{x.fromInbox ? " · from lead" : ""}</span>
+            <span style={{ color: BRAND.sub }}>{(STATUS[x.status] || {}).label || x.status} · {ago(x.createdAt)}</span>
+          </div>
+        ))}
+        {d.activity.length > 0 && <>
+          <div style={{ fontSize: 12, fontWeight: 700, color: BRAND.sub, margin: "14px 0 4px", letterSpacing: "0.06em" }}>ACTIVITY</div>
+          {d.activity.map((a, i) => <div key={i} style={{ fontSize: 12.5, color: BRAND.sub }}>{ago(a.at)} · {a.who} · {a.what} {a.detail}</div>)}
+        </>}
+      </Card>
+
+      <Card>
+        <H>SUPPORT NOTES <span style={{ fontSize: 12, color: BRAND.sub, fontFamily: "'Barlow', sans-serif", fontWeight: 500 }}>(only you see these)</span></H>
+        <textarea style={Object.assign({}, inputStyle, { minHeight: 70 })} value={noteText} onChange={(e) => setNoteText(e.target.value)} placeholder="e.g. Called 10/9 — helped connect Thumbtack, wants Pro plan next month" />
+        <div className="mt-2"><Btn small disabled={!!busy || !noteText.trim()} onClick={async () => { await act("n", "note", { text: noteText }, "Note saved"); setNoteText(""); }}>Add note</Btn></div>
+        <div className="mt-3">
+          {(d.notes || []).map((n) => <div key={n.id} style={{ borderTop: `1px solid ${BRAND.line}`, padding: "7px 0", fontSize: 13.5 }}><span style={{ color: BRAND.sub, fontSize: 12 }}>{fmtDay(n.at)} · {n.by}{n.kind === "action" ? " · action" : ""}</span><div style={{ whiteSpace: "pre-wrap", color: n.kind === "action" ? BRAND.sub : BRAND.ink }}>{n.text}</div></div>)}
+          {(d.help || []).filter((h) => h.resolved).length > 0 && <div style={{ fontSize: 12, color: BRAND.sub, marginTop: 8 }}>{(d.help || []).filter((h) => h.resolved).length} earlier help request(s) handled.</div>}
+        </div>
+      </Card>
+    </div>
+  );
+}
+
 /* ---------- billing (other companies only; JTProconstruction is never billed) ---------- */
 async function billingCall(action, extra) {
   const idToken = await fbAuth.currentUser.getIdToken();
@@ -3255,9 +3532,11 @@ function BillingGate({ billing, isOwner, onSignOut, notify }) {
         </div>
         <div style={{ background: BRAND.paper, borderRadius: 14, padding: 24 }}>
           <h2 style={{ fontFamily: "'Barlow Condensed', sans-serif", fontSize: 26, fontWeight: 700, color: BRAND.navy, marginBottom: 6 }}>
-            {!isOwner ? "YOUR COMPANY'S PLAN NEEDS ATTENTION" : locked ? (billing.hasCard ? "YOUR PLAN IS NOT ACTIVE" : "YOUR FREE TRIAL HAS ENDED") : "START YOUR FREE TRIAL — " + billing.trialDaysLeft + " DAYS FREE"}
+            {billing.access === "suspended" ? "YOUR ACCOUNT IS ON HOLD" : !isOwner ? "YOUR COMPANY'S PLAN NEEDS ATTENTION" : locked ? (billing.hasCard ? "YOUR PLAN IS NOT ACTIVE" : "YOUR FREE TRIAL HAS ENDED") : "START YOUR FREE TRIAL — " + billing.trialDaysLeft + " DAYS FREE"}
           </h2>
-          {!isOwner ? (
+          {billing.access === "suspended" ? (
+            <p style={{ fontSize: 14, color: BRAND.sub }}>Your quotes are safe. Please contact {PRODUCT} support at <a href={"tel:" + SUPPORT.phone.replace(/[^\d+]/g, "")} style={{ color: BRAND.navySoft, fontWeight: 700 }}>{SUPPORT.phone}</a> or <a href={"mailto:" + SUPPORT.email} style={{ color: BRAND.navySoft, fontWeight: 700 }}>{SUPPORT.email}</a> — Support ID <b>{supportIdOf(TENANT)}</b>.</p>
+          ) : !isOwner ? (
             <p style={{ fontSize: 14, color: BRAND.sub }}>Your quotes are safe. Ask your company's owner to sign in and choose a plan — the app unlocks for everyone as soon as they do.</p>
           ) : locked && billing.hasCard ? (
             <>
