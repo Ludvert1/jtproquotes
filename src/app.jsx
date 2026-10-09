@@ -147,7 +147,7 @@ if (CLOUD) {
 let TENANT = null;
 const fsBase = () => (TENANT ? db.collection("companies").doc(TENANT) : db);
 const col = (name) => fsBase().collection(name);
-const PRODUCT = (window.JTPQ_CONFIG && window.JTPQ_CONFIG.productName) || "JTProQuotes";
+const PRODUCT = (window.JTPQ_CONFIG && window.JTPQ_CONFIG.productName) || "S-I-Quotespro";
 const ALLOW_COMPANY_SIGNUP = !!(window.JTPQ_CONFIG && window.JTPQ_CONFIG.allowCompanySignup);
 // Set while a new company account is being created, so the sign-in listener
 // waits for it instead of filing the person as a JTPro associate.
@@ -400,11 +400,11 @@ function AlertsBell({ me }) {
               <ol style={{ paddingLeft: 18, margin: "6px 0" }}>
                 <li style={{ listStyle: "decimal" }}>Tap the <strong>Share</strong> button (square with an arrow) in Safari</li>
                 <li style={{ listStyle: "decimal" }}>Choose <strong>Add to Home Screen</strong> → Add</li>
-                <li style={{ listStyle: "decimal" }}>Open <strong>JTProQuotes</strong> from the new icon, sign in, and tap <strong>Turn on alerts</strong></li>
+                <li style={{ listStyle: "decimal" }}>Open <strong>{PRODUCT}</strong> from the new icon, sign in, and tap <strong>Turn on alerts</strong></li>
               </ol>
             </div>
           )}
-          {state === "denied" && <div style={p}>Notifications are blocked for this site. Allow them in your phone's settings (Chrome: ⋮ → Settings → Site settings → Notifications; iPhone: Settings → Notifications → JTProQuotes), then reload.</div>}
+          {state === "denied" && <div style={p}>Notifications are blocked for this site. Allow them in your phone's settings (Chrome: ⋮ → Settings → Site settings → Notifications; iPhone: Settings → Notifications → {PRODUCT}), then reload.</div>}
           {state === "unsupported" && <div style={p}>This browser can't receive alerts. Use Chrome on Android, Safari from the Home Screen on iPhone, or Chrome/Edge on a computer.</div>}
           {state === "checking" && <div style={p}>Checking…</div>}
           {msg && <div style={{ fontSize: 12.5, fontWeight: 600, color: msg.indexOf("on") >= 0 || msg.indexOf("sent") >= 0 ? BRAND.green : BRAND.red, marginBottom: 8 }}>{msg}</div>}
@@ -431,6 +431,7 @@ function App() {
   const [toast, setToast] = useState(null);
   const [joinGate, setJoinGate] = useState(null);
   const [pending, setPending] = useState(null);
+  const [leadLater, setLeadLater] = useState(false);
 
   const DEFAULT_SETTINGS ={ laborRate: 35, overheadPct: 10, targetMargin: 25, requireTeamCode: false, teamCode: "JTPRO-" + Math.random().toString(36).slice(2, 6).toUpperCase() };
 
@@ -690,8 +691,8 @@ function App() {
               ? <img src={COMPANY.logo} alt="" style={{ width: 38, height: 38, objectFit: "contain", background: "#fff", borderRadius: 8 }} />
               : <div style={{ width: 38, height: 38, background: BRAND.gold, borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 19, color: BRAND.navy }}>{COMPANY.initials}</div>}
             <div>
-              <div style={{ color: "#fff", fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 21, letterSpacing: "0.05em", lineHeight: 1 }}>{TENANT ? COMPANY.name.toUpperCase() : PRODUCT.toUpperCase()}</div>
-              <div style={{ color: BRAND.goldBright, fontSize: 11, letterSpacing: "0.1em" }}>{TENANT ? PRODUCT.toUpperCase() : COMPANY.name.toUpperCase()}</div>
+              <div style={{ color: "#fff", fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 21, letterSpacing: "0.05em", lineHeight: 1 }}>{COMPANY.name.toUpperCase()}</div>
+              <div style={{ color: BRAND.goldBright, fontSize: 11, letterSpacing: "0.1em" }}>{PRODUCT.toUpperCase()}</div>
             </div>
           </div>
           <nav className="flex items-center gap-1 flex-wrap">
@@ -710,6 +711,9 @@ function App() {
           Signed in as <strong style={{ color: BRAND.ink }}>{me.name}</strong> · {ROLE_LABEL[roleOf(me)]}
         </div>
 
+        {view === "dashboard" && TENANT && isOwner && !(settings.leadSetup && settings.leadSetup.done) && !leadLater && (
+          <ThumbtackSetup settings={settings} quotes={quotes} compact onPatch={mergeSettings} onDismiss={(done) => { setLeadLater(true); if (done) notify("Lead inbox connected — new leads will show up here."); }} />
+        )}
         {view === "dashboard" && <Dashboard me={me} isOwner={isOwner} isManager={isManager} quotes={visibleQuotes} users={users} settings={settings}
           onOpen={(q) => { setActiveQuote(q); setView("edit"); }} onPreview={setPreviewQuote} onNew={() => setView("new")}
           onDelete={async (q) => {
@@ -743,7 +747,7 @@ function App() {
           onUpdateQuote={upsertQuote} onSaveUsers={saveUsers} onDeleteUser={deleteUser} onDeleteQuote={deleteQuote} onSaveSettings={saveSettings} onPreview={setPreviewQuote}
           onOpen={(q) => { setActiveQuote(q); setView("edit"); }} notify={notify} />}
 
-        {view === "settings" && isOwner && <SettingsView settings={settings} onSave={async (s) => { await saveSettings(s); notify("Settings saved"); }} />}
+        {view === "settings" && isOwner && <SettingsView settings={settings} quotes={quotes} onSave={async (s) => { await saveSettings(s); notify("Settings saved"); }} />}
       </main>
 
       {previewQuote && <PreviewModal quote={previewQuote} settings={settings} users={users} me={me} onClose={() => setPreviewQuote(null)} />}
@@ -760,7 +764,7 @@ function PendingApproval({ profile, onSignOut }) {
     <div className="min-h-screen flex items-center justify-center px-4" style={{ background: BRAND.navy }}>
       <div className="w-full" style={{ maxWidth: 440 }}>
         <div className="text-center mb-6">
-          <div style={{ display: "inline-flex", width: 56, height: 56, background: BRAND.gold, borderRadius: 12, alignItems: "center", justifyContent: "center", fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 28, color: BRAND.navy }}>{TENANT ? "⏳" : "JT"}</div>
+          <div style={{ display: "inline-flex", width: 56, height: 56, background: BRAND.gold, borderRadius: 12, alignItems: "center", justifyContent: "center", fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 28, color: BRAND.navy }}>SI</div>
           <h1 style={{ color: "#fff", fontFamily: "'Barlow Condensed', sans-serif", fontSize: 34, fontWeight: 700, letterSpacing: "0.08em", margin: "12px 0 2px" }}>{PRODUCT.toUpperCase()}</h1>
         </div>
         <div style={{ background: "#fff", borderRadius: 14, padding: 28, textAlign: "center" }}>
@@ -794,6 +798,7 @@ function CloudAuth({ gate }) {
   const [company, setCompany] = useState("");
   const [phone, setPhone] = useState("");
   const [city, setCity] = useState("");
+  const [replyMode, setReplyMode] = useState("auto");
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [pw, setPw] = useState("");
@@ -828,6 +833,8 @@ function CloudAuth({ gate }) {
           b.set(cref.collection("users").doc(uidNew), { id: uidNew, name: name.trim(), username: email.trim(), email: email.trim(), role: "owner", active: true, createdAt: now });
           b.set(cref.collection("settings").doc("company"), {
             laborRate: 45, overheadPct: 12, targetMargin: 25, minMargin: 15, requireTeamCode: true, teamCode, ingestKey: randomKey(),
+            leadReplyMode: replyMode === "none" ? "manual" : replyMode, usesThumbtack: replyMode !== "none",
+            leadSetup: { done: replyMode === "none" },
             profile: { name: company.trim(), phone: phone.trim(), email: email.trim(), area: city.trim(), cities: "", tag: "Licensed & Insured", signer: name.trim().split(/\s+/)[0], site: "", logo: "" },
           });
           b.set(db.collection("joincodes").doc(teamCode), { companyId: cid, companyName: company.trim() });
@@ -889,9 +896,9 @@ function CloudAuth({ gate }) {
     <div className="min-h-screen flex items-center justify-center px-4" style={{ background: BRAND.navy }}>
       <div className="w-full" style={{ maxWidth: 420 }}>
         <div className="text-center mb-6">
-          <div style={{ display: "inline-flex", width: 56, height: 56, background: BRAND.gold, borderRadius: 12, alignItems: "center", justifyContent: "center", fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 28, color: BRAND.navy }}>{mode === "company" ? "AI" : "JT"}</div>
+          <div style={{ display: "inline-flex", width: 56, height: 56, background: BRAND.gold, borderRadius: 12, alignItems: "center", justifyContent: "center", fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 28, color: BRAND.navy }}>SI</div>
           <h1 style={{ color: "#fff", fontFamily: "'Barlow Condensed', sans-serif", fontSize: 34, fontWeight: 700, letterSpacing: "0.08em", margin: "12px 0 2px" }}>{PRODUCT.toUpperCase()}</h1>
-          <p style={{ color: BRAND.goldBright, fontSize: 13, letterSpacing: "0.08em" }}>{mode === "company" ? "AI QUOTES FOR CONTRACTORS · 14-DAY FREE TRIAL" : "PROFESSIONAL QUOTES · " + JTPRO_COMPANY.name.toUpperCase()}</p>
+          <p style={{ color: BRAND.goldBright, fontSize: 13, letterSpacing: "0.08em" }}>{mode === "company" ? "AI QUOTES FOR CONTRACTORS · 14-DAY FREE TRIAL" : "AI QUOTES FOR CONTRACTORS"}</p>
         </div>
         <div style={{ background: "#fff", borderRadius: 14, padding: 26 }}>
           {mode === "company" && <React.Fragment>
@@ -902,6 +909,13 @@ function CloudAuth({ gate }) {
               <Field label="Business phone"><input style={inputStyle} value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="(281) 000-0000" /></Field>
               <Field label="City, State"><input style={inputStyle} value={city} onChange={(e) => setCity(e.target.value)} placeholder="Katy, TX" /></Field>
             </div>
+            <Field label="Thumbtack leads" hint="You'll connect your Thumbtack account in the next step — it takes about 5 minutes.">
+              <select style={inputStyle} value={replyMode} onChange={(e) => setReplyMode(e.target.value)}>
+                <option value="auto">Yes — auto-reply to new leads (fastest)</option>
+                <option value="manual">Yes — let me review each reply first</option>
+                <option value="none">I don't use Thumbtack</option>
+              </select>
+            </Field>
           </React.Fragment>}
           {(mode === "register" || mode === "company") && <Field label={mode === "company" ? "Your full name" : "Full name"}><input style={inputStyle} value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Stephanie Snead" /></Field>}
           <Field label="Email"><input style={inputStyle} type="email" autoCapitalize="none" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@email.com" /></Field>
@@ -2967,7 +2981,7 @@ function TeamView({ quotes, users, settings, me, onUpdateQuote, onSaveUsers, onD
         <h2 style={h2Style}>ACTIVITY LOG</h2>
         <Card style={{ maxHeight: 340, overflowY: "auto", padding: 0 }}>
           {activity.length === 0
-            ? <div style={{ padding: 16, color: BRAND.sub, fontSize: 14 }}>Every sign-in, draft, edit, preview, and print will be recorded here — nothing happens in JTProQuotes without a trace.</div>
+            ? <div style={{ padding: 16, color: BRAND.sub, fontSize: 14 }}>Every sign-in, draft, edit, preview, and print will be recorded here — nothing happens in {PRODUCT} without a trace.</div>
             : activity.map((a, i) => (
               <div key={i} style={{ padding: "8px 16px", borderBottom: `1px solid ${BRAND.line}`, fontSize: 13 }}>
                 <strong>{a.by}</strong> — {a.action}{a.quoteNo ? ` (${a.quoteNo})` : ""} <span style={{ color: BRAND.sub, fontSize: 12 }}>· {new Date(a.at).toLocaleString()}</span>
@@ -3042,37 +3056,125 @@ function CompanyProfileCard({ s, setS }) {
     </Card>
   );
 }
-/* Another company's lead inbox: their own Gmail script files Thumbtack (and
-   other) lead emails straight into their quotes with this key. */
-function LeadInboxCard({ s, setS }) {
-  const key = s.ingestKey ? TENANT + "." + s.ingestKey : "";
+/* ---------- Thumbtack (and other lead sites) connection ----------
+   Thumbtack only lets approved partners into its systems, so leads are
+   connected the dependable way: Thumbtack emails each new lead to the
+   contractor's Gmail, and a small script in their own Google account
+   hands it to S-I-Quotespro, which drafts the quote and the reply.
+   The contractor picks whether replies go out automatically. */
+async function mergeSettings(patch) {
+  await col("settings").doc("company").set(patch, { merge: true });
+}
+function ThumbtackSetup({ settings, onPatch, quotes, compact, onDismiss }) {
+  const st = settings || {};
+  const mode = st.leadReplyMode || "";
+  const [step, setStep] = useState(mode ? 2 : 1);
   const [copied, setCopied] = useState("");
-  const copy = async (txt, what) => { try { await navigator.clipboard.writeText(txt); setCopied(what); setTimeout(() => setCopied(""), 2000); } catch { window.prompt("Copy:", txt); } };
+  const [err, setErr] = useState("");
+  const [busy, setBusy] = useState(false);
+  const fullKey = st.ingestKey ? TENANT + "." + st.ingestKey : "";
   const endpoint = window.location.origin + "/api/ingest-lead";
+  const lastLead = Object.values(quotes || {}).filter((q) => q.fromInbox).sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)))[0];
+  const instant = "Hi! Thanks for reaching out to " + COMPANY.name + ". We got your request and are putting together a price for you right now — you'll have it shortly. If you have photos of the job, send them here and we'll make it even more accurate. — " + (COMPANY.signer || COMPANY.name);
+  const copy = async (txt, what) => { try { await navigator.clipboard.writeText(txt); } catch { window.prompt("Copy this:", txt); } setCopied(what); setTimeout(() => setCopied(""), 2500); };
+  const ensureKey = async () => { if (st.ingestKey) return st.ingestKey; const k = randomKey(); await onPatch({ ingestKey: k }); return k; };
+  const copyScript = async () => {
+    setErr(""); setBusy(true);
+    try {
+      const key = await ensureKey();
+      const r = await fetch("/integrations/leads-for-contractors.gs", { cache: "no-store" });
+      if (!r.ok) throw new Error("Couldn't load the script. Check your connection and try again.");
+      const code = (await r.text()).replace("PASTE_ENDPOINT_HERE", endpoint).replace("PASTE_COMPANY_KEY_HERE", TENANT + "." + key);
+      await copy(code, "script");
+    } catch (e) { setErr(e.message); }
+    setBusy(false);
+  };
+  const choose = async (m) => { await onPatch({ leadReplyMode: m }); setStep(2); };
+  const box = { border: "1px solid " + BRAND.line, borderRadius: 10, padding: 12, marginBottom: 10, background: "#fff" };
+  const num = (n, on) => <span style={{ display: "inline-flex", width: 24, height: 24, borderRadius: 99, background: on ? BRAND.gold : BRAND.line, color: BRAND.navy, fontWeight: 700, fontSize: 13, alignItems: "center", justifyContent: "center", marginRight: 8, flexShrink: 0 }}>{n}</span>;
+  const head = (n, title) => <div style={{ display: "flex", alignItems: "center", fontWeight: 700, color: BRAND.navy, fontSize: 15, marginBottom: 6 }}>{num(n, step >= n)}{title}</div>;
+  const li = { fontSize: 13.5, color: BRAND.ink, marginBottom: 4, lineHeight: 1.45 };
   return (
-    <Card style={{ marginBottom: 14 }}>
-      <h3 style={{ fontFamily: "'Barlow Condensed', sans-serif", fontSize: 20, fontWeight: 700, color: BRAND.navy, marginBottom: 4 }}>LEAD INBOX (THUMBTACK, ANGI, EMAIL)</h3>
-      <div style={{ fontSize: 12.5, color: BRAND.sub, marginBottom: 10 }}>New lead emails become AI-drafted quotes with a reply ready to send. Set up once in your Gmail: script.google.com → New project → paste the lead script → set the two lines below → run it once → add a 5-minute trigger.</div>
-      {key ? (
-        <React.Fragment>
-          <Field label="ENDPOINT"><div className="flex gap-2"><input style={inputStyle} readOnly value={endpoint} /><Btn small kind="ghost" onClick={() => copy(endpoint, "e")}>{copied === "e" ? "Copied" : "Copy"}</Btn></div></Field>
-          <Field label="COMPANY_KEY" hint="Keep it private — it lets lead emails into your account. Make a new one if it ever leaks (then update your script)."><div className="flex gap-2"><input style={inputStyle} readOnly value={key} /><Btn small kind="ghost" onClick={() => copy(key, "k")}>{copied === "k" ? "Copied" : "Copy"}</Btn></div></Field>
-          <Btn small kind="ghost" onClick={() => { if (window.confirm("Make a new key? Your Gmail script stops filing leads until you paste the new one in. Save settings after.")) setS(Object.assign({}, s, { ingestKey: randomKey() })); }}>Make a new key</Btn>
-        </React.Fragment>
-      ) : <Btn small kind="gold" onClick={() => setS(Object.assign({}, s, { ingestKey: randomKey() }))}>Create my lead-inbox key</Btn>}
+    <Card style={{ marginBottom: 14, borderTop: "4px solid " + BRAND.gold }}>
+      <div className="flex items-center justify-between flex-wrap gap-2" style={{ marginBottom: 6 }}>
+        <h3 style={{ fontFamily: "'Barlow Condensed', sans-serif", fontSize: 22, fontWeight: 700, color: BRAND.navy, margin: 0 }}>CONNECT YOUR THUMBTACK LEADS</h3>
+        {onDismiss && <button onClick={onDismiss} style={{ background: "none", border: "none", color: BRAND.sub, fontSize: 12.5, textDecoration: "underline", cursor: "pointer" }}>I'll do this later</button>}
+      </div>
+      <div style={{ fontSize: 13, color: BRAND.sub, marginBottom: 12 }}>Every new Thumbtack lead becomes an AI-drafted quote with a reply written for the customer — usually within 5 minutes. Takes about 5 minutes to set up. Works for Angi, HomeAdvisor, Yelp and Bark lead emails too.</div>
+      {lastLead && <div style={{ background: "#E8F4EC", color: BRAND.green, borderRadius: 8, padding: "8px 12px", fontSize: 13, fontWeight: 700, marginBottom: 10 }}>✅ Connected — last lead filed {fmtDate(lastLead.createdAt)} ({lastLead.quoteNo}).</div>}
+
+      <div style={box}>
+        {head(1, "How do you want to answer new leads?")}
+        <div className="grid md-grid-cols-2 gap-2">
+          {[["auto", "⚡ Auto-reply", "Fastest — the first pro to answer usually wins. Thumbtack sends your instant reply the second a lead arrives, and when the lead includes the customer's email, your AI quote reply is emailed to them automatically."],
+            ["manual", "✋ I'll review first", "The AI drafts the quote and the reply; you check the price and tap \"Copy & open this lead\" to send it in Thumbtack. Nothing goes out without you."]].map(([k, t, d]) => (
+            <button key={k} onClick={() => choose(k)} style={{ textAlign: "left", border: "2px solid " + (mode === k ? BRAND.gold : BRAND.line), background: mode === k ? "#FBF3DE" : "#fff", borderRadius: 10, padding: 12, cursor: "pointer" }}>
+              <div style={{ fontWeight: 700, color: BRAND.navy, fontSize: 14.5 }}>{t} {mode === k ? "✓" : ""}</div>
+              <div style={{ fontSize: 12.5, color: BRAND.sub, marginTop: 4 }}>{d}</div>
+            </button>
+          ))}
+        </div>
+        <div style={{ fontSize: 11.5, color: BRAND.sub, marginTop: 6 }}>You can change this any time in Settings.</div>
+      </div>
+
+      {(step >= 2 || !compact) && <React.Fragment>
+        <div style={box}>
+          {head(2, "Have Thumbtack email you every new lead")}
+          <ol style={{ paddingLeft: 18, margin: 0 }}>
+            <li style={li}>In the Thumbtack Pro app or thumbtack.com, open <strong>Settings → Notifications</strong>.</li>
+            <li style={li}>Turn <strong>Email</strong> on for <strong>new leads</strong> and <strong>new messages</strong>.</li>
+            <li style={li}>Check the email on your Thumbtack account is a <strong>Gmail</strong> address. If it's a business address, forward it to a Gmail (or change it in Thumbtack's account settings).</li>
+          </ol>
+        </div>
+
+        <div style={box}>
+          {head(3, "Connect your Gmail (one-time, about 3 minutes)")}
+          <ol style={{ paddingLeft: 18, margin: "0 0 10px" }}>
+            <li style={li}>Tap <strong>Copy my lead script</strong> — it's already filled in with your company's private key.</li>
+            <li style={li}>Tap <strong>Open Google Apps Script</strong>, signed in to that same Gmail. A blank project opens.</li>
+            <li style={li}>Select everything in the editor, delete it, and <strong>paste</strong>. Click the <strong>💾 Save</strong> icon.</li>
+            <li style={li}>In the box next to <strong>Debug</strong>, pick <strong>setup</strong>, then click <strong>▶ Run</strong>.</li>
+            <li style={li}>Google asks for permission: choose your account → <strong>Advanced</strong> → <strong>Go to project (unsafe)</strong> → <strong>Allow</strong>. (It's "unsafe" only because it's your own private script, not a published app.)</li>
+          </ol>
+          <div className="flex gap-2 flex-wrap">
+            <Btn small kind="gold" disabled={busy} onClick={copyScript}>{copied === "script" ? "✓ Copied — now open Apps Script" : busy ? "Preparing…" : "📋 Copy my lead script"}</Btn>
+            <a href="https://script.google.com/home/projects/create" target="_blank" rel="noopener" style={{ textDecoration: "none" }}><Btn small kind="ghost">Open Google Apps Script ↗</Btn></a>
+          </div>
+          {err && <div style={{ color: BRAND.red, fontSize: 12.5, marginTop: 6 }}>{err}</div>}
+          <div style={{ fontSize: 11.5, color: BRAND.sub, marginTop: 8 }}>The log should say "Connected". From then on it checks every 5 minutes. Leads show up on your dashboard with an AI-DRAFTED tag and a phone alert. To stop it later, run <strong>stopConnector</strong> in the same project.</div>
+        </div>
+
+        {mode === "auto" && <div style={box}>
+          {head(4, "Turn on Thumbtack's instant reply")}
+          <div style={li}>Thumbtack can answer every lead the moment it arrives. In Thumbtack, open <strong>Settings</strong> and look for <strong>Instant response</strong> (sometimes called auto-reply or saved replies), turn it on, and paste this message:</div>
+          <div style={{ background: "#F4F7FB", border: "1px solid " + BRAND.line, borderRadius: 8, padding: 10, fontSize: 13, whiteSpace: "pre-wrap", margin: "6px 0" }}>{instant}</div>
+          <Btn small kind="ghost" onClick={() => copy(instant, "instant")}>{copied === "instant" ? "✓ Copied" : "Copy message"}</Btn>
+          <div style={{ fontSize: 11.5, color: BRAND.sub, marginTop: 6 }}>Then send the full AI quote reply from the lead in S-I-Quotespro (one tap: Copy & open this lead).</div>
+        </div>}
+
+        {!compact && fullKey && <details style={{ fontSize: 12.5, color: BRAND.sub }}>
+          <summary style={{ cursor: "pointer" }}>Advanced: endpoint and key</summary>
+          <div style={{ marginTop: 6 }}>ENDPOINT: <code>{endpoint}</code></div>
+          <div>COMPANY_KEY: <code style={{ wordBreak: "break-all" }}>{fullKey}</code></div>
+          <div style={{ marginTop: 6 }}><Btn small kind="ghost" onClick={async () => { if (window.confirm("Make a new key? Your current lead script stops working until you copy the new script and run setup again.")) await onPatch({ ingestKey: randomKey() }); }}>Make a new key</Btn></div>
+        </details>}
+
+        {onDismiss && <div style={{ marginTop: 10 }}><Btn kind="gold" onClick={async () => { await onPatch({ leadSetup: { done: true, at: new Date().toISOString() } }); onDismiss(true); }}>I've connected it — done</Btn></div>}
+      </React.Fragment>}
     </Card>
   );
 }
+
 // JTProconstruction's own workspace starts from its existing letterhead.
 const JTPRO_DEFAULTS_FOR = (s) => (TENANT ? {} : { name: JTPRO_COMPANY.name, tag: JTPRO_COMPANY.tag, phone: JTPRO_COMPANY.phone, email: JTPRO_COMPANY.email, site: JTPRO_COMPANY.site, signer: JTPRO_COMPANY.signer, area: JTPRO_COMPANY.area, cities: JTPRO_COMPANY.cities });
 
-function SettingsView({ settings, onSave }) {
+function SettingsView({ settings, onSave, quotes }) {
   const [s, setS] = useState(settings);
   return (
     <div style={{ maxWidth: 560 }}>
       <h2 style={{ fontFamily: "'Barlow Condensed', sans-serif", fontSize: 26, fontWeight: 700, color: BRAND.navy, letterSpacing: "0.03em", marginBottom: 14 }}>COMPANY SETTINGS</h2>
       <CompanyProfileCard s={s} setS={setS} />
-      {TENANT && <LeadInboxCard s={s} setS={setS} />}
+      {TENANT && <ThumbtackSetup settings={s} quotes={quotes} onPatch={async (p) => { await mergeSettings(p); setS((x) => Object.assign({}, x, p)); }} />}
       <Card>
         <Field label="Default labor rate ($/hr per crew member)"><input style={inputStyle} type="number" value={s.laborRate} onChange={(e) => setS(Object.assign({}, s, { laborRate: Number(e.target.value) }))} /></Field>
         <Field label="Default overhead %" hint="Applied on top of labor + materials before profit."><input style={inputStyle} type="number" value={s.overheadPct} onChange={(e) => setS(Object.assign({}, s, { overheadPct: Number(e.target.value) }))} /></Field>

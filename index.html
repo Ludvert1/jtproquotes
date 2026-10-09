@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>JTProQuotes · JTProconstruction LLC</title>
+<title>S-I-Quotespro · AI quotes for contractors</title>
 <meta name="description" content="Professional construction quoting for JTProconstruction LLC." />
 <meta name="theme-color" content="#0B1F3A" />
 <meta name="robots" content="noindex, nofollow" />
@@ -12,7 +12,7 @@
 <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
 <meta name="mobile-web-app-capable" content="yes" />
-<meta name="apple-mobile-web-app-title" content="JTProQuotes" />
+<meta name="apple-mobile-web-app-title" content="S-I-Quotes" />
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Barlow:wght@400;500;600;700&display=swap" />
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
@@ -453,7 +453,7 @@ if (CLOUD) {
 let TENANT = null;
 const fsBase = () => TENANT ? db.collection("companies").doc(TENANT) : db;
 const col = name => fsBase().collection(name);
-const PRODUCT = window.JTPQ_CONFIG && window.JTPQ_CONFIG.productName || "JTProQuotes";
+const PRODUCT = window.JTPQ_CONFIG && window.JTPQ_CONFIG.productName || "S-I-Quotespro";
 const ALLOW_COMPANY_SIGNUP = !!(window.JTPQ_CONFIG && window.JTPQ_CONFIG.allowCompanySignup);
 let signupInFlight = null;
 const warn = where => e => console.warn("[JTProQuotes] " + where + ":", e && e.message || e);
@@ -933,9 +933,9 @@ function AlertsBell({
     style: {
       listStyle: "decimal"
     }
-  }, "Open ", React.createElement("strong", null, "JTProQuotes"), " from the new icon, sign in, and tap ", React.createElement("strong", null, "Turn on alerts")))), state === "denied" && React.createElement("div", {
+  }, "Open ", React.createElement("strong", null, PRODUCT), " from the new icon, sign in, and tap ", React.createElement("strong", null, "Turn on alerts")))), state === "denied" && React.createElement("div", {
     style: p
-  }, "Notifications are blocked for this site. Allow them in your phone's settings (Chrome: \u22EE \u2192 Settings \u2192 Site settings \u2192 Notifications; iPhone: Settings \u2192 Notifications \u2192 JTProQuotes), then reload."), state === "unsupported" && React.createElement("div", {
+  }, "Notifications are blocked for this site. Allow them in your phone's settings (Chrome: \u22EE \u2192 Settings \u2192 Site settings \u2192 Notifications; iPhone: Settings \u2192 Notifications \u2192 ", PRODUCT, "), then reload."), state === "unsupported" && React.createElement("div", {
     style: p
   }, "This browser can't receive alerts. Use Chrome on Android, Safari from the Home Screen on iPhone, or Chrome/Edge on a computer."), state === "checking" && React.createElement("div", {
     style: p
@@ -975,6 +975,7 @@ function App() {
   const [toast, setToast] = useState(null);
   const [joinGate, setJoinGate] = useState(null);
   const [pending, setPending] = useState(null);
+  const [leadLater, setLeadLater] = useState(false);
   const DEFAULT_SETTINGS = {
     laborRate: 35,
     overheadPct: 10,
@@ -1381,13 +1382,13 @@ function App() {
       letterSpacing: "0.05em",
       lineHeight: 1
     }
-  }, TENANT ? COMPANY.name.toUpperCase() : PRODUCT.toUpperCase()), React.createElement("div", {
+  }, COMPANY.name.toUpperCase()), React.createElement("div", {
     style: {
       color: BRAND.goldBright,
       fontSize: 11,
       letterSpacing: "0.1em"
     }
-  }, TENANT ? PRODUCT.toUpperCase() : COMPANY.name.toUpperCase()))), React.createElement("nav", {
+  }, PRODUCT.toUpperCase()))), React.createElement("nav", {
     className: "flex items-center gap-1 flex-wrap"
   }, navItems.map(([k, l]) => React.createElement("button", {
     key: k,
@@ -1428,7 +1429,16 @@ function App() {
     style: {
       color: BRAND.ink
     }
-  }, me.name), " \xB7 ", ROLE_LABEL[roleOf(me)]), view === "dashboard" && React.createElement(Dashboard, {
+  }, me.name), " \xB7 ", ROLE_LABEL[roleOf(me)]), view === "dashboard" && TENANT && isOwner && !(settings.leadSetup && settings.leadSetup.done) && !leadLater && React.createElement(ThumbtackSetup, {
+    settings: settings,
+    quotes: quotes,
+    compact: true,
+    onPatch: mergeSettings,
+    onDismiss: done => {
+      setLeadLater(true);
+      if (done) notify("Lead inbox connected — new leads will show up here.");
+    }
+  }), view === "dashboard" && React.createElement(Dashboard, {
     me: me,
     isOwner: isOwner,
     isManager: isManager,
@@ -1492,6 +1502,7 @@ function App() {
     notify: notify
   }), view === "settings" && isOwner && React.createElement(SettingsView, {
     settings: settings,
+    quotes: quotes,
     onSave: async s => {
       await saveSettings(s);
       notify("Settings saved");
@@ -1550,7 +1561,7 @@ function PendingApproval({
       fontSize: 28,
       color: BRAND.navy
     }
-  }, TENANT ? "⏳" : "JT"), React.createElement("h1", {
+  }, "SI"), React.createElement("h1", {
     style: {
       color: "#fff",
       fontFamily: "'Barlow Condensed', sans-serif",
@@ -1625,6 +1636,7 @@ function CloudAuth({
   const [company, setCompany] = useState("");
   const [phone, setPhone] = useState("");
   const [city, setCity] = useState("");
+  const [replyMode, setReplyMode] = useState("auto");
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [pw, setPw] = useState("");
@@ -1684,6 +1696,11 @@ function CloudAuth({
             requireTeamCode: true,
             teamCode,
             ingestKey: randomKey(),
+            leadReplyMode: replyMode === "none" ? "manual" : replyMode,
+            usesThumbtack: replyMode !== "none",
+            leadSetup: {
+              done: replyMode === "none"
+            },
             profile: {
               name: company.trim(),
               phone: phone.trim(),
@@ -1811,7 +1828,7 @@ function CloudAuth({
       fontSize: 28,
       color: BRAND.navy
     }
-  }, mode === "company" ? "AI" : "JT"), React.createElement("h1", {
+  }, "SI"), React.createElement("h1", {
     style: {
       color: "#fff",
       fontFamily: "'Barlow Condensed', sans-serif",
@@ -1826,7 +1843,7 @@ function CloudAuth({
       fontSize: 13,
       letterSpacing: "0.08em"
     }
-  }, mode === "company" ? "AI QUOTES FOR CONTRACTORS · 14-DAY FREE TRIAL" : "PROFESSIONAL QUOTES · " + JTPRO_COMPANY.name.toUpperCase())), React.createElement("div", {
+  }, mode === "company" ? "AI QUOTES FOR CONTRACTORS · 14-DAY FREE TRIAL" : "AI QUOTES FOR CONTRACTORS")), React.createElement("div", {
     style: {
       background: "#fff",
       borderRadius: 14,
@@ -1869,7 +1886,20 @@ function CloudAuth({
     value: city,
     onChange: e => setCity(e.target.value),
     placeholder: "Katy, TX"
-  })))), (mode === "register" || mode === "company") && React.createElement(Field, {
+  }))), React.createElement(Field, {
+    label: "Thumbtack leads",
+    hint: "You'll connect your Thumbtack account in the next step \u2014 it takes about 5 minutes."
+  }, React.createElement("select", {
+    style: inputStyle,
+    value: replyMode,
+    onChange: e => setReplyMode(e.target.value)
+  }, React.createElement("option", {
+    value: "auto"
+  }, "Yes \u2014 auto-reply to new leads (fastest)"), React.createElement("option", {
+    value: "manual"
+  }, "Yes \u2014 let me review each reply first"), React.createElement("option", {
+    value: "none"
+  }, "I don't use Thumbtack")))), (mode === "register" || mode === "company") && React.createElement(Field, {
     label: mode === "company" ? "Your full name" : "Full name"
   }, React.createElement("input", {
     style: inputStyle,
@@ -5907,7 +5937,7 @@ function TeamView({
       color: BRAND.sub,
       fontSize: 14
     }
-  }, "Every sign-in, draft, edit, preview, and print will be recorded here \u2014 nothing happens in JTProQuotes without a trace.") : activity.map((a, i) => React.createElement("div", {
+  }, "Every sign-in, draft, edit, preview, and print will be recorded here \u2014 nothing happens in ", PRODUCT, " without a trace.") : activity.map((a, i) => React.createElement("div", {
     key: i,
     style: {
       padding: "8px 16px",
@@ -6062,80 +6092,311 @@ function CompanyProfileCard({
     className: "grid md-grid-cols-2 gap-x-4"
   }, row("phone", "Phone", "(281) 000-0000"), row("email", "Email", "office@yourcompany.com"), row("site", "Website", "yourcompany.com"), row("signer", "Sign replies as", "First name", "Ends every client reply, e.g. '— Mike'.")), row("area", "Base / service area", "Katy, TX · Serving Greater Houston"), row("cities", "Cities served (optional)", "Houston · Katy · Sugar Land · Cypress", "Prints under your name on the quote, and tells the AI where you work."));
 }
-function LeadInboxCard({
-  s,
-  setS
+async function mergeSettings(patch) {
+  await col("settings").doc("company").set(patch, {
+    merge: true
+  });
+}
+function ThumbtackSetup({
+  settings,
+  onPatch,
+  quotes,
+  compact,
+  onDismiss
 }) {
-  const key = s.ingestKey ? TENANT + "." + s.ingestKey : "";
+  const st = settings || {};
+  const mode = st.leadReplyMode || "";
+  const [step, setStep] = useState(mode ? 2 : 1);
   const [copied, setCopied] = useState("");
+  const [err, setErr] = useState("");
+  const [busy, setBusy] = useState(false);
+  const fullKey = st.ingestKey ? TENANT + "." + st.ingestKey : "";
+  const endpoint = window.location.origin + "/api/ingest-lead";
+  const lastLead = Object.values(quotes || {}).filter(q => q.fromInbox).sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)))[0];
+  const instant = "Hi! Thanks for reaching out to " + COMPANY.name + ". We got your request and are putting together a price for you right now — you'll have it shortly. If you have photos of the job, send them here and we'll make it even more accurate. — " + (COMPANY.signer || COMPANY.name);
   const copy = async (txt, what) => {
     try {
       await navigator.clipboard.writeText(txt);
-      setCopied(what);
-      setTimeout(() => setCopied(""), 2000);
     } catch {
-      window.prompt("Copy:", txt);
+      window.prompt("Copy this:", txt);
     }
+    setCopied(what);
+    setTimeout(() => setCopied(""), 2500);
   };
-  const endpoint = window.location.origin + "/api/ingest-lead";
+  const ensureKey = async () => {
+    if (st.ingestKey) return st.ingestKey;
+    const k = randomKey();
+    await onPatch({
+      ingestKey: k
+    });
+    return k;
+  };
+  const copyScript = async () => {
+    setErr("");
+    setBusy(true);
+    try {
+      const key = await ensureKey();
+      const r = await fetch("/integrations/leads-for-contractors.gs", {
+        cache: "no-store"
+      });
+      if (!r.ok) throw new Error("Couldn't load the script. Check your connection and try again.");
+      const code = (await r.text()).replace("PASTE_ENDPOINT_HERE", endpoint).replace("PASTE_COMPANY_KEY_HERE", TENANT + "." + key);
+      await copy(code, "script");
+    } catch (e) {
+      setErr(e.message);
+    }
+    setBusy(false);
+  };
+  const choose = async m => {
+    await onPatch({
+      leadReplyMode: m
+    });
+    setStep(2);
+  };
+  const box = {
+    border: "1px solid " + BRAND.line,
+    borderRadius: 10,
+    padding: 12,
+    marginBottom: 10,
+    background: "#fff"
+  };
+  const num = (n, on) => React.createElement("span", {
+    style: {
+      display: "inline-flex",
+      width: 24,
+      height: 24,
+      borderRadius: 99,
+      background: on ? BRAND.gold : BRAND.line,
+      color: BRAND.navy,
+      fontWeight: 700,
+      fontSize: 13,
+      alignItems: "center",
+      justifyContent: "center",
+      marginRight: 8,
+      flexShrink: 0
+    }
+  }, n);
+  const head = (n, title) => React.createElement("div", {
+    style: {
+      display: "flex",
+      alignItems: "center",
+      fontWeight: 700,
+      color: BRAND.navy,
+      fontSize: 15,
+      marginBottom: 6
+    }
+  }, num(n, step >= n), title);
+  const li = {
+    fontSize: 13.5,
+    color: BRAND.ink,
+    marginBottom: 4,
+    lineHeight: 1.45
+  };
   return React.createElement(Card, {
     style: {
-      marginBottom: 14
+      marginBottom: 14,
+      borderTop: "4px solid " + BRAND.gold
+    }
+  }, React.createElement("div", {
+    className: "flex items-center justify-between flex-wrap gap-2",
+    style: {
+      marginBottom: 6
     }
   }, React.createElement("h3", {
     style: {
       fontFamily: "'Barlow Condensed', sans-serif",
-      fontSize: 20,
+      fontSize: 22,
       fontWeight: 700,
       color: BRAND.navy,
-      marginBottom: 4
+      margin: 0
     }
-  }, "LEAD INBOX (THUMBTACK, ANGI, EMAIL)"), React.createElement("div", {
+  }, "CONNECT YOUR THUMBTACK LEADS"), onDismiss && React.createElement("button", {
+    onClick: onDismiss,
+    style: {
+      background: "none",
+      border: "none",
+      color: BRAND.sub,
+      fontSize: 12.5,
+      textDecoration: "underline",
+      cursor: "pointer"
+    }
+  }, "I'll do this later")), React.createElement("div", {
+    style: {
+      fontSize: 13,
+      color: BRAND.sub,
+      marginBottom: 12
+    }
+  }, "Every new Thumbtack lead becomes an AI-drafted quote with a reply written for the customer \u2014 usually within 5 minutes. Takes about 5 minutes to set up. Works for Angi, HomeAdvisor, Yelp and Bark lead emails too."), lastLead && React.createElement("div", {
+    style: {
+      background: "#E8F4EC",
+      color: BRAND.green,
+      borderRadius: 8,
+      padding: "8px 12px",
+      fontSize: 13,
+      fontWeight: 700,
+      marginBottom: 10
+    }
+  }, "\u2705 Connected \u2014 last lead filed ", fmtDate(lastLead.createdAt), " (", lastLead.quoteNo, ")."), React.createElement("div", {
+    style: box
+  }, head(1, "How do you want to answer new leads?"), React.createElement("div", {
+    className: "grid md-grid-cols-2 gap-2"
+  }, [["auto", "⚡ Auto-reply", "Fastest — the first pro to answer usually wins. Thumbtack sends your instant reply the second a lead arrives, and when the lead includes the customer's email, your AI quote reply is emailed to them automatically."], ["manual", "✋ I'll review first", "The AI drafts the quote and the reply; you check the price and tap \"Copy & open this lead\" to send it in Thumbtack. Nothing goes out without you."]].map(([k, t, d]) => React.createElement("button", {
+    key: k,
+    onClick: () => choose(k),
+    style: {
+      textAlign: "left",
+      border: "2px solid " + (mode === k ? BRAND.gold : BRAND.line),
+      background: mode === k ? "#FBF3DE" : "#fff",
+      borderRadius: 10,
+      padding: 12,
+      cursor: "pointer"
+    }
+  }, React.createElement("div", {
+    style: {
+      fontWeight: 700,
+      color: BRAND.navy,
+      fontSize: 14.5
+    }
+  }, t, " ", mode === k ? "✓" : ""), React.createElement("div", {
     style: {
       fontSize: 12.5,
       color: BRAND.sub,
-      marginBottom: 10
+      marginTop: 4
     }
-  }, "New lead emails become AI-drafted quotes with a reply ready to send. Set up once in your Gmail: script.google.com \u2192 New project \u2192 paste the lead script \u2192 set the two lines below \u2192 run it once \u2192 add a 5-minute trigger."), key ? React.createElement(React.Fragment, null, React.createElement(Field, {
-    label: "ENDPOINT"
-  }, React.createElement("div", {
-    className: "flex gap-2"
-  }, React.createElement("input", {
-    style: inputStyle,
-    readOnly: true,
-    value: endpoint
-  }), React.createElement(Btn, {
-    small: true,
-    kind: "ghost",
-    onClick: () => copy(endpoint, "e")
-  }, copied === "e" ? "Copied" : "Copy"))), React.createElement(Field, {
-    label: "COMPANY_KEY",
-    hint: "Keep it private \u2014 it lets lead emails into your account. Make a new one if it ever leaks (then update your script)."
-  }, React.createElement("div", {
-    className: "flex gap-2"
-  }, React.createElement("input", {
-    style: inputStyle,
-    readOnly: true,
-    value: key
-  }), React.createElement(Btn, {
-    small: true,
-    kind: "ghost",
-    onClick: () => copy(key, "k")
-  }, copied === "k" ? "Copied" : "Copy"))), React.createElement(Btn, {
-    small: true,
-    kind: "ghost",
-    onClick: () => {
-      if (window.confirm("Make a new key? Your Gmail script stops filing leads until you paste the new one in. Save settings after.")) setS(Object.assign({}, s, {
-        ingestKey: randomKey()
-      }));
+  }, d)))), React.createElement("div", {
+    style: {
+      fontSize: 11.5,
+      color: BRAND.sub,
+      marginTop: 6
     }
-  }, "Make a new key")) : React.createElement(Btn, {
+  }, "You can change this any time in Settings.")), (step >= 2 || !compact) && React.createElement(React.Fragment, null, React.createElement("div", {
+    style: box
+  }, head(2, "Have Thumbtack email you every new lead"), React.createElement("ol", {
+    style: {
+      paddingLeft: 18,
+      margin: 0
+    }
+  }, React.createElement("li", {
+    style: li
+  }, "In the Thumbtack Pro app or thumbtack.com, open ", React.createElement("strong", null, "Settings \u2192 Notifications"), "."), React.createElement("li", {
+    style: li
+  }, "Turn ", React.createElement("strong", null, "Email"), " on for ", React.createElement("strong", null, "new leads"), " and ", React.createElement("strong", null, "new messages"), "."), React.createElement("li", {
+    style: li
+  }, "Check the email on your Thumbtack account is a ", React.createElement("strong", null, "Gmail"), " address. If it's a business address, forward it to a Gmail (or change it in Thumbtack's account settings)."))), React.createElement("div", {
+    style: box
+  }, head(3, "Connect your Gmail (one-time, about 3 minutes)"), React.createElement("ol", {
+    style: {
+      paddingLeft: 18,
+      margin: "0 0 10px"
+    }
+  }, React.createElement("li", {
+    style: li
+  }, "Tap ", React.createElement("strong", null, "Copy my lead script"), " \u2014 it's already filled in with your company's private key."), React.createElement("li", {
+    style: li
+  }, "Tap ", React.createElement("strong", null, "Open Google Apps Script"), ", signed in to that same Gmail. A blank project opens."), React.createElement("li", {
+    style: li
+  }, "Select everything in the editor, delete it, and ", React.createElement("strong", null, "paste"), ". Click the ", React.createElement("strong", null, "\uD83D\uDCBE Save"), " icon."), React.createElement("li", {
+    style: li
+  }, "In the box next to ", React.createElement("strong", null, "Debug"), ", pick ", React.createElement("strong", null, "setup"), ", then click ", React.createElement("strong", null, "\u25B6 Run"), "."), React.createElement("li", {
+    style: li
+  }, "Google asks for permission: choose your account \u2192 ", React.createElement("strong", null, "Advanced"), " \u2192 ", React.createElement("strong", null, "Go to project (unsafe)"), " \u2192 ", React.createElement("strong", null, "Allow"), ". (It's \"unsafe\" only because it's your own private script, not a published app.)")), React.createElement("div", {
+    className: "flex gap-2 flex-wrap"
+  }, React.createElement(Btn, {
     small: true,
     kind: "gold",
-    onClick: () => setS(Object.assign({}, s, {
-      ingestKey: randomKey()
-    }))
-  }, "Create my lead-inbox key"));
+    disabled: busy,
+    onClick: copyScript
+  }, copied === "script" ? "✓ Copied — now open Apps Script" : busy ? "Preparing…" : "📋 Copy my lead script"), React.createElement("a", {
+    href: "https://script.google.com/home/projects/create",
+    target: "_blank",
+    rel: "noopener",
+    style: {
+      textDecoration: "none"
+    }
+  }, React.createElement(Btn, {
+    small: true,
+    kind: "ghost"
+  }, "Open Google Apps Script \u2197"))), err && React.createElement("div", {
+    style: {
+      color: BRAND.red,
+      fontSize: 12.5,
+      marginTop: 6
+    }
+  }, err), React.createElement("div", {
+    style: {
+      fontSize: 11.5,
+      color: BRAND.sub,
+      marginTop: 8
+    }
+  }, "The log should say \"Connected\". From then on it checks every 5 minutes. Leads show up on your dashboard with an AI-DRAFTED tag and a phone alert. To stop it later, run ", React.createElement("strong", null, "stopConnector"), " in the same project.")), mode === "auto" && React.createElement("div", {
+    style: box
+  }, head(4, "Turn on Thumbtack's instant reply"), React.createElement("div", {
+    style: li
+  }, "Thumbtack can answer every lead the moment it arrives. In Thumbtack, open ", React.createElement("strong", null, "Settings"), " and look for ", React.createElement("strong", null, "Instant response"), " (sometimes called auto-reply or saved replies), turn it on, and paste this message:"), React.createElement("div", {
+    style: {
+      background: "#F4F7FB",
+      border: "1px solid " + BRAND.line,
+      borderRadius: 8,
+      padding: 10,
+      fontSize: 13,
+      whiteSpace: "pre-wrap",
+      margin: "6px 0"
+    }
+  }, instant), React.createElement(Btn, {
+    small: true,
+    kind: "ghost",
+    onClick: () => copy(instant, "instant")
+  }, copied === "instant" ? "✓ Copied" : "Copy message"), React.createElement("div", {
+    style: {
+      fontSize: 11.5,
+      color: BRAND.sub,
+      marginTop: 6
+    }
+  }, "Then send the full AI quote reply from the lead in S-I-Quotespro (one tap: Copy & open this lead).")), !compact && fullKey && React.createElement("details", {
+    style: {
+      fontSize: 12.5,
+      color: BRAND.sub
+    }
+  }, React.createElement("summary", {
+    style: {
+      cursor: "pointer"
+    }
+  }, "Advanced: endpoint and key"), React.createElement("div", {
+    style: {
+      marginTop: 6
+    }
+  }, "ENDPOINT: ", React.createElement("code", null, endpoint)), React.createElement("div", null, "COMPANY_KEY: ", React.createElement("code", {
+    style: {
+      wordBreak: "break-all"
+    }
+  }, fullKey)), React.createElement("div", {
+    style: {
+      marginTop: 6
+    }
+  }, React.createElement(Btn, {
+    small: true,
+    kind: "ghost",
+    onClick: async () => {
+      if (window.confirm("Make a new key? Your current lead script stops working until you copy the new script and run setup again.")) await onPatch({
+        ingestKey: randomKey()
+      });
+    }
+  }, "Make a new key"))), onDismiss && React.createElement("div", {
+    style: {
+      marginTop: 10
+    }
+  }, React.createElement(Btn, {
+    kind: "gold",
+    onClick: async () => {
+      await onPatch({
+        leadSetup: {
+          done: true,
+          at: new Date().toISOString()
+        }
+      });
+      onDismiss(true);
+    }
+  }, "I've connected it \u2014 done"))));
 }
 const JTPRO_DEFAULTS_FOR = s => TENANT ? {} : {
   name: JTPRO_COMPANY.name,
@@ -6149,7 +6410,8 @@ const JTPRO_DEFAULTS_FOR = s => TENANT ? {} : {
 };
 function SettingsView({
   settings,
-  onSave
+  onSave,
+  quotes
 }) {
   const [s, setS] = useState(settings);
   return React.createElement("div", {
@@ -6168,9 +6430,13 @@ function SettingsView({
   }, "COMPANY SETTINGS"), React.createElement(CompanyProfileCard, {
     s: s,
     setS: setS
-  }), TENANT && React.createElement(LeadInboxCard, {
-    s: s,
-    setS: setS
+  }), TENANT && React.createElement(ThumbtackSetup, {
+    settings: s,
+    quotes: quotes,
+    onPatch: async p => {
+      await mergeSettings(p);
+      setS(x => Object.assign({}, x, p));
+    }
   }), React.createElement(Card, null, React.createElement(Field, {
     label: "Default labor rate ($/hr per crew member)"
   }, React.createElement("input", {

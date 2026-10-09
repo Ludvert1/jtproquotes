@@ -289,6 +289,9 @@ module.exports = async (req, res) => {
     ok: true, quoteNo, id, drafted: !!d,
     total: Math.round(total), range: d ? priceRange(total, d.confidence) : "",
     reply, clientName: quote.clientName, clientEmail: quote.clientEmail || "",
+    // The company chose to answer leads automatically (Settings → Lead inbox).
+    autoReply: !!(tenant && d && settings && settings.leadReplyMode === "auto"),
+    replySubject: "Your project quote from " + companyFor(settings, !tenant).name + " (" + quoteNo + ")",
     questions: d ? d.questions : [],
   });
 };

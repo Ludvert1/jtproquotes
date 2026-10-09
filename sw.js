@@ -6,8 +6,8 @@ self.addEventListener("activate", (e) => e.waitUntil(self.clients.claim()));
 
 self.addEventListener("push", (event) => {
   let d = {};
-  try { d = event.data ? event.data.json() : {}; } catch { d = { title: "JTProQuotes", body: event.data ? event.data.text() : "" }; }
-  const title = d.title || "JTProQuotes";
+  try { d = event.data ? event.data.json() : {}; } catch { d = { title: "S-I-Quotespro", body: event.data ? event.data.text() : "" }; }
+  const title = d.title || "S-I-Quotespro";
   const opts = {
     body: d.body || "",
     icon: "/icons/icon-192.png",

@@ -34,7 +34,7 @@ window.JTPQ_CONFIG = {
 
   // Name of the app on the sign-in screen (other companies see their own
   // company name once signed in).
-  productName: "JTProQuotes",
+  productName: "S-I-Quotespro",
 
   // Lets other contractors start their own company account from the
   // sign-in screen ("Start your company's free trial", or link straight to
