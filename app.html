@@ -455,6 +455,22 @@ const fsBase = () => TENANT ? db.collection("companies").doc(TENANT) : db;
 const col = name => fsBase().collection(name);
 const PRODUCT = window.JTPQ_CONFIG && window.JTPQ_CONFIG.productName || "S-I-Quotespro";
 const ALLOW_COMPANY_SIGNUP = !!(window.JTPQ_CONFIG && window.JTPQ_CONFIG.allowCompanySignup);
+const REF_CODE = (() => {
+  const clean = v => String(v || "").toLowerCase().replace(/[^a-z0-9-]/g, "").slice(0, 30);
+  try {
+    const fromUrl = clean(new URLSearchParams(window.location.search).get("ref"));
+    if (fromUrl) {
+      localStorage.setItem("siq_ref", JSON.stringify({
+        ref: fromUrl,
+        at: Date.now()
+      }));
+      return fromUrl;
+    }
+    const saved = JSON.parse(localStorage.getItem("siq_ref") || "null");
+    if (saved && Date.now() - saved.at < 30 * 864e5) return clean(saved.ref);
+  } catch {}
+  return "";
+})();
 let signupInFlight = null;
 const warn = where => e => console.warn("[JTProQuotes] " + where + ":", e && e.message || e);
 const hasClaudeStore = typeof window.storage !== "undefined" && window.storage && typeof window.storage.get === "function";
@@ -1249,8 +1265,8 @@ function App() {
   useEffect(() => {
     if (!me || TENANT) return;
     const a = new URLSearchParams(window.location.search).get("admin");
-    if (!a) return;
-    setAdminOpen(a);
+    if (a === null) return;
+    setAdminOpen(a || "");
     setView("admin");
     try {
       window.history.replaceState(null, "", window.location.pathname === "/" ? "/app" : window.location.pathname);
@@ -1763,14 +1779,16 @@ function CloudAuth({
           const teamCode = initialsOf(company) + "-" + Math.random().toString(36).slice(2, 6).toUpperCase();
           const b = db.batch();
           const cref = db.collection("companies").doc(cid);
-          b.set(cref, {
+          b.set(cref, Object.assign({
             name: company.trim(),
             ownerUid: uidNew,
             ownerEmail: email.trim(),
             plan: "trial",
             createdAt: now,
             trialEnds: new Date(Date.now() + 14 * 864e5).toISOString()
-          });
+          }, REF_CODE ? {
+            referredBy: REF_CODE
+          } : {}));
           b.set(db.collection("memberships").doc(uidNew), {
             companyId: cid,
             at: now
@@ -1959,7 +1977,17 @@ function CloudAuth({
       color: BRAND.sub,
       marginBottom: 14
     }
-  }, "Photo-to-quote AI, branded PDF quotes with your name and logo, and a lead inbox \u2014 set up in two minutes. No card needed for the trial."), React.createElement(Field, {
+  }, "Photo-to-quote AI, branded PDF quotes with your name and logo, and a lead inbox \u2014 set up in two minutes. Nothing is charged for 14 days."), REF_CODE && React.createElement("div", {
+    style: {
+      background: "#E2F2E9",
+      color: BRAND.green,
+      borderRadius: 8,
+      padding: "9px 12px",
+      fontSize: 13.5,
+      fontWeight: 700,
+      marginBottom: 14
+    }
+  }, "Referred by a friend: you get 25% off your first paid month."), React.createElement(Field, {
     label: "Company name"
   }, React.createElement("input", {
     style: inputStyle,
@@ -6686,6 +6714,67 @@ function planPill(c) {
     style: PILL("#ECEEF1", BRAND.sub)
   }, "Trial ended");
 }
+function ReferralMaker({
+  notify
+}) {
+  const [name, setName] = useState("");
+  const slug = name.toLowerCase().trim().replace(/\s+/g, "-").replace(/[^a-z0-9-]/g, "").slice(0, 30);
+  const link = "https://www.s-i-quotespro.com/?start&ref=" + (slug || "yourname");
+  const text = `Hey! Know a contractor or handyman? Have them check out S-I-Quotespro, the app I'm backing. It turns Thumbtack and Angi leads and job photos into professional quotes in minutes. 14 days free, and with my link they get 25% off their first month:\n${link}`;
+  const copy = async (t, msg) => {
+    try {
+      await navigator.clipboard.writeText(t);
+      notify(msg);
+    } catch {
+      notify("Couldn't copy — select the text and copy it.");
+    }
+  };
+  return React.createElement(Card, {
+    style: {
+      marginBottom: 16
+    }
+  }, React.createElement("div", {
+    style: {
+      fontFamily: "'Barlow Condensed', sans-serif",
+      fontSize: 19,
+      fontWeight: 700,
+      color: BRAND.navy,
+      marginBottom: 6
+    }
+  }, "MAKE A REFERRAL LINK"), React.createElement("p", {
+    style: {
+      fontSize: 13,
+      color: BRAND.sub,
+      marginBottom: 10
+    }
+  }, "Type the name of the friend who'll share it. Contractors who sign up with their link get 25% off their first month, and the friend earns $25 after that company's first paid month. You'll see \"$25 reward due\" here."), React.createElement("div", {
+    className: "flex gap-2 flex-wrap items-center"
+  }, React.createElement("input", {
+    style: Object.assign({}, inputStyle, {
+      maxWidth: 260
+    }),
+    value: name,
+    onChange: e => setName(e.target.value),
+    placeholder: "Friend's name, e.g. Maria"
+  }), React.createElement(Btn, {
+    small: true,
+    kind: "gold",
+    disabled: !slug,
+    onClick: () => copy(link, "Link copied")
+  }, "Copy link"), React.createElement(Btn, {
+    small: true,
+    kind: "ghost",
+    disabled: !slug,
+    onClick: () => copy(text, "Message copied — paste it in a text to " + name)
+  }, "Copy text message")), React.createElement("div", {
+    style: {
+      fontSize: 13,
+      color: BRAND.ink,
+      marginTop: 8,
+      wordBreak: "break-all"
+    }
+  }, link));
+}
 function AdminView({
   notify,
   openCid
@@ -6721,11 +6810,13 @@ function AdminView({
     if (filter === "paying") return c.billingStatus === "active";
     if (filter === "trial") return !c.hasCard || c.billingStatus === "trialing";
     if (filter === "setup") return !c.leadConnected;
+    if (filter === "referred") return !!c.referredBy;
+    if (filter === "reward") return c.rewardDue;
     return true;
   });
   const all = data && data.companies || [];
   const week = all.filter(c => Date.now() - new Date(c.createdAt).getTime() < 7 * 864e5).length;
-  const tiles = [["Companies", all.length], ["New this week", week], ["Paying", all.filter(c => c.billingStatus === "active").length], ["Card on file (trial)", all.filter(c => c.billingStatus === "trialing").length], ["Open help requests", all.reduce((n, c) => n + (c.openHelp || 0), 0)]];
+  const tiles = [["Companies", all.length], ["New this week", week], ["Paying", all.filter(c => c.billingStatus === "active").length], ["Card on file (trial)", all.filter(c => c.billingStatus === "trialing").length], ["Open help requests", all.reduce((n, c) => n + (c.openHelp || 0), 0)], ["Referral rewards due", all.filter(c => c.rewardDue).length]];
   return React.createElement("div", null, React.createElement("div", {
     className: "flex items-center justify-between flex-wrap gap-2 mb-3"
   }, React.createElement("h2", {
@@ -6750,7 +6841,9 @@ function AdminView({
     style: {
       color: BRAND.sub
     }
-  }, "Loading every company\u2026"), data && React.createElement(React.Fragment, null, React.createElement("div", {
+  }, "Loading every company\u2026"), data && React.createElement(React.Fragment, null, React.createElement(ReferralMaker, {
+    notify: notify
+  }), React.createElement("div", {
     className: "grid gap-3 mb-4",
     style: {
       gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))"
@@ -6773,7 +6866,7 @@ function AdminView({
       fontFamily: "'Barlow Condensed', sans-serif",
       fontSize: 30,
       fontWeight: 700,
-      color: l.startsWith("Open") && n ? BRAND.red : BRAND.navy
+      color: l.startsWith("Open") && n ? BRAND.red : l.startsWith("Referral") && n ? BRAND.green : BRAND.navy
     }
   }, n)))), data.testMode && React.createElement("p", {
     style: {
@@ -6806,7 +6899,11 @@ function AdminView({
     value: "paying"
   }, "Paying"), React.createElement("option", {
     value: "setup"
-  }, "Lead inbox not connected"))), rows.length === 0 && React.createElement("p", {
+  }, "Lead inbox not connected"), React.createElement("option", {
+    value: "referred"
+  }, "Referred by a friend"), React.createElement("option", {
+    value: "reward"
+  }, "Referral reward due"))), rows.length === 0 && React.createElement("p", {
     style: {
       color: BRAND.sub
     }
@@ -6839,7 +6936,11 @@ function AdminView({
     }
   }, "\xB7 ID ", c.supportId)), React.createElement("div", {
     className: "flex gap-1 flex-wrap"
-  }, c.openHelp > 0 && React.createElement("span", {
+  }, c.rewardDue && React.createElement("span", {
+    style: PILL("#D7EEDF", BRAND.green)
+  }, "$25 reward due \u2192 ", c.referredBy), c.referredBy && !c.rewardDue && React.createElement("span", {
+    style: PILL("#E4EBF6", BRAND.navySoft)
+  }, "Ref: ", c.referredBy, c.refRewardPaid ? " · paid" : ""), c.openHelp > 0 && React.createElement("span", {
     style: PILL("#F9E5E3", BRAND.red)
   }, c.openHelp, " help request", c.openHelp > 1 ? "s" : ""), planPill(c))), React.createElement("div", {
     style: {
@@ -7066,7 +7167,40 @@ function AdminCompany({
         reason
       }, "Account on hold");
     }
-  }, "Put on hold"))), React.createElement(Card, null, React.createElement(H, null, "LEAD INBOX & SETUP"), React.createElement("div", {
+  }, "Put on hold"))), co.referredBy && React.createElement(Card, {
+    style: {
+      borderColor: s.rewardDue ? BRAND.green : BRAND.line
+    }
+  }, React.createElement(H, null, "REFERRAL"), React.createElement("div", {
+    style: {
+      fontSize: 14,
+      lineHeight: 1.8
+    }
+  }, React.createElement("div", null, "Referred by: ", React.createElement("b", null, co.referredBy)), React.createElement("div", null, "25% off first month: ", co.referralDiscountUsed ? "applied at checkout" : "not used yet (applies when they pick a plan)"), React.createElement("div", null, "$25 reward: ", co.refRewardPaid ? React.createElement("b", {
+    style: {
+      color: BRAND.green
+    }
+  }, "paid ", fmtDay(co.refRewardPaid)) : s.rewardDue ? React.createElement("b", {
+    style: {
+      color: BRAND.green
+    }
+  }, "due now \u2014 they've paid their first month") : "not due yet (due after their first paid month)")), React.createElement("div", {
+    className: "mt-3"
+  }, co.refRewardPaid ? React.createElement(Btn, {
+    small: true,
+    kind: "ghost",
+    disabled: !!busy,
+    onClick: () => act("rp", "refPaid", {
+      on: false
+    }, "Reward un-marked")
+  }, "Undo \"paid\"") : React.createElement(Btn, {
+    small: true,
+    kind: "gold",
+    disabled: !!busy || !s.rewardDue,
+    onClick: () => act("rp", "refPaid", {
+      on: true
+    }, "Reward marked paid")
+  }, "I paid the $25 reward"))), React.createElement(Card, null, React.createElement(H, null, "LEAD INBOX & SETUP"), React.createElement("div", {
     style: {
       fontSize: 14,
       lineHeight: 1.8
@@ -7348,7 +7482,11 @@ function PlanPicker({
       marginTop: 12,
       lineHeight: 1.5
     }
-  }, trial ? React.createElement(React.Fragment, null, "Nothing is charged today. To confirm your card we place a ", React.createElement("strong", null, "$1 hold that's released right away"), " (it may show as pending for a few days, then disappears). Your plan starts automatically after your ", billing.trialDaysLeft, "-day free trial \u2014 cancel any time before then and you pay nothing.") : React.createElement(React.Fragment, null, "Your plan starts today and renews monthly. Cancel any time in Manage billing."), " ", "Secure checkout by Stripe."), billing && billing.testMode && React.createElement("p", {
+  }, trial ? React.createElement(React.Fragment, null, "Nothing is charged today. To confirm your card we place a ", React.createElement("strong", null, "$1 hold that's released right away"), " (it may show as pending for a few days, then disappears). Your plan starts automatically after your ", billing.trialDaysLeft, "-day free trial \u2014 cancel any time before then and you pay nothing.") : React.createElement(React.Fragment, null, "Your plan starts today and renews monthly. Cancel any time in Manage billing."), billing && billing.referralDiscount ? React.createElement(React.Fragment, null, " ", React.createElement("strong", {
+    style: {
+      color: BRAND.green
+    }
+  }, "Your 25% referral discount is applied to your first paid month.")) : null, " ", "Secure checkout by Stripe."), billing && billing.testMode && React.createElement("p", {
     style: {
       fontSize: 12,
       color: BRAND.amber,

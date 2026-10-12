@@ -101,6 +101,9 @@ async function summary(co) {
     users: users.length, pendingUsers: users.filter((u) => !u.active && !u.declined).length, quotes,
     leadConnected: !!(settings && settings.leadSetup && settings.leadSetup.done), leadReplyMode: (settings && settings.leadReplyMode) || "",
     openHelp: help.filter((h) => !h.resolved).length,
+    referredBy: co.referredBy || "", refRewardPaid: co.refRewardPaid || "",
+    // $25 is owed once a referred company has paid its first month.
+    rewardDue: !!co.referredBy && !co.refRewardPaid && co.billingStatus === "active",
   };
 }
 
@@ -257,6 +260,13 @@ module.exports = async (req, res) => {
       const text = String(body.text || "").trim().slice(0, 2000);
       if (!text) return bad(res, 400, "Write the note first.");
       await note(coPath, caller, text, true);
+      return res.status(200).json({ ok: true });
+    }
+
+    if (action === "refPaid") {
+      const on = !!body.on;
+      await patch(coPath, { refRewardPaid: on ? new Date().toISOString() : "" });
+      await note(coPath, caller, on ? `Paid $25 referral reward to "${co.data.referredBy || "?"}"` : "Un-marked the referral reward");
       return res.status(200).json({ ok: true });
     }
 

@@ -215,6 +215,11 @@
       "source": "/support",
       "destination": "/#help",
       "permanent": false
+    },
+    {
+      "source": "/admin",
+      "destination": "/app?admin",
+      "permanent": false
     }
   ]
 }

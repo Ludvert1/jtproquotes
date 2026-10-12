@@ -149,6 +149,18 @@ const fsBase = () => (TENANT ? db.collection("companies").doc(TENANT) : db);
 const col = (name) => fsBase().collection(name);
 const PRODUCT = (window.JTPQ_CONFIG && window.JTPQ_CONFIG.productName) || "S-I-Quotespro";
 const ALLOW_COMPANY_SIGNUP = !!(window.JTPQ_CONFIG && window.JTPQ_CONFIG.allowCompanySignup);
+/* Referral: links like s-i-quotespro.com/?start&ref=maria. Kept for 30 days
+   on this device so it survives a reload, and saved on the company at sign-up. */
+const REF_CODE = (() => {
+  const clean = (v) => String(v || "").toLowerCase().replace(/[^a-z0-9-]/g, "").slice(0, 30);
+  try {
+    const fromUrl = clean(new URLSearchParams(window.location.search).get("ref"));
+    if (fromUrl) { localStorage.setItem("siq_ref", JSON.stringify({ ref: fromUrl, at: Date.now() })); return fromUrl; }
+    const saved = JSON.parse(localStorage.getItem("siq_ref") || "null");
+    if (saved && Date.now() - saved.at < 30 * 864e5) return clean(saved.ref);
+  } catch {}
+  return "";
+})();
 // Set while a new company account is being created, so the sign-in listener
 // waits for it instead of filing the person as a JTPro associate.
 let signupInFlight = null;
@@ -631,8 +643,8 @@ function App() {
   useEffect(() => {
     if (!me || TENANT) return;
     const a = new URLSearchParams(window.location.search).get("admin");
-    if (!a) return;
-    setAdminOpen(a); setView("admin");
+    if (a === null) return; // ?admin opens the Admin tab; ?admin=<company id> opens that company
+    setAdminOpen(a || ""); setView("admin");
     try { window.history.replaceState(null, "", window.location.pathname === "/" ? "/app" : window.location.pathname); } catch {}
   }, [me && me.id]);
 
@@ -873,7 +885,7 @@ function CloudAuth({ gate }) {
           const teamCode = initialsOf(company) + "-" + Math.random().toString(36).slice(2, 6).toUpperCase();
           const b = db.batch();
           const cref = db.collection("companies").doc(cid);
-          b.set(cref, { name: company.trim(), ownerUid: uidNew, ownerEmail: email.trim(), plan: "trial", createdAt: now, trialEnds: new Date(Date.now() + 14 * 864e5).toISOString() });
+          b.set(cref, Object.assign({ name: company.trim(), ownerUid: uidNew, ownerEmail: email.trim(), plan: "trial", createdAt: now, trialEnds: new Date(Date.now() + 14 * 864e5).toISOString() }, REF_CODE ? { referredBy: REF_CODE } : {}));
           b.set(db.collection("memberships").doc(uidNew), { companyId: cid, at: now });
           b.set(cref.collection("users").doc(uidNew), { id: uidNew, name: name.trim(), username: email.trim(), email: email.trim(), role: "owner", active: true, createdAt: now });
           b.set(cref.collection("settings").doc("company"), {
@@ -948,7 +960,8 @@ function CloudAuth({ gate }) {
         <div style={{ background: "#fff", borderRadius: 14, padding: 26 }}>
           {mode === "company" && <React.Fragment>
             <h2 style={{ fontFamily: "'Barlow Condensed', sans-serif", fontSize: 22, fontWeight: 700, color: BRAND.navy, marginBottom: 4 }}>START YOUR COMPANY ACCOUNT</h2>
-            <p style={{ fontSize: 13, color: BRAND.sub, marginBottom: 14 }}>Photo-to-quote AI, branded PDF quotes with your name and logo, and a lead inbox — set up in two minutes. No card needed for the trial.</p>
+            <p style={{ fontSize: 13, color: BRAND.sub, marginBottom: 14 }}>Photo-to-quote AI, branded PDF quotes with your name and logo, and a lead inbox — set up in two minutes. Nothing is charged for 14 days.</p>
+            {REF_CODE && <div style={{ background: "#E2F2E9", color: BRAND.green, borderRadius: 8, padding: "9px 12px", fontSize: 13.5, fontWeight: 700, marginBottom: 14 }}>Referred by a friend: you get 25% off your first paid month.</div>}
             <Field label="Company name"><input style={inputStyle} value={company} onChange={(e) => setCompany(e.target.value)} placeholder="e.g. Lone Star Remodeling LLC" /></Field>
             <div className="grid grid-cols-2 gap-x-3">
               <Field label="Business phone"><input style={inputStyle} value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="(281) 000-0000" /></Field>
@@ -3289,6 +3302,26 @@ function planPill(c) {
   return left > 0 ? <span style={PILL("#FBF3DE", BRAND.amber)}>Trial · {left}d left · no card</span> : <span style={PILL("#ECEEF1", BRAND.sub)}>Trial ended</span>;
 }
 
+function ReferralMaker({ notify }) {
+  const [name, setName] = useState("");
+  const slug = name.toLowerCase().trim().replace(/\s+/g, "-").replace(/[^a-z0-9-]/g, "").slice(0, 30);
+  const link = "https://www.s-i-quotespro.com/?start&ref=" + (slug || "yourname");
+  const text = `Hey! Know a contractor or handyman? Have them check out S-I-Quotespro, the app I'm backing. It turns Thumbtack and Angi leads and job photos into professional quotes in minutes. 14 days free, and with my link they get 25% off their first month:\n${link}`;
+  const copy = async (t, msg) => { try { await navigator.clipboard.writeText(t); notify(msg); } catch { notify("Couldn't copy — select the text and copy it."); } };
+  return (
+    <Card style={{ marginBottom: 16 }}>
+      <div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontSize: 19, fontWeight: 700, color: BRAND.navy, marginBottom: 6 }}>MAKE A REFERRAL LINK</div>
+      <p style={{ fontSize: 13, color: BRAND.sub, marginBottom: 10 }}>Type the name of the friend who'll share it. Contractors who sign up with their link get 25% off their first month, and the friend earns $25 after that company's first paid month. You'll see "$25 reward due" here.</p>
+      <div className="flex gap-2 flex-wrap items-center">
+        <input style={Object.assign({}, inputStyle, { maxWidth: 260 })} value={name} onChange={(e) => setName(e.target.value)} placeholder="Friend's name, e.g. Maria" />
+        <Btn small kind="gold" disabled={!slug} onClick={() => copy(link, "Link copied")}>Copy link</Btn>
+        <Btn small kind="ghost" disabled={!slug} onClick={() => copy(text, "Message copied — paste it in a text to " + name)}>Copy text message</Btn>
+      </div>
+      <div style={{ fontSize: 13, color: BRAND.ink, marginTop: 8, wordBreak: "break-all" }}>{link}</div>
+    </Card>
+  );
+}
+
 function AdminView({ notify, openCid }) {
   const [data, setData] = useState(null);
   const [err, setErr] = useState("");
@@ -3305,11 +3338,13 @@ function AdminView({ notify, openCid }) {
     if (filter === "paying") return c.billingStatus === "active";
     if (filter === "trial") return !c.hasCard || c.billingStatus === "trialing";
     if (filter === "setup") return !c.leadConnected;
+    if (filter === "referred") return !!c.referredBy;
+    if (filter === "reward") return c.rewardDue;
     return true;
   });
   const all = (data && data.companies) || [];
   const week = all.filter((c) => Date.now() - new Date(c.createdAt).getTime() < 7 * 864e5).length;
-  const tiles = [["Companies", all.length], ["New this week", week], ["Paying", all.filter((c) => c.billingStatus === "active").length], ["Card on file (trial)", all.filter((c) => c.billingStatus === "trialing").length], ["Open help requests", all.reduce((n, c) => n + (c.openHelp || 0), 0)]];
+  const tiles = [["Companies", all.length], ["New this week", week], ["Paying", all.filter((c) => c.billingStatus === "active").length], ["Card on file (trial)", all.filter((c) => c.billingStatus === "trialing").length], ["Open help requests", all.reduce((n, c) => n + (c.openHelp || 0), 0)], ["Referral rewards due", all.filter((c) => c.rewardDue).length]];
   return (
     <div>
       <div className="flex items-center justify-between flex-wrap gap-2 mb-3">
@@ -3319,14 +3354,15 @@ function AdminView({ notify, openCid }) {
       {err && <Card style={{ borderColor: BRAND.red, color: BRAND.red, marginBottom: 12 }}>{err}</Card>}
       {!data && !err && <p style={{ color: BRAND.sub }}>Loading every company…</p>}
       {data && <>
+        <ReferralMaker notify={notify} />
         <div className="grid gap-3 mb-4" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))" }}>
-          {tiles.map(([l, n]) => <Card key={l} style={{ padding: 14 }}><div style={{ fontSize: 11.5, fontWeight: 700, color: BRAND.sub, letterSpacing: "0.06em", textTransform: "uppercase" }}>{l}</div><div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontSize: 30, fontWeight: 700, color: l.startsWith("Open") && n ? BRAND.red : BRAND.navy }}>{n}</div></Card>)}
+          {tiles.map(([l, n]) => <Card key={l} style={{ padding: 14 }}><div style={{ fontSize: 11.5, fontWeight: 700, color: BRAND.sub, letterSpacing: "0.06em", textTransform: "uppercase" }}>{l}</div><div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontSize: 30, fontWeight: 700, color: l.startsWith("Open") && n ? BRAND.red : l.startsWith("Referral") && n ? BRAND.green : BRAND.navy }}>{n}</div></Card>)}
         </div>
         {data.testMode && <p style={{ fontSize: 12, color: BRAND.amber, marginBottom: 8 }}>Stripe is in TEST MODE.</p>}
         <div className="flex gap-2 flex-wrap mb-3">
           <input style={Object.assign({}, inputStyle, { maxWidth: 340 })} value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search name, email, phone or Support ID" />
           <select style={Object.assign({}, inputStyle, { maxWidth: 220 })} value={filter} onChange={(e) => setFilter(e.target.value)}>
-            <option value="all">All companies</option><option value="help">Needs help</option><option value="trial">In trial</option><option value="paying">Paying</option><option value="setup">Lead inbox not connected</option>
+            <option value="all">All companies</option><option value="help">Needs help</option><option value="trial">In trial</option><option value="paying">Paying</option><option value="setup">Lead inbox not connected</option><option value="referred">Referred by a friend</option><option value="reward">Referral reward due</option>
           </select>
         </div>
         {rows.length === 0 && <p style={{ color: BRAND.sub }}>{all.length ? "No company matches that." : "No contractors have signed up yet. Share s-i-quotespro.com/?start"}</p>}
@@ -3335,7 +3371,7 @@ function AdminView({ notify, openCid }) {
             <button key={c.cid} onClick={() => setCid(c.cid)} style={{ textAlign: "left", background: "#fff", border: `1.5px solid ${c.openHelp ? BRAND.red : BRAND.line}`, borderRadius: 12, padding: "12px 14px", cursor: "pointer" }}>
               <div className="flex items-center justify-between flex-wrap gap-2">
                 <div style={{ fontWeight: 800, color: BRAND.ink, fontSize: 16 }}>{c.name} <span style={{ fontWeight: 600, color: BRAND.sub, fontSize: 12 }}>· ID {c.supportId}</span></div>
-                <div className="flex gap-1 flex-wrap">{c.openHelp > 0 && <span style={PILL("#F9E5E3", BRAND.red)}>{c.openHelp} help request{c.openHelp > 1 ? "s" : ""}</span>}{planPill(c)}</div>
+                <div className="flex gap-1 flex-wrap">{c.rewardDue && <span style={PILL("#D7EEDF", BRAND.green)}>$25 reward due → {c.referredBy}</span>}{c.referredBy && !c.rewardDue && <span style={PILL("#E4EBF6", BRAND.navySoft)}>Ref: {c.referredBy}{c.refRewardPaid ? " · paid" : ""}</span>}{c.openHelp > 0 && <span style={PILL("#F9E5E3", BRAND.red)}>{c.openHelp} help request{c.openHelp > 1 ? "s" : ""}</span>}{planPill(c)}</div>
               </div>
               <div style={{ fontSize: 13, color: BRAND.sub, marginTop: 3 }}>{c.ownerName || "Owner"} · {c.ownerEmail}{c.phone ? " · " + c.phone : ""}</div>
               <div style={{ fontSize: 12.5, color: BRAND.sub, marginTop: 2 }}>Signed up {fmtDay(c.createdAt)} · {c.users} user{c.users === 1 ? "" : "s"}{c.pendingUsers ? " (" + c.pendingUsers + " waiting)" : ""} · {c.quotes == null ? "?" : c.quotes} quotes · Leads {c.leadConnected ? "connected" + (c.leadReplyMode ? " (" + c.leadReplyMode + ")" : "") : <b style={{ color: BRAND.amber }}>not connected</b>}</div>
@@ -3411,6 +3447,18 @@ function AdminCompany({ cid, onBack, notify }) {
             : <Btn small kind="danger" disabled={!!busy} onClick={() => { const reason = window.prompt("Put " + s.name + " on hold? They'll be locked out and see 'contact support'.\n\nReason (only you see this):", ""); if (reason !== null) act("s", "suspend", { on: true, reason }, "Account on hold"); }}>Put on hold</Btn>}
         </div>
       </Card>
+
+      {co.referredBy && <Card style={{ borderColor: s.rewardDue ? BRAND.green : BRAND.line }}>
+        <H>REFERRAL</H>
+        <div style={{ fontSize: 14, lineHeight: 1.8 }}>
+          <div>Referred by: <b>{co.referredBy}</b></div>
+          <div>25% off first month: {co.referralDiscountUsed ? "applied at checkout" : "not used yet (applies when they pick a plan)"}</div>
+          <div>$25 reward: {co.refRewardPaid ? <b style={{ color: BRAND.green }}>paid {fmtDay(co.refRewardPaid)}</b> : s.rewardDue ? <b style={{ color: BRAND.green }}>due now — they've paid their first month</b> : "not due yet (due after their first paid month)"}</div>
+        </div>
+        <div className="mt-3">{co.refRewardPaid
+          ? <Btn small kind="ghost" disabled={!!busy} onClick={() => act("rp", "refPaid", { on: false }, "Reward un-marked")}>Undo "paid"</Btn>
+          : <Btn small kind="gold" disabled={!!busy || !s.rewardDue} onClick={() => act("rp", "refPaid", { on: true }, "Reward marked paid")}>I paid the $25 reward</Btn>}</div>
+      </Card>}
 
       <Card>
         <H>LEAD INBOX & SETUP</H>
@@ -3513,6 +3561,7 @@ function PlanPicker({ billing, onError }) {
         {trial
           ? <>Nothing is charged today. To confirm your card we place a <strong>$1 hold that's released right away</strong> (it may show as pending for a few days, then disappears). Your plan starts automatically after your {billing.trialDaysLeft}-day free trial — cancel any time before then and you pay nothing.</>
           : <>Your plan starts today and renews monthly. Cancel any time in Manage billing.</>}
+        {billing && billing.referralDiscount ? <> <strong style={{ color: BRAND.green }}>Your 25% referral discount is applied to your first paid month.</strong></> : null}
         {" "}Secure checkout by Stripe.
       </p>
       {billing && billing.testMode && <p style={{ fontSize: 12, color: BRAND.amber, marginTop: 6 }}>TEST MODE — use card 4242 4242 4242 4242, any future date, any CVC. No real money moves.</p>}

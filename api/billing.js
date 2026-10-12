@@ -51,10 +51,19 @@ function accessOf(co) {
   return new Date(co.trialEnds).getTime() > Date.now() ? "needs_card" : "locked";
 }
 
+/* 25% off the first paid month for referred companies. "Repeating, 1 month"
+   counts from sign-up, so it covers the first charge after the 14-day trial. */
+async function referralCoupon() {
+  const id = "siq_ref25";
+  try { const c = await stripe("GET", "coupons/" + id); if (c && c.id) return id; } catch {}
+  await stripe("POST", "coupons", { id, percent_off: 25, duration: "repeating", duration_in_months: 1, name: "Referral: 25% off first month" }, "siq-coupon-ref25");
+  return id;
+}
+
 function publicView(co) {
   const left = co.trialEnds ? Math.max(0, Math.ceil((new Date(co.trialEnds).getTime() - Date.now()) / DAY)) : 0;
   return {
-    access: accessOf(co), trialDaysLeft: left,
+    access: accessOf(co), trialDaysLeft: left, referralDiscount: !!co.referredBy && !co.stripeSubscriptionId,
     plan: co.plan || "trial", billingStatus: co.billingStatus || "", trialEnds: co.trialEnds || "",
     currentPeriodEnd: co.currentPeriodEnd || "", cancelAtPeriodEnd: !!co.cancelAtPeriodEnd,
     hasCard: !!co.stripeSubscriptionId, cardCheck: co.cardCheck || "",
@@ -97,7 +106,7 @@ async function syncFromStripe(cid, co, sessionId) {
   }
   if (!subId) return co;
   const sub = await stripe("GET", "subscriptions/" + subId, { expand: ["default_payment_method"] });
-  co = await saveCompany(cid, Object.assign({ stripeCustomerId: customer || sub.customer }, billingFields(sub)));
+  co = await saveCompany(cid, Object.assign({ stripeCustomerId: customer || sub.customer }, billingFields(sub), co.referredBy ? { referralDiscountUsed: true } : {}));
   return cardCheck(cid, co, sub);
 }
 
@@ -162,7 +171,9 @@ module.exports = async (req, res) => {
       const session = await stripe("POST", "checkout/sessions", {
         mode: "subscription", customer: co.stripeCustomerId, client_reference_id: cid,
         line_items: [{ price: await priceFor(plan), quantity: 1 }],
-        payment_method_collection: "always", allow_promotion_codes: true,
+        payment_method_collection: "always",
+        // Referred companies get 25% off their first paid month; others may type a promo code.
+        ...(co.referredBy && !co.referralDiscountUsed ? { discounts: [{ coupon: await referralCoupon() }] } : { allow_promotion_codes: true }),
         subscription_data: Object.assign({ metadata: { siq_company: cid, siq_plan: plan } }, daysLeft >= 1 ? { trial_period_days: Math.min(daysLeft, TRIAL_DAYS) } : {}),
         custom_text: { submit: { message: daysLeft >= 1
           ? "Nothing is charged today. Your card gets a $1 hold that's released right away, and your plan starts after your free trial ends. Cancel any time before then."
