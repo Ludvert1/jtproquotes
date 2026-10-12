@@ -130,8 +130,9 @@ if (CLOUD) {
       fbStorage = firebase.storage ? firebase.storage() : null;
       /* The SDK retries a failed upload for up to ten minutes by default. With
          no bucket set up that looked like a frozen button, so give up fast. */
-      if (fbStorage && fbStorage.setMaxUploadRetryTime) fbStorage.setMaxUploadRetryTime(12000);
-      if (fbStorage && fbStorage.setMaxOperationRetryTime) fbStorage.setMaxOperationRetryTime(12000);
+      // Phones on job sites often have weak signal: give uploads a full minute of retries.
+      if (fbStorage && fbStorage.setMaxUploadRetryTime) fbStorage.setMaxUploadRetryTime(60000);
+      if (fbStorage && fbStorage.setMaxOperationRetryTime) fbStorage.setMaxOperationRetryTime(30000);
     }
     catch (e) { console.warn("[JTProQuotes] Storage unavailable:", e && e.message); }
   } catch (e) {
@@ -225,7 +226,8 @@ const warn = (where) => (e) => {
   console.warn("[S-I-Quotespro] " + where + ":", (e && e.message) || e);
   // Permission and server errors from the database mean something is misconfigured; offline blips don't.
   const code = String((e && e.code) || "");
-  if (code && !/unavailable|cancelled|aborted|deadline-exceeded/.test(code)) reportProblem("database: " + where, code + " " + ((e && e.message) || ""));
+  // A slow or dropped connection (storage retry limit, timeouts) isn't a fault in the app.
+  if (code && !/unavailable|cancel|aborted|deadline-exceeded|retry-limit-exceeded/.test(code)) reportProblem("database: " + where, code + " " + ((e && e.message) || ""));
 };
 
 /* A crash while drawing the screen shows a friendly message instead of a blank page, and is reported. */
@@ -2277,8 +2279,10 @@ function QuoteForm({ me, isOwner, isManager, settings, notify, existing, onSave,
       try {
         const path = `leads/${me.id}/${q.id}/${Date.now()}-${i}.jpg`;
         const ref = fbStorage.ref().child(path);
-        await withTimeout(ref.put(dataUrlToBlob(sh.dataUrl), { contentType: "image/jpeg" }), 25000);
-        const url = await withTimeout(ref.getDownloadURL(), 10000);
+        const put = () => withTimeout(ref.put(dataUrlToBlob(sh.dataUrl), { contentType: "image/jpeg" }), 90000);
+        // One more try after a short pause — weak signal usually comes back.
+        try { await put(); } catch (e1) { await new Promise((r) => setTimeout(r, 8000)); await put(); }
+        const url = await withTimeout(ref.getDownloadURL(), 20000);
         setDirty(true);
         setQ((p) => Object.assign({}, p, {
           attachments: (p.attachments || []).map((a) => (a.id === att.id ? Object.assign({}, a, { url, path }) : a)),

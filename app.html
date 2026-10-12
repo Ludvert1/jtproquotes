@@ -440,8 +440,8 @@ if (CLOUD) {
     db = firebase.firestore();
     try {
       fbStorage = firebase.storage ? firebase.storage() : null;
-      if (fbStorage && fbStorage.setMaxUploadRetryTime) fbStorage.setMaxUploadRetryTime(12000);
-      if (fbStorage && fbStorage.setMaxOperationRetryTime) fbStorage.setMaxOperationRetryTime(12000);
+      if (fbStorage && fbStorage.setMaxUploadRetryTime) fbStorage.setMaxUploadRetryTime(60000);
+      if (fbStorage && fbStorage.setMaxOperationRetryTime) fbStorage.setMaxOperationRetryTime(30000);
     } catch (e) {
       console.warn("[JTProQuotes] Storage unavailable:", e && e.message);
     }
@@ -536,7 +536,7 @@ function realOutage(key) {
 const warn = where => e => {
   console.warn("[S-I-Quotespro] " + where + ":", e && e.message || e);
   const code = String(e && e.code || "");
-  if (code && !/unavailable|cancelled|aborted|deadline-exceeded/.test(code)) reportProblem("database: " + where, code + " " + (e && e.message || ""));
+  if (code && !/unavailable|cancel|aborted|deadline-exceeded|retry-limit-exceeded/.test(code)) reportProblem("database: " + where, code + " " + (e && e.message || ""));
 };
 class ErrorBoundary extends React.Component {
   constructor(p) {
@@ -4497,10 +4497,16 @@ function QuoteForm({
       try {
         const path = `leads/${me.id}/${q.id}/${Date.now()}-${i}.jpg`;
         const ref = fbStorage.ref().child(path);
-        await withTimeout(ref.put(dataUrlToBlob(sh.dataUrl), {
+        const put = () => withTimeout(ref.put(dataUrlToBlob(sh.dataUrl), {
           contentType: "image/jpeg"
-        }), 25000);
-        const url = await withTimeout(ref.getDownloadURL(), 10000);
+        }), 90000);
+        try {
+          await put();
+        } catch (e1) {
+          await new Promise(r => setTimeout(r, 8000));
+          await put();
+        }
+        const url = await withTimeout(ref.getDownloadURL(), 20000);
         setDirty(true);
         setQ(p => Object.assign({}, p, {
           attachments: (p.attachments || []).map(a => a.id === att.id ? Object.assign({}, a, {
