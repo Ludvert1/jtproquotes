@@ -502,6 +502,17 @@ function reportProblem(where, err) {
 }
 window.addEventListener("error", e => reportProblem("browser crash", e.error || e.message));
 window.addEventListener("unhandledrejection", e => reportProblem("unhandled promise", e.reason));
+let lastHiddenAt = 0;
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState !== "visible") lastHiddenAt = Date.now();else lastHiddenAt = Date.now();
+});
+const netFails = {};
+function realOutage(key) {
+  if (document.visibilityState !== "visible" || Date.now() - lastHiddenAt < 15e3 || navigator.onLine === false) return false;
+  const prev = netFails[key] || 0;
+  netFails[key] = Date.now();
+  return prev && Date.now() - prev < 120e3;
+}
 (function watchApi() {
   const orig = window.fetch && window.fetch.bind(window);
   if (!orig) return;
@@ -510,12 +521,14 @@ window.addEventListener("unhandledrejection", e => reportProblem("unhandled prom
     const ours = /^\/api\/(?!report)/.test(url) || url.indexOf(location.origin + "/api/") === 0;
     try {
       const r = await orig(input, init);
+      if (ours) delete netFails[url.replace(location.origin, "").split("?")[0]];
       if (ours && r.status >= 500) {
         r.clone().json().catch(() => ({})).then(j => reportProblem("api " + url.replace(location.origin, "").split("?")[0], r.status + " " + (j && j.error || r.statusText || "server error")));
       }
       return r;
     } catch (e) {
-      if (ours && navigator.onLine !== false) reportProblem("api " + url.replace(location.origin, "").split("?")[0], "no response: " + (e && e.message || e));
+      const path = url.replace(location.origin, "").split("?")[0];
+      if (ours && realOutage(path)) reportProblem("api " + path, "no response twice in a row: " + (e && e.message || e));
       throw e;
     }
   };
@@ -6865,7 +6878,9 @@ function SystemHealth({
   };
   useEffect(() => {
     load();
-    const t = setInterval(load, 60e3);
+    const t = setInterval(() => {
+      if (document.visibilityState === "visible") load();
+    }, 60e3);
     return () => clearInterval(t);
   }, []);
   const run = async () => {

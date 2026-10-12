@@ -188,6 +188,18 @@ function reportProblem(where, err) {
 window.addEventListener("error", (e) => reportProblem("browser crash", e.error || e.message));
 window.addEventListener("unhandledrejection", (e) => reportProblem("unhandled promise", e.reason));
 /* Every call to our own /api: a 5xx, or no answer while the phone is online, is a problem worth knowing about. */
+/* Phones cut off requests when the screen locks or you switch apps; those
+   aren't real outages. Only count "no response" while the app is on screen,
+   and only when the same call fails twice in a row within 2 minutes. */
+let lastHiddenAt = 0;
+document.addEventListener("visibilitychange", () => { if (document.visibilityState !== "visible") lastHiddenAt = Date.now(); else lastHiddenAt = Date.now(); });
+const netFails = {};
+function realOutage(key) {
+  if (document.visibilityState !== "visible" || Date.now() - lastHiddenAt < 15e3 || navigator.onLine === false) return false;
+  const prev = netFails[key] || 0;
+  netFails[key] = Date.now();
+  return prev && Date.now() - prev < 120e3;
+}
 (function watchApi() {
   const orig = window.fetch && window.fetch.bind(window);
   if (!orig) return;
@@ -196,12 +208,14 @@ window.addEventListener("unhandledrejection", (e) => reportProblem("unhandled pr
     const ours = /^\/api\/(?!report)/.test(url) || url.indexOf(location.origin + "/api/") === 0;
     try {
       const r = await orig(input, init);
+      if (ours) delete netFails[url.replace(location.origin, "").split("?")[0]];
       if (ours && r.status >= 500) {
         r.clone().json().catch(() => ({})).then((j) => reportProblem("api " + url.replace(location.origin, "").split("?")[0], r.status + " " + ((j && j.error) || r.statusText || "server error")));
       }
       return r;
     } catch (e) {
-      if (ours && navigator.onLine !== false) reportProblem("api " + url.replace(location.origin, "").split("?")[0], "no response: " + ((e && e.message) || e));
+      const path = url.replace(location.origin, "").split("?")[0];
+      if (ours && realOutage(path)) reportProblem("api " + path, "no response twice in a row: " + ((e && e.message) || e));
       throw e;
     }
   };
@@ -3383,7 +3397,7 @@ function SystemHealth({ notify }) {
   const [open, setOpen] = useState("");
   const [showFixed, setShowFixed] = useState(false);
   const load = async () => { try { setD(await adminCall("ops")); } catch (e) { setD({ error: e.message }); } };
-  useEffect(() => { load(); const t = setInterval(load, 60e3); return () => clearInterval(t); }, []);
+  useEffect(() => { load(); const t = setInterval(() => { if (document.visibilityState === "visible") load(); }, 60e3); return () => clearInterval(t); }, []);
   const run = async () => { setBusy("run"); try { const r = await adminCall("runHealth"); setD((x) => Object.assign({}, x, { health: r.health })); notify(r.health.ok ? "All checks passed" : "Some checks are failing"); } catch (e) { notify(e.message); } setBusy(""); };
   const fix = async (fp) => { setBusy(fp); try { await adminCall("resolveError", { fp }); await load(); notify("Marked as fixed — you'll be alerted if it comes back"); } catch (e) { notify(e.message); } setBusy(""); };
   if (!d) return <Card style={{ marginBottom: 16 }}><p style={{ color: BRAND.sub }}>Checking system health…</p></Card>;
