@@ -730,11 +730,16 @@ function App() {
     return () => clearTimeout(t);
   }, [quoteCount]);
   const [planOpen, setPlanOpen] = useState(false);
+  const [reviewOpen, setReviewOpen] = useState(false);
+  const [askedReview, setAskedReview] = useState(false);
+  const reviewSeen = () => { try { return !!(localStorage.getItem("siq_asked_review_" + (TENANT || "")) || localStorage.getItem("siq_reviewed_" + (TENANT || ""))); } catch { return true; } };
+  // Ask an owner once, after they've made 5 quotes (never on top of the free-quote heads-up).
   const inTrial = !!(TENANT && billing && billing.enabled && billing.quoteLimit && billing.billingStatus !== "active" && ["trial", "ok"].includes(billing.access));
   const warnKey = "siq_warn_lastquote_" + (TENANT || "");
   const [warned, setWarned] = useState(() => { try { return !!localStorage.getItem(warnKey); } catch { return false; } });
   const showLastQuoteAlert = inTrial && !warned && billing.quotesUsed === billing.quoteLimit - 1;
   const dismissLastQuote = () => { try { localStorage.setItem(warnKey, "1"); } catch {} setWarned(true); };
+  const askReview = !!(TENANT && me && isOwnerRole(me) && !askedReview && !reviewSeen() && !showLastQuoteAlert && !planOpen && quoteCount >= 5 && !(billing && ["locked", "limit", "suspended"].includes(billing.access)));
 
   /* A help-request alert opens that company in the admin portal (?admin=<cid>). */
   useEffect(() => {
@@ -905,7 +910,8 @@ function App() {
       </main>
 
       {previewQuote && <PreviewModal quote={previewQuote} settings={settings} users={users} me={me} onClose={() => setPreviewQuote(null)} />}
-      {helpOpen && <HelpModal me={me} notify={notify} onClose={() => setHelpOpen(false)} />}
+      {helpOpen && <HelpModal me={me} notify={notify} onClose={() => setHelpOpen(false)} onReview={() => { setHelpOpen(false); setReviewOpen(true); }} />}
+      {(reviewOpen || askReview) && <ReviewModal me={me} notify={notify} onClose={() => { setReviewOpen(false); setAskedReview(true); try { localStorage.setItem("siq_asked_review_" + (TENANT || ""), "1"); } catch {} }} />}
       {(planOpen || showLastQuoteAlert) && <PlanModal billing={billing} isOwner={isOwner} lastQuote={showLastQuoteAlert && !planOpen} notify={notify} onClose={() => { setPlanOpen(false); dismissLastQuote(); }} />}
 
       {toast && <div style={{ position: "fixed", bottom: 20, left: "50%", transform: "translateX(-50%)", background: BRAND.navy, color: BRAND.goldBright, padding: "10px 22px", borderRadius: 99, fontWeight: 600, fontSize: 14, boxShadow: "0 6px 20px rgba(0,0,0,0.25)", zIndex: 60 }}>{toast}</div>}
@@ -3358,7 +3364,95 @@ const ago = (iso) => {
   return Math.round(h / 24) + " days ago";
 };
 
-function HelpModal({ me, onClose, notify }) {
+/* Contractors rate S-I-Quotespro. Reviews go to the owner, who publishes them on the website. */
+function ReviewModal({ me, onClose, notify }) {
+  const [rating, setRating] = useState(5);
+  const [text, setText] = useState("");
+  const [name, setName] = useState(((me && me.name) || "").split(" ")[0] + ((me && me.name || "").split(" ")[1] ? " " + (me.name.split(" ")[1][0] || "") + "." : ""));
+  const [city, setCity] = useState("");
+  const [showCompany, setShowCompany] = useState(true);
+  const [consent, setConsent] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [done, setDone] = useState(false);
+  const send = async () => {
+    setBusy(true);
+    try { await adminCall("review", { rating, text, name, city, showCompany, consent }); setDone(true); try { localStorage.setItem("siq_reviewed_" + (TENANT || ""), "1"); } catch {} }
+    catch (e) { notify(e.message); }
+    setBusy(false);
+  };
+  return (
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(11,31,58,0.6)", zIndex: 60, display: "flex", alignItems: "center", justifyContent: "center", padding: 16, overflowY: "auto" }}>
+      <div onClick={(e) => e.stopPropagation()} style={{ background: "#fff", borderRadius: 14, padding: 22, width: "100%", maxWidth: 460, maxHeight: "92vh", overflowY: "auto" }}>
+        <div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontSize: 25, fontWeight: 700, color: BRAND.navy }}>{done ? "THANK YOU!" : "HOW IS " + PRODUCT.toUpperCase() + " WORKING FOR YOU?"}</div>
+        {done ? (
+          <>
+            <p style={{ fontSize: 14, color: BRAND.sub, margin: "8px 0 16px" }}>Your review was sent. It may appear on s-i-quotespro.com after a quick check. Thanks for helping other contractors decide.</p>
+            <Btn onClick={onClose}>Close</Btn>
+          </>
+        ) : (
+          <>
+            <div className="flex gap-1" style={{ margin: "12px 0 14px" }} role="radiogroup" aria-label="Rating">
+              {[1, 2, 3, 4, 5].map((n) => (
+                <button key={n} aria-label={n + " stars"} onClick={() => setRating(n)} style={{ background: "none", border: "none", cursor: "pointer", fontSize: 38, lineHeight: 1, color: n <= rating ? BRAND.gold : BRAND.line, padding: 2 }}>★</button>
+              ))}
+            </div>
+            <Field label="Your review"><textarea style={Object.assign({}, inputStyle, { minHeight: 100 })} value={text} onChange={(e) => setText(e.target.value)} placeholder="What do you like? What has it helped with? What could be better?" /></Field>
+            <div className="grid grid-cols-2 gap-x-3">
+              <Field label="Name to show"><input style={inputStyle} value={name} onChange={(e) => setName(e.target.value)} /></Field>
+              <Field label="City (optional)"><input style={inputStyle} value={city} onChange={(e) => setCity(e.target.value)} placeholder="Katy, TX" /></Field>
+            </div>
+            <label className="flex items-center gap-2" style={{ fontSize: 13.5, marginBottom: 8 }}><input type="checkbox" checked={showCompany} onChange={(e) => setShowCompany(e.target.checked)} /> Show my company name ({COMPANY.name})</label>
+            <label className="flex items-start gap-2" style={{ fontSize: 13.5, marginBottom: 14 }}><input type="checkbox" checked={consent} onChange={(e) => setConsent(e.target.checked)} style={{ marginTop: 3 }} /> {PRODUCT} may show this review, my name and city on its website.</label>
+            <div className="flex gap-2"><Btn kind="gold" disabled={busy || text.trim().length < 10 || !consent} onClick={send}>{busy ? "Sending…" : "Send review"}</Btn><Btn kind="ghost" onClick={onClose}>Not now</Btn></div>
+            <p style={{ fontSize: 12, color: BRAND.sub, marginTop: 10 }}>Honest reviews only, good or bad. We never edit what you write.</p>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* Admin: every review that came in, to publish on the website or hide for a stated reason. */
+function ReviewsAdmin({ notify }) {
+  const [list, setList] = useState(null);
+  const [busy, setBusy] = useState("");
+  const [hideFor, setHideFor] = useState("");
+  const load = async () => { try { setList((await adminCall("reviews")).reviews); } catch (e) { setList([]); notify(e.message); } };
+  useEffect(() => { load(); }, []);
+  const act = async (id, status, reason) => { setBusy(id); try { await adminCall("moderateReview", { id, status, reason }); await load(); notify(status === "published" ? "Published on the website" : "Hidden"); } catch (e) { notify(e.message); } setBusy(""); setHideFor(""); };
+  if (!list) return null;
+  const pending = list.filter((r) => r.status === "pending").length;
+  const pub = list.filter((r) => r.status === "published");
+  const avg = pub.length ? (pub.reduce((n, r) => n + r.rating, 0) / pub.length).toFixed(1) : "—";
+  return (
+    <Card style={{ marginBottom: 16 }}>
+      <div className="flex items-center justify-between flex-wrap gap-2">
+        <div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontSize: 19, fontWeight: 700, color: BRAND.navy }}>REVIEWS {pending ? <span style={PILL("#FBF3DE", BRAND.amber)}>{pending} waiting</span> : null}</div>
+        <div style={{ fontSize: 13, color: BRAND.sub }}>On the website: {pub.length} · average {avg}★</div>
+      </div>
+      {list.length === 0 && <p style={{ fontSize: 13.5, color: BRAND.sub, marginTop: 8 }}>No reviews yet. Contractors can leave one from the Help button in the app; the app also asks owners after their 5th quote.</p>}
+      {list.map((r) => (
+        <div key={r.id} style={{ borderTop: `1px solid ${BRAND.line}`, padding: "10px 0", opacity: r.status === "hidden" ? 0.55 : 1 }}>
+          <div className="flex justify-between flex-wrap gap-2">
+            <div style={{ color: BRAND.gold, fontSize: 17, letterSpacing: 1 }}>{"★".repeat(r.rating)}<span style={{ color: BRAND.line }}>{"★".repeat(5 - r.rating)}</span></div>
+            <span style={PILL(r.status === "published" ? "#D7EEDF" : r.status === "hidden" ? "#ECEEF1" : "#FBF3DE", r.status === "published" ? BRAND.green : r.status === "hidden" ? BRAND.sub : BRAND.amber)}>{r.status === "hidden" ? "Hidden · " + r.hiddenReason : r.status === "published" ? "On website" : "Waiting"}</span>
+          </div>
+          <div style={{ fontSize: 14.5, margin: "4px 0", whiteSpace: "pre-wrap" }}>"{r.text}"</div>
+          <div style={{ fontSize: 12.5, color: BRAND.sub }}>{r.name}{r.company ? ", " + r.company : ""}{r.city ? " · " + r.city : ""} · {fmtDay(r.at)} · {r.email}</div>
+          <div className="flex gap-2 flex-wrap mt-2">
+            {r.status !== "published" && <Btn small kind="gold" disabled={!!busy} onClick={() => act(r.id, "published")}>Publish on website</Btn>}
+            {r.status !== "hidden" && (hideFor === r.id
+              ? ["spam", "offensive", "private info", "not about S-I-Quotespro", "duplicate", "asked to remove"].map((why) => <Btn key={why} small kind="ghost" disabled={!!busy} onClick={() => act(r.id, "hidden", why)}>{why}</Btn>)
+              : <Btn small kind="ghost" disabled={!!busy} onClick={() => setHideFor(r.id)}>Hide…</Btn>)}
+          </div>
+        </div>
+      ))}
+      <p style={{ fontSize: 12, color: BRAND.sub, marginTop: 8 }}>Publish every genuine review, including critical ones. US law (FTC rule on consumer reviews) doesn't allow hiding reviews just because they're negative; hide only for the reasons listed.</p>
+    </Card>
+  );
+}
+
+function HelpModal({ me, onClose, notify, onReview }) {
   const [msg, setMsg] = useState("");
   const [phone, setPhone] = useState("");
   const [busy, setBusy] = useState(false);
@@ -3375,6 +3469,7 @@ function HelpModal({ me, onClose, notify }) {
         <div className="flex gap-2 flex-wrap mb-4">
           <a href={"tel:" + SUPPORT.phone.replace(/[^\d+]/g, "")} style={{ textDecoration: "none" }}><Btn kind="gold">Call {SUPPORT.phone}</Btn></a>
           <a href={"mailto:" + SUPPORT.email + "?subject=" + encodeURIComponent("Help — Support ID " + sid)} style={{ textDecoration: "none" }}><Btn kind="ghost">Email us</Btn></a>
+          {onReview && <Btn kind="ghost" onClick={onReview}>★ Leave a review</Btn>}
         </div>
         {sent ? (
           <p style={{ fontSize: 14, color: BRAND.green }}>Got it — we've been notified and will get back to you shortly.</p>
@@ -3526,6 +3621,7 @@ function AdminView({ notify, openCid }) {
       {err && <Card style={{ borderColor: BRAND.red, color: BRAND.red, marginBottom: 12 }}>{err}</Card>}
       {!data && !err && <p style={{ color: BRAND.sub }}>Loading every company…</p>}
       <SystemHealth notify={notify} />
+      <ReviewsAdmin notify={notify} />
       {data && <>
         <ReferralMaker notify={notify} />
         <div className="grid gap-3 mb-4" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))" }}>

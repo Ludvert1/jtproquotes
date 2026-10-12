@@ -20,6 +20,7 @@
 const { bad, parseBody, verifyCaller, DOCS, adminToken, fromFields, toFields, getDocAsServer, setDocAsServer, createDocAsServer, listDocsAsServer, sendEmail } = require("./_lib");
 const { withMonitor } = require("./_monitor");
 const { sendToPeople } = require("./_push");
+const { alertOwner } = require("./_monitor");
 const { stripe, stripeOn, testMode } = require("./_stripe");
 
 const FB_KEY = process.env.FIREBASE_API_KEY || "AIzaSyCG6AJn66iGzK0cChgNTnRDSTMZrasdNbc";
@@ -145,6 +146,29 @@ const handler = async (req, res) => {
   const action = String(body.action || "");
 
   try {
+    /* A contractor rates S-I-Quotespro. One review per person (a new one replaces
+       their old one); it waits for the owner to publish it on the website. */
+    if (action === "review") {
+      if (!caller.companyId) return bad(res, 400, "Reviews are for contractor accounts.");
+      const rating = Math.round(Number(body.rating));
+      const text = String(body.text || "").trim().slice(0, 800);
+      if (!(rating >= 1 && rating <= 5)) return bad(res, 400, "Pick 1 to 5 stars.");
+      if (text.length < 10) return bad(res, 400, "Write a sentence or two about your experience.");
+      const co = (await getDocAsServer("companies/" + caller.companyId)) || {};
+      const doc = {
+        rating, text,
+        name: String(body.name || caller.name || "").trim().slice(0, 60) || "A contractor",
+        company: body.showCompany === false ? "" : String(co.name || "").slice(0, 80),
+        city: String(body.city || "").trim().slice(0, 60),
+        cid: caller.companyId, uid: caller.uid, email: caller.email,
+        at: new Date().toISOString(), status: "pending", consent: body.consent === true,
+      };
+      if (!doc.consent) return bad(res, 400, "Tick the box to let us show your review on our website.");
+      await setDocAsServer("reviews/" + caller.uid, doc);
+      try { await alertOwner("New review: " + "★".repeat(rating) + " from " + doc.name, `"${text}"\n\n${doc.name}${doc.company ? ", " + doc.company : ""}${doc.city ? " · " + doc.city : ""}\n\nPublish it in Admin → Reviews: https://www.s-i-quotespro.com/admin`); } catch {}
+      return res.status(200).json({ ok: true });
+    }
+
     if (action === "help") {
       if (!caller.companyId) return bad(res, 400, "Help requests are for contractor accounts.");
       return await askForHelp(caller, body, res);
@@ -173,6 +197,22 @@ const handler = async (req, res) => {
       const state = await require("./health").runAndRecord();
       return res.status(200).json({ health: state });
     }
+    if (action === "reviews") {
+      const list = await listWithIds("reviews", 500).catch(() => []);
+      list.sort((a, b) => String(b.at).localeCompare(String(a.at)));
+      return res.status(200).json({ reviews: list.map((r) => ({ id: r.id, rating: r.rating, text: r.text, name: r.name, company: r.company, city: r.city, email: r.email, at: r.at, status: r.status, hiddenReason: r.hiddenReason || "" })) });
+    }
+    if (action === "moderateReview") {
+      const id = String(body.id || "");
+      if (!/^[A-Za-z0-9]{10,40}$/.test(id)) return bad(res, 400, "Pick a review.");
+      const status = body.status === "published" ? "published" : "hidden";
+      const reasons = ["spam", "offensive", "private info", "not about S-I-Quotespro", "duplicate", "asked to remove"];
+      const reason = status === "hidden" ? String(body.reason || "") : "";
+      if (status === "hidden" && !reasons.includes(reason)) return bad(res, 400, "Pick a reason for hiding it.");
+      await patch("reviews/" + id, { status, hiddenReason: reason, moderatedAt: new Date().toISOString() });
+      return res.status(200).json({ ok: true });
+    }
+
     if (action === "resolveError") {
       const fp = String(body.fp || "");
       if (!/^[0-9a-f]{20}$/.test(fp)) return bad(res, 400, "Pick an error.");

@@ -235,6 +235,10 @@
     {
       "source": "/api/report",
       "destination": "/api/health"
+    },
+    {
+      "source": "/api/reviews",
+      "destination": "/api/contact"
     }
   ]
 }

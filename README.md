@@ -394,3 +394,7 @@ admin access to specific sign-in emails.
 ## Free trial limit (14 days or 7 quotes)
 
 A new company starts free with no card: 14 days or 7 quotes, whichever comes first (`TRIAL_QUOTES` in `api/_access.js`). The count is a high-water mark on the company (`trialQuotesUsed`), so deleting quotes doesn't reset it. At the 6th quote everyone gets an in-app heads-up (owners can pick a plan right there); after the 7th the app shows the plan screen and AI features stop server-side until a plan starts. Checkout after the 7th quote charges right away; a company that already added a card during the trial gets "Start my plan now", which ends the Stripe trial and charges the card.
+
+## Reviews
+
+Contractors leave a review from **Help → Leave a review** in the app; owners are also asked once after their 5th quote. Reviews are stored server-only in `reviews/{uid}` (one per person, a new one replaces the old) and alert the owner. In **Admin → Reviews** you publish them to the website or hide them for a listed reason (spam, offensive, private info, …). The website section "What contractors say" (`/api/reviews`, served by `api/contact.js`) shows only published reviews and stays hidden until there is at least one.
