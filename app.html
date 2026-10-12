@@ -472,7 +472,110 @@ const REF_CODE = (() => {
   return "";
 })();
 let signupInFlight = null;
-const warn = where => e => console.warn("[JTProQuotes] " + where + ":", e && e.message || e);
+const reported = new Set();
+function reportProblem(where, err) {
+  try {
+    if (!CLOUD || reported.size >= 15) return;
+    const message = String(err && (err.message || err.reason) || err || "").slice(0, 500);
+    if (!message) return;
+    const key = where + "|" + message;
+    if (reported.has(key)) return;
+    reported.add(key);
+    const body = JSON.stringify({
+      where,
+      message,
+      stack: String(err && err.stack || "").slice(0, 1500),
+      cid: TENANT || "",
+      url: location.pathname + location.search.replace(/session_id=[^&]+/, "session_id=…")
+    });
+    if (navigator.sendBeacon) navigator.sendBeacon("/api/report", new Blob([body], {
+      type: "application/json"
+    }));else fetch("/api/report", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body,
+      keepalive: true
+    }).catch(() => {});
+  } catch {}
+}
+window.addEventListener("error", e => reportProblem("browser crash", e.error || e.message));
+window.addEventListener("unhandledrejection", e => reportProblem("unhandled promise", e.reason));
+(function watchApi() {
+  const orig = window.fetch && window.fetch.bind(window);
+  if (!orig) return;
+  window.fetch = async (input, init) => {
+    const url = typeof input === "string" ? input : input && input.url || "";
+    const ours = /^\/api\/(?!report)/.test(url) || url.indexOf(location.origin + "/api/") === 0;
+    try {
+      const r = await orig(input, init);
+      if (ours && r.status >= 500) {
+        r.clone().json().catch(() => ({})).then(j => reportProblem("api " + url.replace(location.origin, "").split("?")[0], r.status + " " + (j && j.error || r.statusText || "server error")));
+      }
+      return r;
+    } catch (e) {
+      if (ours && navigator.onLine !== false) reportProblem("api " + url.replace(location.origin, "").split("?")[0], "no response: " + (e && e.message || e));
+      throw e;
+    }
+  };
+})();
+const warn = where => e => {
+  console.warn("[S-I-Quotespro] " + where + ":", e && e.message || e);
+  const code = String(e && e.code || "");
+  if (code && !/unavailable|cancelled|aborted|deadline-exceeded/.test(code)) reportProblem("database: " + where, code + " " + (e && e.message || ""));
+};
+class ErrorBoundary extends React.Component {
+  constructor(p) {
+    super(p);
+    this.state = {
+      err: null
+    };
+  }
+  static getDerivedStateFromError(err) {
+    return {
+      err
+    };
+  }
+  componentDidCatch(err, info) {
+    reportProblem("screen crash", Object.assign(new Error(err && err.message || String(err)), {
+      stack: (err && err.stack || "") + "\n" + (info && info.componentStack || "")
+    }));
+  }
+  render() {
+    if (!this.state.err) return this.props.children;
+    return React.createElement("div", {
+      className: "min-h-screen flex items-center justify-center px-4",
+      style: {
+        background: BRAND.navy
+      }
+    }, React.createElement("div", {
+      style: {
+        background: "#fff",
+        borderRadius: 14,
+        padding: 26,
+        maxWidth: 440,
+        textAlign: "center"
+      }
+    }, React.createElement("h2", {
+      style: {
+        fontFamily: "'Barlow Condensed', sans-serif",
+        fontSize: 26,
+        color: BRAND.navy,
+        marginBottom: 8
+      }
+    }, "SOMETHING WENT WRONG"), React.createElement("p", {
+      style: {
+        fontSize: 14,
+        color: BRAND.sub,
+        marginBottom: 16
+      }
+    }, "Your quotes are safe. We've been notified automatically. Reload to keep working."), React.createElement(Btn, {
+      kind: "gold",
+      onClick: () => location.reload()
+    }, "Reload")));
+  }
+}
 const hasClaudeStore = typeof window.storage !== "undefined" && window.storage && typeof window.storage.get === "function";
 async function sGet(key, fallback) {
   if (hasClaudeStore) {
@@ -1170,17 +1273,22 @@ function App() {
   const saveSettings = async s => {
     if (CLOUD) {
       const before = settings || {};
-      await col("settings").doc("company").set(s);
-      if (TENANT) {
-        const oldCode = String(before.teamCode || "").toUpperCase(),
-          newCode = String(s.teamCode || "").toUpperCase();
-        if (newCode && newCode !== oldCode) {
+      const oldCode = String(before.teamCode || "").toUpperCase(),
+        newCode = String(s.teamCode || "").toUpperCase();
+      if (TENANT && newCode && newCode !== oldCode) {
+        try {
           await db.collection("joincodes").doc(newCode).set({
             companyId: TENANT,
             companyName: s.profile && s.profile.name || COMPANY.name
-          }).catch(warn("save join code"));
-          if (oldCode) await db.collection("joincodes").doc(oldCode).delete().catch(warn("retire join code"));
+          });
+        } catch (e) {
+          warn("save join code")(e);
+          throw new Error("That team code is already taken. Pick a different one.");
         }
+      }
+      await col("settings").doc("company").set(s);
+      if (TENANT) {
+        if (newCode && newCode !== oldCode && oldCode) await db.collection("joincodes").doc(oldCode).delete().catch(warn("retire join code"));
         if (s.profile && s.profile.name && s.profile.name !== (before.profile && before.profile.name || "")) {
           db.collection("companies").doc(TENANT).update({
             name: s.profile.name,
@@ -1612,8 +1720,12 @@ function App() {
     billing: billing,
     notify: notify,
     onSave: async s => {
-      await saveSettings(s);
-      notify("Settings saved");
+      try {
+        await saveSettings(s);
+        notify("Settings saved");
+      } catch (e) {
+        notify(e.message || "Couldn't save settings. Try again.");
+      }
     }
   })), previewQuote && React.createElement(PreviewModal, {
     quote: previewQuote,
@@ -3968,7 +4080,17 @@ function QuoteForm({
   });
   const [dirty, setDirty] = useState(false);
   const [loggedStart, setLoggedStart] = useState(false);
+  const autosaveTimer = useRef(null);
+  const autosavePaused = useRef(false);
+  const stopAutosave = () => {
+    autosavePaused.current = true;
+    if (autosaveTimer.current) {
+      clearTimeout(autosaveTimer.current);
+      autosaveTimer.current = null;
+    }
+  };
   const set = (k, v) => {
+    autosavePaused.current = false;
     setDirty(true);
     setQ(p => Object.assign({}, p, {
       [k]: v
@@ -3981,12 +4103,14 @@ function QuoteForm({
       logActivity(me.name, "Started a new draft", q.quoteNo);
       setLoggedStart(true);
     }
-    if (locked) return;
+    if (locked || autosavePaused.current) return;
     const t = setTimeout(() => {
-      onAutosave(Object.assign({}, q, {
+      autosaveTimer.current = null;
+      if (!autosavePaused.current) onAutosave(Object.assign({}, q, {
         updatedAt: new Date().toISOString()
       }));
     }, 1200);
+    autosaveTimer.current = t;
     return () => clearTimeout(t);
   }, [q, dirty]);
   const c = computeQuote(q, settings);
@@ -4135,6 +4259,7 @@ function QuoteForm({
   };
   const save = async (submit, opts) => {
     if (!q.clientName.trim()) return alert("Enter the client's name.");
+    stopAutosave();
     if (submit && !(Number(q.days) > 0) && !(q.items || []).length) return alert("Add the days on site (or materials) before submitting — the quote is still $0.");
     const next = Object.assign({}, q, {
       updatedAt: new Date().toISOString()
@@ -4159,8 +4284,12 @@ function QuoteForm({
   };
   const canReview = isManager && existing && q.createdBy !== me.id && ["pending", "changes", "draft"].includes(q.status);
   const sendBack = () => {
+    stopAutosave();
     const note = window.prompt("What should they change?\n(e.g. Margin too thin — raise to 22%)", q.reviewNote || "");
-    if (note === null) return;
+    if (note === null) {
+      autosavePaused.current = false;
+      return;
+    }
     onSave(Object.assign({}, q, {
       status: "changes",
       reviewNote: note.trim(),
@@ -4174,7 +4303,11 @@ function QuoteForm({
     logActivity(me.name, "Requested changes on quote", q.quoteNo);
   };
   const voidThis = () => {
-    if (!window.confirm("Void quote " + q.quoteNo + "?\n\nVoiding is permanent. The quote is frozen for good — it can't be edited, printed, or brought back, and it stops counting toward any total.")) return;
+    stopAutosave();
+    if (!window.confirm("Void quote " + q.quoteNo + "?\n\nVoiding is permanent. The quote is frozen for good — it can't be edited, printed, or brought back, and it stops counting toward any total.")) {
+      autosavePaused.current = false;
+      return;
+    }
     const reason = window.prompt("Why is this quote being voided?\n(e.g. duplicate, client cancelled, priced in error)");
     if (reason === null) return;
     onSave(Object.assign({}, q, {
@@ -6714,6 +6847,219 @@ function planPill(c) {
     style: PILL("#ECEEF1", BRAND.sub)
   }, "Trial ended");
 }
+function SystemHealth({
+  notify
+}) {
+  const [d, setD] = useState(null);
+  const [busy, setBusy] = useState("");
+  const [open, setOpen] = useState("");
+  const [showFixed, setShowFixed] = useState(false);
+  const load = async () => {
+    try {
+      setD(await adminCall("ops"));
+    } catch (e) {
+      setD({
+        error: e.message
+      });
+    }
+  };
+  useEffect(() => {
+    load();
+    const t = setInterval(load, 60e3);
+    return () => clearInterval(t);
+  }, []);
+  const run = async () => {
+    setBusy("run");
+    try {
+      const r = await adminCall("runHealth");
+      setD(x => Object.assign({}, x, {
+        health: r.health
+      }));
+      notify(r.health.ok ? "All checks passed" : "Some checks are failing");
+    } catch (e) {
+      notify(e.message);
+    }
+    setBusy("");
+  };
+  const fix = async fp => {
+    setBusy(fp);
+    try {
+      await adminCall("resolveError", {
+        fp
+      });
+      await load();
+      notify("Marked as fixed — you'll be alerted if it comes back");
+    } catch (e) {
+      notify(e.message);
+    }
+    setBusy("");
+  };
+  if (!d) return React.createElement(Card, {
+    style: {
+      marginBottom: 16
+    }
+  }, React.createElement("p", {
+    style: {
+      color: BRAND.sub
+    }
+  }, "Checking system health\u2026"));
+  const h = d.health,
+    errs = d.errors || [];
+  const openErrs = errs.filter(e => !e.resolved);
+  const shown = showFixed ? errs : openErrs;
+  const tone = !h ? BRAND.sub : h.ok && !openErrs.length ? BRAND.green : !h.ok ? BRAND.red : BRAND.amber;
+  const label = !h ? "No check has run yet" : !h.ok ? "Something is down" : openErrs.length ? openErrs.length + " open problem" + (openErrs.length > 1 ? "s" : "") : "All systems normal";
+  return React.createElement(Card, {
+    style: {
+      marginBottom: 16,
+      borderColor: tone,
+      borderWidth: 2
+    }
+  }, React.createElement("div", {
+    className: "flex items-center justify-between flex-wrap gap-2"
+  }, React.createElement("div", {
+    className: "flex items-center gap-2"
+  }, React.createElement("span", {
+    style: {
+      width: 12,
+      height: 12,
+      borderRadius: 99,
+      background: tone,
+      display: "inline-block",
+      boxShadow: `0 0 0 4px ${tone}22`
+    }
+  }), React.createElement("div", {
+    style: {
+      fontFamily: "'Barlow Condensed', sans-serif",
+      fontSize: 21,
+      fontWeight: 700,
+      color: BRAND.navy
+    }
+  }, "SYSTEM HEALTH \xB7 ", label.toUpperCase())), React.createElement("div", {
+    className: "flex gap-2"
+  }, React.createElement(Btn, {
+    small: true,
+    kind: "ghost",
+    disabled: !!busy,
+    onClick: run
+  }, busy === "run" ? "Checking…" : "Run check now"))), d.error && React.createElement("p", {
+    style: {
+      color: BRAND.red,
+      fontSize: 13,
+      marginTop: 8
+    }
+  }, d.error), h && React.createElement(React.Fragment, null, React.createElement("div", {
+    style: {
+      fontSize: 12.5,
+      color: BRAND.sub,
+      margin: "6px 0 10px"
+    }
+  }, "Last checked ", ago(h.at), h.failingSince ? " · failing since " + fmtDay(h.failingSince) : "", ". Checks run every 30 minutes; you get a phone alert and email when something breaks or recovers."), React.createElement("div", {
+    className: "grid gap-2",
+    style: {
+      gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))"
+    }
+  }, (h.checks || []).map(c => React.createElement("div", {
+    key: c.name,
+    style: {
+      border: `1px solid ${c.ok ? BRAND.line : BRAND.red}`,
+      background: c.ok ? "#fff" : "#F9E5E3",
+      borderRadius: 8,
+      padding: "8px 10px"
+    }
+  }, React.createElement("div", {
+    style: {
+      fontWeight: 700,
+      fontSize: 13.5,
+      color: c.ok ? BRAND.ink : BRAND.red
+    }
+  }, c.ok ? "✓" : "✕", " ", c.name), React.createElement("div", {
+    style: {
+      fontSize: 12,
+      color: BRAND.sub
+    }
+  }, c.detail || (c.ok ? "OK" : ""), c.ok && c.ms ? " · " + c.ms + " ms" : ""))))), React.createElement("div", {
+    className: "flex items-center justify-between flex-wrap gap-2",
+    style: {
+      marginTop: 14
+    }
+  }, React.createElement("div", {
+    style: {
+      fontSize: 12,
+      fontWeight: 700,
+      color: BRAND.sub,
+      letterSpacing: "0.06em"
+    }
+  }, "ERRORS SEEN BY USERS AND THE SERVER"), errs.length > openErrs.length && React.createElement("button", {
+    onClick: () => setShowFixed(!showFixed),
+    style: {
+      background: "none",
+      border: "none",
+      color: BRAND.navySoft,
+      fontSize: 12.5,
+      cursor: "pointer"
+    }
+  }, showFixed ? "Hide fixed" : "Show fixed (" + (errs.length - openErrs.length) + ")")), shown.length === 0 && React.createElement("p", {
+    style: {
+      fontSize: 13.5,
+      color: BRAND.green,
+      marginTop: 6
+    }
+  }, "No open errors."), shown.map(e => React.createElement("div", {
+    key: e.fp,
+    style: {
+      borderTop: `1px solid ${BRAND.line}`,
+      padding: "9px 0",
+      opacity: e.resolved ? 0.6 : 1
+    }
+  }, React.createElement("div", {
+    className: "flex items-start justify-between gap-2 flex-wrap"
+  }, React.createElement("div", {
+    style: {
+      minWidth: 0,
+      flex: 1
+    }
+  }, React.createElement("div", {
+    style: {
+      fontSize: 14,
+      fontWeight: 700,
+      color: BRAND.ink,
+      wordBreak: "break-word"
+    }
+  }, e.message), React.createElement("div", {
+    style: {
+      fontSize: 12,
+      color: BRAND.sub
+    }
+  }, e.where, " \xB7 ", e.source, " \xB7 ", e.count, "\xD7 \xB7 last ", ago(e.lastSeen), e.lastCompany ? " · company " + e.lastCompany : "")), React.createElement("div", {
+    className: "flex gap-2"
+  }, e.stack && React.createElement(Btn, {
+    small: true,
+    kind: "ghost",
+    onClick: () => setOpen(open === e.fp ? "" : e.fp)
+  }, open === e.fp ? "Hide details" : "Details"), !e.resolved && React.createElement(Btn, {
+    small: true,
+    kind: "ghost",
+    disabled: !!busy,
+    onClick: () => fix(e.fp)
+  }, "Mark fixed"))), open === e.fp && React.createElement("pre", {
+    style: {
+      fontSize: 11,
+      background: BRAND.paper,
+      padding: 10,
+      borderRadius: 8,
+      overflowX: "auto",
+      whiteSpace: "pre-wrap",
+      marginTop: 6
+    }
+  }, e.stack, e.lastUrl ? "\n\nPage: " + e.lastUrl : ""))), React.createElement("p", {
+    style: {
+      fontSize: 12,
+      color: BRAND.sub,
+      marginTop: 10
+    }
+  }, "To get these alerts on your phone, open the app on your phone and tap ", React.createElement("b", null, "Turn on alerts"), "."));
+}
 function ReferralMaker({
   notify
 }) {
@@ -6841,7 +7187,9 @@ function AdminView({
     style: {
       color: BRAND.sub
     }
-  }, "Loading every company\u2026"), data && React.createElement(React.Fragment, null, React.createElement(ReferralMaker, {
+  }, "Loading every company\u2026"), React.createElement(SystemHealth, {
+    notify: notify
+  }), data && React.createElement(React.Fragment, null, React.createElement(ReferralMaker, {
     notify: notify
   }), React.createElement("div", {
     className: "grid gap-3 mb-4",
@@ -8715,7 +9063,7 @@ function PreviewModal({
     }
   }, "Thank you for the opportunity to earn your business. \u2014 ", COMPANY.name))));
 }
-ReactDOM.createRoot(document.getElementById("root")).render(React.createElement(App, null));
+ReactDOM.createRoot(document.getElementById("root")).render(React.createElement(ErrorBoundary, null, React.createElement(App, null)));
 </script>
 
 </body>

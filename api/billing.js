@@ -12,7 +12,9 @@
 ============================================================ */
 
 const { bad, parseBody, verifyCaller, getDocAsServer, setDocAsServer } = require("./_lib");
+const { withMonitor } = require("./_monitor");
 const { PLANS, TRIAL_DAYS, stripe, stripeOn, testMode, priceFor, portalConfig, billingFields } = require("./_stripe");
+const { loadCompany, accessOf, trialCap } = require("./_access");
 
 const DAY = 864e5;
 
@@ -23,32 +25,12 @@ function originOf(req) {
   return "https://www.s-i-quotespro.com";
 }
 
-async function loadCompany(cid) {
-  const got = await getDocAsServer("companies/" + cid, { meta: true });
-  if (!got) throw Object.assign(new Error("Company not found."), { code: 404 });
-  const co = got.data;
-  /* The free trial is 14 days from when the company was really created —
-     the trialEnds the browser wrote at sign-up can't stretch it. */
-  const born = got.createTime ? new Date(got.createTime).getTime() : Date.now();
-  let cap = born + TRIAL_DAYS * DAY;
-  if (co.trialOverride) cap = Math.max(cap, new Date(co.trialOverride).getTime() || 0); // extra days given by S-I-Quotespro support
-  const claimed = co.trialEnds ? new Date(co.trialEnds).getTime() : cap;
-  if (!co.stripeSubscriptionId) co.trialEnds = new Date(Math.min(cap, isNaN(claimed) ? cap : claimed)).toISOString();
-  return co;
-}
 async function saveCompany(cid, patch) {
   const co = await loadCompany(cid);
   const next = Object.assign({}, co, patch);
+  delete next._createTime;
   await setDocAsServer("companies/" + cid, next);
   return next;
-}
-
-/* Can this company use the app right now? */
-function accessOf(co) {
-  if (co.suspended) return "suspended"; // put on hold by S-I-Quotespro support
-  if (!stripeOn()) return "ok"; // billing not switched on yet
-  if (co.stripeSubscriptionId) return ["trialing", "active", "past_due"].includes(co.billingStatus) ? "ok" : "locked";
-  return new Date(co.trialEnds).getTime() > Date.now() ? "needs_card" : "locked";
 }
 
 /* 25% off the first paid month for referred companies. "Repeating, 1 month"
@@ -82,7 +64,7 @@ async function cardCheck(cid, co, sub) {
   try {
     const pi = await stripe("POST", "payment_intents", {
       amount: 100, currency: "usd", customer: co.stripeCustomerId, payment_method: pm,
-      capture_method: "manual", confirm: true, off_session: true,
+      capture_method: "manual", confirm: true, off_session: true, payment_method_types: ["card"],
       description: "S-I-Quotespro card check — $1 hold, released automatically",
       metadata: { siq_company: cid, purpose: "card_check" },
     }, "siq-cardcheck-" + cid + "-" + pm);
@@ -90,13 +72,24 @@ async function cardCheck(cid, co, sub) {
     else result = pi.status === "requires_action" ? "needs_auth" : "failed";
     if (pi.status !== "requires_capture" && pi.status !== "canceled") { try { await stripe("POST", "payment_intents/" + pi.id + "/cancel", {}); } catch {} }
   } catch (e) {
-    result = "declined";
+    // A real decline comes back as a card error; anything else is our problem, not the customer's card.
+    result = e.stripe && e.stripe.type === "card_error" ? "declined" : "unchecked";
+    if (result === "unchecked") console.error("[billing] card check:", e.message);
   }
   return saveCompany(cid, { cardCheck: result, cardCheckedAt: new Date().toISOString() });
 }
 
-async function syncFromStripe(cid, co, sessionId) {
-  let subId = co.stripeSubscriptionId || "";
+/* If checkout finished but the browser never came back, find the subscription
+   on the customer so we never sell the same company a second plan. */
+async function adoptExisting(cid, co) {
+  if (co.stripeSubscriptionId || !co.stripeCustomerId || !stripeOn()) return co;
+  const list = await stripe("GET", "subscriptions", { customer: co.stripeCustomerId, status: "all", limit: 10 });
+  const live = (list.data || []).find((x) => ["trialing", "active", "past_due"].includes(x.status));
+  return live ? syncFromStripe(cid, co, "", live.id) : co;
+}
+
+async function syncFromStripe(cid, co, sessionId, knownSubId) {
+  let subId = knownSubId || co.stripeSubscriptionId || "";
   let customer = co.stripeCustomerId || "";
   if (sessionId) {
     const s = await stripe("GET", "checkout/sessions/" + encodeURIComponent(sessionId));
@@ -105,12 +98,23 @@ async function syncFromStripe(cid, co, sessionId) {
     customer = s.customer || customer;
   }
   if (!subId) return co;
-  const sub = await stripe("GET", "subscriptions/" + subId, { expand: ["default_payment_method"] });
+  let sub;
+  try { sub = await stripe("GET", "subscriptions/" + subId, { expand: ["default_payment_method"] }); }
+  catch (e) {
+    // A subscription Stripe has never heard of (or was deleted): forget it instead of trusting it.
+    if (e.stripe && e.stripe.code === "resource_missing") {
+      return saveCompany(cid, { stripeSubscriptionId: "", billingStatus: "", billingSyncedAt: new Date().toISOString() });
+    }
+    throw e;
+  }
+  if (sub.metadata && sub.metadata.siq_company && sub.metadata.siq_company !== cid) {
+    throw Object.assign(new Error("That subscription belongs to another account."), { code: 403 });
+  }
   co = await saveCompany(cid, Object.assign({ stripeCustomerId: customer || sub.customer }, billingFields(sub), co.referredBy ? { referralDiscountUsed: true } : {}));
   return cardCheck(cid, co, sub);
 }
 
-module.exports = async (req, res) => {
+const handler = async (req, res) => {
   if (req.method !== "POST") return bad(res, 405, "POST only.");
   const body = parseBody(req);
   if (!body) return bad(res, 400, "Missing or invalid request body.");
@@ -135,6 +139,7 @@ module.exports = async (req, res) => {
         || (co.trialEnds && new Date(co.trialEnds).getTime() < Date.now() && co.billingStatus === "trialing")
         || (co.currentPeriodEnd && new Date(co.currentPeriodEnd).getTime() < Date.now());
       if (stripeOn() && co.stripeSubscriptionId && stale) { try { co = await syncFromStripe(cid, co); } catch (e) { console.error("[billing] sync:", e.message); } }
+      if (stripeOn() && !co.stripeSubscriptionId && co.stripeCustomerId) { try { co = await adoptExisting(cid, co); } catch (e) { console.error("[billing] adopt:", e.message); } }
       return res.status(200).json(publicView(co));
     }
 
@@ -155,6 +160,7 @@ module.exports = async (req, res) => {
     if (action === "checkout") {
       const plan = String(body.plan || "");
       if (!PLANS[plan]) return bad(res, 400, "Pick a plan: starter, pro or team.");
+      co = await adoptExisting(cid, co);
       if (co.stripeSubscriptionId && ["trialing", "active", "past_due"].includes(co.billingStatus)) {
         return bad(res, 409, "You already have a plan. Use Manage billing to change it.");
       }
@@ -164,8 +170,9 @@ module.exports = async (req, res) => {
         }, "siq-customer-" + cid);
         co = await saveCompany(cid, { stripeCustomerId: cust.id });
       }
-      // Whatever is left of the 14-day trial that started at sign-up.
-      const ends = co.trialEnds ? new Date(co.trialEnds).getTime() : Date.now() + TRIAL_DAYS * DAY;
+      // Whatever is left of the 14-day trial that started when the company was created
+      // (never a fresh trial for a company that cancels and comes back).
+      const ends = trialCap(co);
       const daysLeft = Math.ceil((ends - Date.now()) / DAY);
       const origin = originOf(req);
       const session = await stripe("POST", "checkout/sessions", {
@@ -190,3 +197,5 @@ module.exports = async (req, res) => {
     return bad(res, e.code && e.code < 600 ? e.code : 502, e.message || "Billing didn't respond. Try again.");
   }
 };
+
+module.exports = withMonitor("billing", handler);

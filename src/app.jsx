@@ -167,7 +167,71 @@ let signupInFlight = null;
 
 /* Surfaces Firestore permission problems in the console instead of
    swallowing them silently — makes rule mismatches debuggable. */
-const warn = (where) => (e) => console.warn("[JTProQuotes] " + where + ":", (e && e.message) || e);
+/* ================= ERROR REPORTING =================
+   Crashes, failed server calls and database errors are sent to
+   /api/report so they show up in Admin → System health (and as a phone
+   alert to the owner) before a customer has to call about them. */
+const reported = new Set();
+function reportProblem(where, err) {
+  try {
+    if (!CLOUD || reported.size >= 15) return;
+    const message = String((err && (err.message || err.reason)) || err || "").slice(0, 500);
+    if (!message) return;
+    const key = where + "|" + message;
+    if (reported.has(key)) return;
+    reported.add(key);
+    const body = JSON.stringify({ where, message, stack: String((err && err.stack) || "").slice(0, 1500), cid: TENANT || "", url: location.pathname + location.search.replace(/session_id=[^&]+/, "session_id=…") });
+    if (navigator.sendBeacon) navigator.sendBeacon("/api/report", new Blob([body], { type: "application/json" }));
+    else fetch("/api/report", { method: "POST", headers: { "Content-Type": "application/json" }, body, keepalive: true }).catch(() => {});
+  } catch {}
+}
+window.addEventListener("error", (e) => reportProblem("browser crash", e.error || e.message));
+window.addEventListener("unhandledrejection", (e) => reportProblem("unhandled promise", e.reason));
+/* Every call to our own /api: a 5xx, or no answer while the phone is online, is a problem worth knowing about. */
+(function watchApi() {
+  const orig = window.fetch && window.fetch.bind(window);
+  if (!orig) return;
+  window.fetch = async (input, init) => {
+    const url = typeof input === "string" ? input : (input && input.url) || "";
+    const ours = /^\/api\/(?!report)/.test(url) || url.indexOf(location.origin + "/api/") === 0;
+    try {
+      const r = await orig(input, init);
+      if (ours && r.status >= 500) {
+        r.clone().json().catch(() => ({})).then((j) => reportProblem("api " + url.replace(location.origin, "").split("?")[0], r.status + " " + ((j && j.error) || r.statusText || "server error")));
+      }
+      return r;
+    } catch (e) {
+      if (ours && navigator.onLine !== false) reportProblem("api " + url.replace(location.origin, "").split("?")[0], "no response: " + ((e && e.message) || e));
+      throw e;
+    }
+  };
+})();
+
+const warn = (where) => (e) => {
+  console.warn("[S-I-Quotespro] " + where + ":", (e && e.message) || e);
+  // Permission and server errors from the database mean something is misconfigured; offline blips don't.
+  const code = String((e && e.code) || "");
+  if (code && !/unavailable|cancelled|aborted|deadline-exceeded/.test(code)) reportProblem("database: " + where, code + " " + ((e && e.message) || ""));
+};
+
+/* A crash while drawing the screen shows a friendly message instead of a blank page, and is reported. */
+class ErrorBoundary extends React.Component {
+  constructor(p) { super(p); this.state = { err: null }; }
+  static getDerivedStateFromError(err) { return { err }; }
+  componentDidCatch(err, info) { reportProblem("screen crash", Object.assign(new Error(err && err.message || String(err)), { stack: (err && err.stack || "") + "\n" + (info && info.componentStack || "") })); }
+  render() {
+    if (!this.state.err) return this.props.children;
+    return (
+      <div className="min-h-screen flex items-center justify-center px-4" style={{ background: BRAND.navy }}>
+        <div style={{ background: "#fff", borderRadius: 14, padding: 26, maxWidth: 440, textAlign: "center" }}>
+          <h2 style={{ fontFamily: "'Barlow Condensed', sans-serif", fontSize: 26, color: BRAND.navy, marginBottom: 8 }}>SOMETHING WENT WRONG</h2>
+          <p style={{ fontSize: 14, color: BRAND.sub, marginBottom: 16 }}>Your quotes are safe. We've been notified automatically. Reload to keep working.</p>
+          <Btn kind="gold" onClick={() => location.reload()}>Reload</Btn>
+        </div>
+      </div>
+    );
+  }
+}
 
 const hasClaudeStore = typeof window.storage !== "undefined" && window.storage && typeof window.storage.get === "function";
 
@@ -561,15 +625,17 @@ function App() {
   const saveSettings = async (s) => {
     if (CLOUD) {
       const before = settings || {};
+      const oldCode = String(before.teamCode || "").toUpperCase(), newCode = String(s.teamCode || "").toUpperCase();
+      /* Another company: its team code is a public lookup key that points new
+         associates at this company. Claim the new code first, so a code that
+         already belongs to someone else is refused before anything changes. */
+      if (TENANT && newCode && newCode !== oldCode) {
+        try { await db.collection("joincodes").doc(newCode).set({ companyId: TENANT, companyName: (s.profile && s.profile.name) || COMPANY.name }); }
+        catch (e) { warn("save join code")(e); throw new Error("That team code is already taken. Pick a different one."); }
+      }
       await col("settings").doc("company").set(s);
       if (TENANT) {
-        /* Another company: its team code is a public lookup key that points
-           new associates at this company. Rotating it retires the old one. */
-        const oldCode = String(before.teamCode || "").toUpperCase(), newCode = String(s.teamCode || "").toUpperCase();
-        if (newCode && newCode !== oldCode) {
-          await db.collection("joincodes").doc(newCode).set({ companyId: TENANT, companyName: (s.profile && s.profile.name) || COMPANY.name }).catch(warn("save join code"));
-          if (oldCode) await db.collection("joincodes").doc(oldCode).delete().catch(warn("retire join code"));
-        }
+        if (newCode && newCode !== oldCode && oldCode) await db.collection("joincodes").doc(oldCode).delete().catch(warn("retire join code"));
         if (s.profile && s.profile.name && s.profile.name !== ((before.profile && before.profile.name) || "")) {
           db.collection("companies").doc(TENANT).update({ name: s.profile.name, updatedAt: new Date().toISOString() }).catch(warn("rename company"));
         }
@@ -803,7 +869,7 @@ function App() {
           onOpen={(q) => { setActiveQuote(q); setView("edit"); }} notify={notify} />}
 
         {view === "admin" && !TENANT && isOwner && <AdminView notify={notify} openCid={adminOpen} />}
-        {view === "settings" && isOwner && <SettingsView settings={settings} quotes={quotes} billing={billing} notify={notify} onSave={async (s) => { await saveSettings(s); notify("Settings saved"); }} />}
+        {view === "settings" && isOwner && <SettingsView settings={settings} quotes={quotes} billing={billing} notify={notify} onSave={async (s) => { try { await saveSettings(s); notify("Settings saved"); } catch (e) { notify(e.message || "Couldn't save settings. Try again."); } }} />}
       </main>
 
       {previewQuote && <PreviewModal quote={previewQuote} settings={settings} users={users} me={me} onClose={() => setPreviewQuote(null)} />}
@@ -1976,13 +2042,19 @@ function QuoteForm({ me, isOwner, isManager, settings, notify, existing, onSave,
   });
   const [dirty, setDirty] = useState(false);
   const [loggedStart, setLoggedStart] = useState(false);
-  const set = (k, v) => { setDirty(true); setQ((p) => Object.assign({}, p, { [k]: v })); };
+  /* Autosave runs 1.2 s after typing stops. Submitting, approving, sending
+     back or voiding stops it first, so an old draft can never land on top. */
+  const autosaveTimer = useRef(null);
+  const autosavePaused = useRef(false);
+  const stopAutosave = () => { autosavePaused.current = true; if (autosaveTimer.current) { clearTimeout(autosaveTimer.current); autosaveTimer.current = null; } };
+  const set = (k, v) => { autosavePaused.current = false; setDirty(true); setQ((p) => Object.assign({}, p, { [k]: v })); };
   const locked = isVoid(q) || (!isManager && ["approved", "sent", "negotiating", "won", "lost"].includes(q.status));
   useEffect(() => {
     if (!dirty) return;
     if (!existing && !loggedStart) { logActivity(me.name, "Started a new draft", q.quoteNo); setLoggedStart(true); }
-    if (locked) return; // approved/sent/won/lost quotes are read-only for associates
-    const t = setTimeout(() => { onAutosave(Object.assign({}, q, { updatedAt: new Date().toISOString() })); }, 1200);
+    if (locked || autosavePaused.current) return; // approved/sent/won/lost quotes are read-only for associates
+    const t = setTimeout(() => { autosaveTimer.current = null; if (!autosavePaused.current) onAutosave(Object.assign({}, q, { updatedAt: new Date().toISOString() })); }, 1200);
+    autosaveTimer.current = t;
     return () => clearTimeout(t);
   }, [q, dirty]);
   const c = computeQuote(q, settings);
@@ -2055,6 +2127,7 @@ function QuoteForm({ me, isOwner, isManager, settings, notify, existing, onSave,
 
   const save = async (submit, opts) => {
     if (!q.clientName.trim()) return alert("Enter the client's name.");
+    stopAutosave();
     if (submit && !(Number(q.days) > 0) && !(q.items || []).length) return alert("Add the days on site (or materials) before submitting — the quote is still $0.");
     const next = Object.assign({}, q, { updatedAt: new Date().toISOString() });
     if (submit) {
@@ -2075,8 +2148,9 @@ function QuoteForm({ me, isOwner, isManager, settings, notify, existing, onSave,
     && ["pending", "changes", "draft"].includes(q.status);
 
   const sendBack = () => {
+    stopAutosave();
     const note = window.prompt("What should they change?\n(e.g. Margin too thin — raise to 22%)", q.reviewNote || "");
-    if (note === null) return;
+    if (note === null) { autosavePaused.current = false; return; }
     onSave(Object.assign({}, q, {
       status: "changes",
       reviewNote: note.trim(),
@@ -2087,7 +2161,8 @@ function QuoteForm({ me, isOwner, isManager, settings, notify, existing, onSave,
   };
 
   const voidThis = () => {
-    if (!window.confirm("Void quote " + q.quoteNo + "?\n\nVoiding is permanent. The quote is frozen for good — it can't be edited, printed, or brought back, and it stops counting toward any total.")) return;
+    stopAutosave();
+    if (!window.confirm("Void quote " + q.quoteNo + "?\n\nVoiding is permanent. The quote is frozen for good — it can't be edited, printed, or brought back, and it stops counting toward any total.")) { autosavePaused.current = false; return; }
     const reason = window.prompt("Why is this quote being voided?\n(e.g. duplicate, client cancelled, priced in error)");
     if (reason === null) return;
     onSave(Object.assign({}, q, {
@@ -3302,6 +3377,67 @@ function planPill(c) {
   return left > 0 ? <span style={PILL("#FBF3DE", BRAND.amber)}>Trial · {left}d left · no card</span> : <span style={PILL("#ECEEF1", BRAND.sub)}>Trial ended</span>;
 }
 
+function SystemHealth({ notify }) {
+  const [d, setD] = useState(null);
+  const [busy, setBusy] = useState("");
+  const [open, setOpen] = useState("");
+  const [showFixed, setShowFixed] = useState(false);
+  const load = async () => { try { setD(await adminCall("ops")); } catch (e) { setD({ error: e.message }); } };
+  useEffect(() => { load(); const t = setInterval(load, 60e3); return () => clearInterval(t); }, []);
+  const run = async () => { setBusy("run"); try { const r = await adminCall("runHealth"); setD((x) => Object.assign({}, x, { health: r.health })); notify(r.health.ok ? "All checks passed" : "Some checks are failing"); } catch (e) { notify(e.message); } setBusy(""); };
+  const fix = async (fp) => { setBusy(fp); try { await adminCall("resolveError", { fp }); await load(); notify("Marked as fixed — you'll be alerted if it comes back"); } catch (e) { notify(e.message); } setBusy(""); };
+  if (!d) return <Card style={{ marginBottom: 16 }}><p style={{ color: BRAND.sub }}>Checking system health…</p></Card>;
+  const h = d.health, errs = (d.errors || []);
+  const openErrs = errs.filter((e) => !e.resolved);
+  const shown = showFixed ? errs : openErrs;
+  const tone = !h ? BRAND.sub : h.ok && !openErrs.length ? BRAND.green : !h.ok ? BRAND.red : BRAND.amber;
+  const label = !h ? "No check has run yet" : !h.ok ? "Something is down" : openErrs.length ? openErrs.length + " open problem" + (openErrs.length > 1 ? "s" : "") : "All systems normal";
+  return (
+    <Card style={{ marginBottom: 16, borderColor: tone, borderWidth: 2 }}>
+      <div className="flex items-center justify-between flex-wrap gap-2">
+        <div className="flex items-center gap-2">
+          <span style={{ width: 12, height: 12, borderRadius: 99, background: tone, display: "inline-block", boxShadow: `0 0 0 4px ${tone}22` }} />
+          <div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontSize: 21, fontWeight: 700, color: BRAND.navy }}>SYSTEM HEALTH · {label.toUpperCase()}</div>
+        </div>
+        <div className="flex gap-2"><Btn small kind="ghost" disabled={!!busy} onClick={run}>{busy === "run" ? "Checking…" : "Run check now"}</Btn></div>
+      </div>
+      {d.error && <p style={{ color: BRAND.red, fontSize: 13, marginTop: 8 }}>{d.error}</p>}
+      {h && <>
+        <div style={{ fontSize: 12.5, color: BRAND.sub, margin: "6px 0 10px" }}>Last checked {ago(h.at)}{h.failingSince ? " · failing since " + fmtDay(h.failingSince) : ""}. Checks run every 30 minutes; you get a phone alert and email when something breaks or recovers.</div>
+        <div className="grid gap-2" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))" }}>
+          {(h.checks || []).map((c) => (
+            <div key={c.name} style={{ border: `1px solid ${c.ok ? BRAND.line : BRAND.red}`, background: c.ok ? "#fff" : "#F9E5E3", borderRadius: 8, padding: "8px 10px" }}>
+              <div style={{ fontWeight: 700, fontSize: 13.5, color: c.ok ? BRAND.ink : BRAND.red }}>{c.ok ? "✓" : "✕"} {c.name}</div>
+              <div style={{ fontSize: 12, color: BRAND.sub }}>{c.detail || (c.ok ? "OK" : "")}{c.ok && c.ms ? " · " + c.ms + " ms" : ""}</div>
+            </div>
+          ))}
+        </div>
+      </>}
+      <div className="flex items-center justify-between flex-wrap gap-2" style={{ marginTop: 14 }}>
+        <div style={{ fontSize: 12, fontWeight: 700, color: BRAND.sub, letterSpacing: "0.06em" }}>ERRORS SEEN BY USERS AND THE SERVER</div>
+        {errs.length > openErrs.length && <button onClick={() => setShowFixed(!showFixed)} style={{ background: "none", border: "none", color: BRAND.navySoft, fontSize: 12.5, cursor: "pointer" }}>{showFixed ? "Hide fixed" : "Show fixed (" + (errs.length - openErrs.length) + ")"}</button>}
+      </div>
+      {shown.length === 0 && <p style={{ fontSize: 13.5, color: BRAND.green, marginTop: 6 }}>No open errors.</p>}
+      {shown.map((e) => (
+        <div key={e.fp} style={{ borderTop: `1px solid ${BRAND.line}`, padding: "9px 0", opacity: e.resolved ? 0.6 : 1 }}>
+          <div className="flex items-start justify-between gap-2 flex-wrap">
+            <div style={{ minWidth: 0, flex: 1 }}>
+              <div style={{ fontSize: 14, fontWeight: 700, color: BRAND.ink, wordBreak: "break-word" }}>{e.message}</div>
+              <div style={{ fontSize: 12, color: BRAND.sub }}>{e.where} · {e.source} · {e.count}× · last {ago(e.lastSeen)}{e.lastCompany ? " · company " + e.lastCompany : ""}</div>
+            </div>
+            <div className="flex gap-2">
+              {e.stack && <Btn small kind="ghost" onClick={() => setOpen(open === e.fp ? "" : e.fp)}>{open === e.fp ? "Hide details" : "Details"}</Btn>}
+              {!e.resolved && <Btn small kind="ghost" disabled={!!busy} onClick={() => fix(e.fp)}>Mark fixed</Btn>}
+            </div>
+          </div>
+          {open === e.fp && <pre style={{ fontSize: 11, background: BRAND.paper, padding: 10, borderRadius: 8, overflowX: "auto", whiteSpace: "pre-wrap", marginTop: 6 }}>{e.stack}{e.lastUrl ? "\n\nPage: " + e.lastUrl : ""}</pre>}
+        </div>
+      ))}
+      <p style={{ fontSize: 12, color: BRAND.sub, marginTop: 10 }}>To get these alerts on your phone, open the app on your phone and tap <b>Turn on alerts</b>.</p>
+    </Card>
+  );
+}
+
 function ReferralMaker({ notify }) {
   const [name, setName] = useState("");
   const slug = name.toLowerCase().trim().replace(/\s+/g, "-").replace(/[^a-z0-9-]/g, "").slice(0, 30);
@@ -3353,6 +3489,7 @@ function AdminView({ notify, openCid }) {
       </div>
       {err && <Card style={{ borderColor: BRAND.red, color: BRAND.red, marginBottom: 12 }}>{err}</Card>}
       {!data && !err && <p style={{ color: BRAND.sub }}>Loading every company…</p>}
+      <SystemHealth notify={notify} />
       {data && <>
         <ReferralMaker notify={notify} />
         <div className="grid gap-3 mb-4" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))" }}>
@@ -4041,4 +4178,4 @@ function PreviewModal({ quote, settings, users, me, onClose }) {
   );
 }
 
-ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+ReactDOM.createRoot(document.getElementById("root")).render(<ErrorBoundary><App /></ErrorBoundary>);

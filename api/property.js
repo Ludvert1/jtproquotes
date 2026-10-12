@@ -7,9 +7,11 @@
 ============================================================ */
 
 const { bad, parseBody, verifyCaller } = require("./_lib");
+const { withMonitor } = require("./_monitor");
+const { blockedReason } = require("./_access");
 const { lookupProperty } = require("./_property");
 
-module.exports = async (req, res) => {
+const handler = async (req, res) => {
   if (req.method !== "POST") return bad(res, 405, "POST only.");
   const body = parseBody(req);
   if (!body) return bad(res, 400, "Missing or invalid request body.");
@@ -20,6 +22,7 @@ module.exports = async (req, res) => {
   try { caller = await verifyCaller(idToken); }
   catch { return bad(res, 503, "Couldn't check your sign-in just now. Try again in a moment."); }
   if (!caller) return bad(res, 403, "Your account isn't approved to use this yet.");
+  { const why = await blockedReason(caller.companyId); if (why) return bad(res, 402, why); }
 
   const address = typeof body.address === "string" ? body.address.trim().slice(0, 240) : "";
   if (address.length < 6) return bad(res, 400, "Enter the job address first (street, city).");
@@ -35,3 +38,5 @@ module.exports = async (req, res) => {
     return bad(res, e.code || 502, e.message || "Property lookup failed.");
   }
 };
+
+module.exports = withMonitor("property", handler);

@@ -19,6 +19,7 @@
 ============================================================ */
 
 const { bad, parseBody, verifyCaller, getDocAs, listDocsAs, sendEmail, quoteTotal } = require("./_lib");
+const { withMonitor } = require("./_monitor");
 const { pushEnabled, sendToPeople } = require("./_push");
 
 const money = (n) => "$" + Math.round(Number(n) || 0).toLocaleString("en-US");
@@ -26,7 +27,7 @@ const money = (n) => "$" + Math.round(Number(n) || 0).toLocaleString("en-US");
 /* The total is recomputed from the stored quote with the shared formula in
    _lib.js, never trusted from the request. */
 
-module.exports = async (req, res) => {
+const handler = async (req, res) => {
   if (req.method !== "POST") return bad(res, 405, "POST only.");
 
   const body = parseBody(req);
@@ -129,3 +130,5 @@ module.exports = async (req, res) => {
   console.log("[notify] quote=" + (quote.quoteNo || quoteId) + " email=" + (out.email && out.email.sent) + " push=" + (out.push && out.push.sent));
   return res.status(200).json(out);
 };
+
+module.exports = withMonitor("notify", handler);

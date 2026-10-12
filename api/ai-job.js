@@ -12,8 +12,10 @@
 ============================================================ */
 
 const { bad, parseBody, verifyCaller, getDocAsServer, setDocAsServer, queryAsServer } = require("./_lib");
+const { withMonitor } = require("./_monitor");
+const { blockedReason } = require("./_access");
 
-module.exports = async (req, res) => {
+const handler = async (req, res) => {
   if (req.method !== "POST") return bad(res, 405, "POST only.");
   const body = parseBody(req);
   if (!body) return bad(res, 400, "Missing or invalid request body.");
@@ -24,6 +26,7 @@ module.exports = async (req, res) => {
   let caller;
   try { caller = await verifyCaller(idToken); } catch { return bad(res, 503, "Couldn't check your sign-in."); }
   if (!caller) return bad(res, 403, "Your account isn't approved.");
+  { const why = await blockedReason(caller.companyId); if (why) return bad(res, 402, why); }
   const isManager = caller.role === "owner" || caller.role === "assistant";
   const sameCompany = (j) => (j.companyId || "") === (caller.companyId || "");
   const mine = (j) => j && (j.uid === caller.uid || (isManager && sameCompany(j)));
@@ -51,3 +54,5 @@ module.exports = async (req, res) => {
     return bad(res, 502, "Couldn't check the draft just now.");
   }
 };
+
+module.exports = withMonitor("ai-job", handler);

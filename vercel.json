@@ -111,6 +111,12 @@
     },
     "api/contact.js": {
       "maxDuration": 15
+    },
+    "api/health.js": {
+      "maxDuration": 60
+    },
+    "api/report.js": {
+      "maxDuration": 15
     }
   },
   "redirects": [
@@ -220,6 +226,12 @@
       "source": "/admin",
       "destination": "/app?admin",
       "permanent": false
+    }
+  ],
+  "crons": [
+    {
+      "path": "/api/health?deep=1",
+      "schedule": "13 12 * * *"
     }
   ]
 }

@@ -7,8 +7,10 @@
 ============================================================ */
 
 const { bad, parseBody, verifyCaller, detectMaterials, checkImages, getDocAs, companyFor } = require("./_lib");
+const { withMonitor } = require("./_monitor");
+const { blockedReason } = require("./_access");
 
-module.exports = async (req, res) => {
+const handler = async (req, res) => {
   if (req.method !== "POST") return bad(res, 405, "POST only.");
   const body = parseBody(req);
   if (!body) return bad(res, 400, "Missing or invalid request body.");
@@ -20,6 +22,7 @@ module.exports = async (req, res) => {
   try { caller = await verifyCaller(idToken); }
   catch { return bad(res, 503, "Couldn't check your sign-in just now. Try again in a moment."); }
   if (!caller) return bad(res, 403, "Your account isn't approved to use this yet.");
+  { const why = await blockedReason(caller.companyId); if (why) return bad(res, 402, why); }
 
   const q = body.quote && typeof body.quote === "object" ? body.quote : {};
   const s = (v, n) => (typeof v === "string" ? v.slice(0, n) : "");
@@ -47,3 +50,5 @@ module.exports = async (req, res) => {
     return bad(res, e.code || 502, e.message || "Couldn't list the materials. Try again.");
   }
 };
+
+module.exports = withMonitor("materials", handler);

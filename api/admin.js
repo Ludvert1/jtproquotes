@@ -18,6 +18,7 @@
 ============================================================ */
 
 const { bad, parseBody, verifyCaller, DOCS, adminToken, fromFields, toFields, getDocAsServer, setDocAsServer, createDocAsServer, listDocsAsServer, sendEmail } = require("./_lib");
+const { withMonitor } = require("./_monitor");
 const { sendToPeople } = require("./_push");
 const { stripe, stripeOn, testMode } = require("./_stripe");
 
@@ -130,7 +131,7 @@ async function askForHelp(caller, body, res) {
   return res.status(200).json({ ok: true, supportId: supportId(cid) });
 }
 
-module.exports = async (req, res) => {
+const handler = async (req, res) => {
   if (req.method !== "POST") return bad(res, 405, "POST only.");
   const body = parseBody(req);
   if (!body) return bad(res, 400, "Missing or invalid request body.");
@@ -156,6 +157,26 @@ module.exports = async (req, res) => {
       for (let i = 0; i < cos.length; i += 10) rows.push(...(await Promise.all(cos.slice(i, i + 10).map(summary))));
       rows.sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
       return res.status(200).json({ companies: rows, testMode: testMode(), stripe: stripeOn() });
+    }
+
+    /* ---- System health: errors and service checks ---- */
+    if (action === "ops") {
+      const [health, errors] = await Promise.all([
+        getDocAsServer("ops/health").catch(() => null),
+        listWithIds("ops/errors/items", 500).catch(() => []),
+      ]);
+      errors.sort((a, b) => (a.resolved === b.resolved ? String(b.lastSeen).localeCompare(String(a.lastSeen)) : a.resolved ? 1 : -1));
+      return res.status(200).json({ health, errors: errors.slice(0, 60).map((e) => ({ fp: e.id, source: e.source, where: e.where, message: e.message, stack: e.stack, count: e.count, firstSeen: e.firstSeen, lastSeen: e.lastSeen, resolved: !!e.resolved, lastCompany: e.lastCompany, lastUrl: e.lastUrl })) });
+    }
+    if (action === "runHealth") {
+      const state = await require("./health").runAndRecord();
+      return res.status(200).json({ health: state });
+    }
+    if (action === "resolveError") {
+      const fp = String(body.fp || "");
+      if (!/^[0-9a-f]{20}$/.test(fp)) return bad(res, 400, "Pick an error.");
+      await patch("ops/errors/items/" + fp, { resolved: true, resolvedAt: new Date().toISOString(), resolvedBy: caller.name || caller.email });
+      return res.status(200).json({ ok: true });
     }
 
     const cid = String(body.cid || "");
@@ -289,3 +310,5 @@ async function note(coPath, caller, text, manual) {
   try { await createDocAsServer(coPath + "/supportNotes", id, { text, at: new Date().toISOString(), by: caller.name || caller.email, kind: manual ? "note" : "action" }); }
   catch (e) { console.error("[admin] note:", e.message); }
 }
+
+module.exports = withMonitor("admin", handler);

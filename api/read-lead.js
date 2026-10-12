@@ -15,12 +15,14 @@
 ============================================================ */
 
 const { bad, parseBody, verifyCaller, extractLead } = require("./_lib");
+const { withMonitor } = require("./_monitor");
+const { blockedReason } = require("./_access");
 
 const MAX_IMAGES = 3;
 const MAX_TOTAL_BASE64 = 3_600_000; // ~2.7 MB of image data, inside Vercel's body limit
 const ALLOWED_MEDIA = ["image/jpeg", "image/png", "image/webp", "image/gif"];
 
-module.exports = async (req, res) => {
+const handler = async (req, res) => {
   if (req.method !== "POST") return bad(res, 405, "POST only.");
 
   const body = parseBody(req);
@@ -37,6 +39,7 @@ module.exports = async (req, res) => {
   try { caller = await verifyCaller(idToken); }
   catch { return bad(res, 503, "Couldn't check your sign-in just now. Try again in a moment."); }
   if (!caller) return bad(res, 403, "Your account isn't approved to use this yet. Ask the owner to approve it.");
+  { const why = await blockedReason(caller.companyId); if (why) return bad(res, 402, why); }
 
   const text = typeof body.text === "string" ? body.text.slice(0, 20000) : "";
   const images = Array.isArray(body.images) ? body.images.slice(0, MAX_IMAGES) : [];
@@ -60,3 +63,5 @@ module.exports = async (req, res) => {
     return bad(res, e.code || 502, e.message || "That didn't work. Try again, or type the details in.");
   }
 };
+
+module.exports = withMonitor("read-lead", handler);

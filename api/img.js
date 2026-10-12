@@ -12,7 +12,9 @@
 const BUCKET = process.env.FIREBASE_STORAGE_BUCKET || "jtproquotes.firebasestorage.app";
 const ALLOWED = "https://firebasestorage.googleapis.com/v0/b/" + BUCKET + "/o/leads%2F";
 
-module.exports = async (req, res) => {
+const { withMonitor } = require("./_monitor");
+
+const handler = async (req, res) => {
   const u = typeof req.query.u === "string" ? req.query.u : "";
   if (!u.startsWith(ALLOWED) || !/[?&]token=[\w-]+/.test(u)) return res.status(400).send("Not an allowed image.");
   try {
@@ -28,3 +30,5 @@ module.exports = async (req, res) => {
     return res.status(502).send("Image unavailable.");
   }
 };
+
+module.exports = withMonitor("img", handler);

@@ -5,10 +5,11 @@
    input is length-limited, and a hidden "website" field catches bots.
 ============================================================ */
 const { bad, parseBody, sendEmail } = require("./_lib");
+const { withMonitor } = require("./_monitor");
 
 const seen = new Map(); // ip -> [timestamps] (best effort, per instance)
 
-module.exports = async (req, res) => {
+const handler = async (req, res) => {
   if (req.method !== "POST") return bad(res, 405, "POST only.");
   const b = parseBody(req);
   if (!b) return bad(res, 400, "Missing message.");
@@ -28,3 +29,5 @@ module.exports = async (req, res) => {
   if (!r.sent) return bad(res, 503, "Couldn't send right now.");
   return res.status(200).json({ ok: true });
 };
+
+module.exports = withMonitor("contact", handler);

@@ -19,6 +19,8 @@
 ============================================================ */
 
 const { bad, parseBody, verifyCaller, getDocAs, setDocAs, setDocAsServer, listDocsAs, draftQuote, checkImages, companyFor } = require("./_lib");
+const { withMonitor } = require("./_monitor");
+const { blockedReason } = require("./_access");
 const { sendToPeople } = require("./_push");
 const { cleanProperty } = require("./_property");
 
@@ -27,7 +29,7 @@ const MAX_PHOTOS = 8;
 // before sending, which keeps eight comfortably under this.
 const MAX_TOTAL_BASE64 = 4_000_000;
 
-module.exports = async (req, res) => {
+const handler = async (req, res) => {
   if (req.method !== "POST") return bad(res, 405, "POST only.");
 
   const body = parseBody(req);
@@ -44,6 +46,7 @@ module.exports = async (req, res) => {
   try { caller = await verifyCaller(idToken); }
   catch { return bad(res, 503, "Couldn't check your sign-in just now. Try again in a moment."); }
   if (!caller) return bad(res, 403, "Your account isn't approved to use this yet. Ask the owner to approve it.");
+  { const why = await blockedReason(caller.companyId); if (why) return bad(res, 402, why); }
 
   const text = typeof body.text === "string" ? body.text.slice(0, 20000) : "";
   const checked = checkImages(body.images, MAX_PHOTOS, MAX_TOTAL_BASE64);
@@ -99,3 +102,5 @@ module.exports = async (req, res) => {
     return bad(res, e.code || 502, e.message || "That didn't work. Try again.");
   }
 };
+
+module.exports = withMonitor("ai-quote", handler);

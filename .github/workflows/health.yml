@@ -1,0 +1,19 @@
+# Checks every service S-I-Quotespro depends on every 30 minutes.
+# The check itself sends the phone alert + email when something breaks or recovers.
+name: Health check
+on:
+  schedule:
+    - cron: "7,37 * * * *"
+  workflow_dispatch: {}
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Run deep health check
+        run: |
+          code=$(curl -s -o out.json -w "%{http_code}" --max-time 60 "https://www.s-i-quotespro.com/api/health?deep=1")
+          cat out.json; echo
+          echo "HTTP $code"
+          # A failing check already alerted the owner; mark the run red so it's visible in GitHub too.
+          [ "$code" = "200" ]

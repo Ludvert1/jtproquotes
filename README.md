@@ -381,3 +381,12 @@ support phone/email from `config.js` (`supportPhone`, `supportEmail`) and a
 "send us a message" form. Each request sends you a phone alert (opens that
 company in Admin) and an email. Optional: `ADMIN_EMAILS` in Vercel narrows
 admin access to specific sign-in emails.
+
+## Monitoring & alerts (System health)
+
+- **Errors users hit** (screen crashes, failed `/api` calls, database permission errors) are sent from the browser to `/api/report`.
+- **Server errors** (any API that throws or answers 5xx) are recorded by `withMonitor` in `api/_monitor.js`.
+- Both are grouped by fingerprint in `ops/errors/items` (server-only). The owner gets a phone alert + email the first time a problem appears, when a fixed one comes back, and at most hourly while it repeats.
+- **Health checks** (`/api/health?deep=1`): website, app, Firestore, Anthropic key, Stripe key, push/email/maps settings. Run every 30 min by `.github/workflows/health.yml`, daily by Vercel cron, or "Run check now" in Admin. Alerts on failure (repeats every 6 h) and on recovery.
+- **Admin → System health** shows the checks, open errors (with details) and "Mark fixed".
+- Paid features (AI quotes, materials, lead inbox) are refused for companies that are on hold or whose trial ended without a plan (`api/_access.js`).

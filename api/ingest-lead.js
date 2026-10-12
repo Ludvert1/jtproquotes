@@ -24,6 +24,7 @@ const {
   draftQuote, draftToQuoteFields, quoteTotal, renderReply, priceRange, priceToWin,
   uploadImageAsServer, checkImages,
 } = require("./_lib");
+const { blockedReason } = require("./_access");
 const { sendToPeople } = require("./_push");
 const { lookupProperty } = require("./_property");
 
@@ -52,10 +53,12 @@ async function companyFromKey(given) {
   if (!want || want.length !== key.length || !crypto.timingSafeEqual(Buffer.from(want), Buffer.from(key))) return null;
   const co = await getDocAsServer("companies/" + cid);
   if (!co) return null;
-  return { cid, settings, ownerUid: co.ownerUid || "" };
+  return { cid, settings, ownerUid: co.ownerUid || "", blocked: await blockedReason(cid) };
 }
 
-module.exports = async (req, res) => {
+const { withMonitor } = require("./_monitor");
+
+const handler = async (req, res) => {
   if (req.method !== "POST") return bad(res, 405, "POST only.");
   if (!process.env.FIREBASE_SERVICE_ACCOUNT) return bad(res, 503, "Lead ingest needs FIREBASE_SERVICE_ACCOUNT in Vercel.");
   const body = parseBody(req);
@@ -68,6 +71,7 @@ module.exports = async (req, res) => {
   if (body.companyKey) {
     try { tenant = await companyFromKey(body.companyKey); } catch (e) { console.error("[ingest-lead] key check failed:", e.message); }
     if (!tenant) return bad(res, 401, "That lead-inbox key isn't valid. Copy it again from Settings → Lead inbox.");
+    if (tenant.blocked && !body.ping) return bad(res, 402, tenant.blocked);
   } else {
     const auth = String(req.headers.authorization || "");
     let sender = null;
@@ -245,7 +249,7 @@ module.exports = async (req, res) => {
 
   try {
     await createDocAsServer(base + "activity", uid() + uid(), {
-      at: now, who: "Lead inbox", action: "Filed a lead as a draft quote", quoteNo,
+      at: now, by: "Lead inbox", action: "Filed a lead as a draft quote", quoteNo,
     });
   } catch { /* the log is useful, not essential */ }
 
@@ -300,3 +304,5 @@ module.exports = async (req, res) => {
     questions: d ? d.questions : [],
   });
 };
+
+module.exports = withMonitor("ingest-lead", handler);

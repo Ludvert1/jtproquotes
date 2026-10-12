@@ -246,6 +246,9 @@ service cloud.firestore {
       allow create: if signedIn()
         && request.resource.data.ownerUid == request.auth.uid
         && request.resource.data.plan == 'trial'
+        // Only sign-up fields — billing fields (subscription, status) are written by the server.
+        && request.resource.data.keys().hasOnly(['name', 'ownerUid', 'ownerEmail', 'plan', 'createdAt', 'trialEnds', 'referredBy'])
+        && (!('referredBy' in request.resource.data) || (request.resource.data.referredBy is string && request.resource.data.referredBy.size() <= 30))
         && !hasMembership()
         && !exists(/databases/$(database)/documents/users/$(request.auth.uid));
       // The owner may rename it; plan and billing are set by the server only.
