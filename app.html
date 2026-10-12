@@ -1383,6 +1383,31 @@ function App() {
       clearInterval(t);
     };
   }, [me && me.id]);
+  const quoteCount = quotes ? Object.keys(quotes).length : 0;
+  useEffect(() => {
+    if (!CLOUD || !me || !TENANT || !billing || !billing.enabled || billing.access === "ok" && billing.billingStatus === "active") return;
+    const t = setTimeout(() => {
+      billingCall("status").then(setBilling).catch(warn("billing refresh"));
+    }, 2500);
+    return () => clearTimeout(t);
+  }, [quoteCount]);
+  const [planOpen, setPlanOpen] = useState(false);
+  const inTrial = !!(TENANT && billing && billing.enabled && billing.quoteLimit && billing.billingStatus !== "active" && ["trial", "ok"].includes(billing.access));
+  const warnKey = "siq_warn_lastquote_" + (TENANT || "");
+  const [warned, setWarned] = useState(() => {
+    try {
+      return !!localStorage.getItem(warnKey);
+    } catch {
+      return false;
+    }
+  });
+  const showLastQuoteAlert = inTrial && !warned && billing.quotesUsed === billing.quoteLimit - 1;
+  const dismissLastQuote = () => {
+    try {
+      localStorage.setItem(warnKey, "1");
+    } catch {}
+    setWarned(true);
+  };
   useEffect(() => {
     if (!me || TENANT) return;
     const a = new URLSearchParams(window.location.search).get("admin");
@@ -1521,12 +1546,13 @@ function App() {
     setView("dashboard");
     await sessionClear();
   };
-  if (TENANT && billing && billing.access && billing.access !== "ok" && (isOwner || billing.access !== "needs_card")) {
+  if (TENANT && billing && ["locked", "limit", "suspended"].includes(billing.access)) {
     return React.createElement(React.Fragment, null, React.createElement(BillingGate, {
       billing: billing,
       isOwner: isOwner,
       onSignOut: logout,
-      notify: notify
+      notify: notify,
+      onBilling: setBilling
     }), toast && React.createElement("div", {
       style: {
         position: "fixed",
@@ -1653,7 +1679,11 @@ function App() {
     style: {
       color: BRAND.ink
     }
-  }, me.name), " \xB7 ", ROLE_LABEL[roleOf(me)]), view === "dashboard" && TENANT && isOwner && !(settings.leadSetup && settings.leadSetup.done) && !leadLater && React.createElement(ThumbtackSetup, {
+  }, me.name), " \xB7 ", ROLE_LABEL[roleOf(me)]), view === "dashboard" && inTrial && React.createElement(TrialBanner, {
+    billing: billing,
+    isOwner: isOwner,
+    onChoose: () => setPlanOpen(true)
+  }), view === "dashboard" && TENANT && isOwner && !(settings.leadSetup && settings.leadSetup.done) && !leadLater && React.createElement(ThumbtackSetup, {
     settings: settings,
     quotes: quotes,
     compact: true,
@@ -1750,6 +1780,15 @@ function App() {
     me: me,
     notify: notify,
     onClose: () => setHelpOpen(false)
+  }), (planOpen || showLastQuoteAlert) && React.createElement(PlanModal, {
+    billing: billing,
+    isOwner: isOwner,
+    lastQuote: showLastQuoteAlert && !planOpen,
+    notify: notify,
+    onClose: () => {
+      setPlanOpen(false);
+      dismissLastQuote();
+    }
   }), toast && React.createElement("div", {
     style: {
       position: "fixed",
@@ -2082,7 +2121,7 @@ function CloudAuth({
       fontSize: 13,
       letterSpacing: "0.08em"
     }
-  }, mode === "company" ? "FAST QUOTES AND LEADS WINNER · 14-DAY FREE TRIAL" : "FAST QUOTES AND LEADS WINNER")), React.createElement("div", {
+  }, mode === "company" ? "FAST QUOTES AND LEADS WINNER · FREE TRIAL: 7 QUOTES" : "FAST QUOTES AND LEADS WINNER")), React.createElement("div", {
     style: {
       background: "#fff",
       borderRadius: 14,
@@ -2102,7 +2141,7 @@ function CloudAuth({
       color: BRAND.sub,
       marginBottom: 14
     }
-  }, "Photo-to-quote AI, branded PDF quotes with your name and logo, and a lead inbox \u2014 set up in two minutes. Nothing is charged for 14 days."), REF_CODE && React.createElement("div", {
+  }, "Photo-to-quote AI, branded PDF quotes with your name and logo, and a lead inbox \u2014 set up in two minutes. Free for 14 days or 7 quotes, whichever comes first. No card needed to start."), REF_CODE && React.createElement("div", {
     style: {
       background: "#E2F2E9",
       color: BRAND.green,
@@ -6854,9 +6893,12 @@ function planPill(c) {
     }, BILL_STATUS[st] || st);
   }
   const left = Math.ceil((new Date(c.trialEnds).getTime() - Date.now()) / 864e5);
+  if (c.trialQuotesUsed >= 7) return React.createElement("span", {
+    style: PILL("#F9E5E3", BRAND.red)
+  }, "7 free quotes used \xB7 needs plan");
   return left > 0 ? React.createElement("span", {
     style: PILL("#FBF3DE", BRAND.amber)
-  }, "Trial \xB7 ", left, "d left \xB7 no card") : React.createElement("span", {
+  }, "Trial \xB7 ", c.trialQuotesUsed || 0, "/7 quotes \xB7 ", left, "d left") : React.createElement("span", {
     style: PILL("#ECEEF1", BRAND.sub)
   }, "Trial ended");
 }
@@ -7772,7 +7814,7 @@ function PlanPicker({
 }) {
   const [busy, setBusy] = useState("");
   const plans = billing && billing.plans || [];
-  const trial = billing && billing.access !== "locked" && billing.trialDaysLeft > 0;
+  const trial = !!(billing && billing.trialAvailable);
   const go = async plan => {
     setBusy(plan);
     try {
@@ -7845,7 +7887,7 @@ function PlanPicker({
       marginTop: 12,
       lineHeight: 1.5
     }
-  }, trial ? React.createElement(React.Fragment, null, "Nothing is charged today. To confirm your card we place a ", React.createElement("strong", null, "$1 hold that's released right away"), " (it may show as pending for a few days, then disappears). Your plan starts automatically after your ", billing.trialDaysLeft, "-day free trial \u2014 cancel any time before then and you pay nothing.") : React.createElement(React.Fragment, null, "Your plan starts today and renews monthly. Cancel any time in Manage billing."), billing && billing.referralDiscount ? React.createElement(React.Fragment, null, " ", React.createElement("strong", {
+  }, trial ? React.createElement(React.Fragment, null, "Nothing is charged today. To confirm your card we place a ", React.createElement("strong", null, "$1 hold that's released right away"), " (it may show as pending for a few days, then disappears). Your plan starts when your free trial ends: in ", billing.trialDaysLeft, " days or at your ", billing.quoteLimit || 7, "th quote, whichever comes first. Cancel before then and you pay nothing.") : React.createElement(React.Fragment, null, "Your plan starts today and renews monthly. Cancel any time in Manage billing."), billing && billing.referralDiscount ? React.createElement(React.Fragment, null, " ", React.createElement("strong", {
     style: {
       color: BRAND.green
     }
@@ -7857,13 +7899,147 @@ function PlanPicker({
     }
   }, "TEST MODE \u2014 use card 4242 4242 4242 4242, any future date, any CVC. No real money moves."));
 }
+function TrialBanner({
+  billing,
+  isOwner,
+  onChoose
+}) {
+  const used = billing.quotesUsed || 0,
+    max = billing.quoteLimit || 7;
+  const left = Math.max(0, max - used);
+  const pct = Math.min(100, Math.round(used / max * 100));
+  const hot = left <= 1;
+  return React.createElement("div", {
+    style: {
+      background: hot ? "#FBF3DE" : "#fff",
+      border: `1.5px solid ${hot ? BRAND.gold : BRAND.line}`,
+      borderRadius: 12,
+      padding: "12px 14px",
+      marginBottom: 14
+    },
+    className: "flex items-center justify-between flex-wrap gap-3"
+  }, React.createElement("div", {
+    style: {
+      minWidth: 220,
+      flex: 1
+    }
+  }, React.createElement("div", {
+    style: {
+      fontWeight: 800,
+      color: BRAND.navy,
+      fontSize: 14.5
+    }
+  }, "Free trial \xB7 ", used, " of ", max, " quotes used", billing.billingStatus !== "trialing" && billing.trialDaysLeft ? " · " + billing.trialDaysLeft + " day" + (billing.trialDaysLeft === 1 ? "" : "s") + " left" : ""), React.createElement("div", {
+    style: {
+      height: 8,
+      background: BRAND.paper,
+      borderRadius: 99,
+      marginTop: 7,
+      overflow: "hidden"
+    }
+  }, React.createElement("div", {
+    style: {
+      width: pct + "%",
+      height: "100%",
+      background: hot ? BRAND.amber : BRAND.gold
+    }
+  })), React.createElement("div", {
+    style: {
+      fontSize: 12.5,
+      color: BRAND.sub,
+      marginTop: 5
+    }
+  }, left === 0 ? "Your free quotes are used." : left === 1 ? "1 free quote left — choose a plan so you're never stopped mid-job." : left + " free quotes left. Plans start at $49/month.")), isOwner && (billing.billingStatus === "trialing" ? React.createElement("span", {
+    style: {
+      fontSize: 13,
+      color: BRAND.green,
+      fontWeight: 700
+    }
+  }, "Card on file \xB7 your ", PLAN_LABEL[billing.plan] || "", " plan starts after quote ", max) : React.createElement(Btn, {
+    kind: "gold",
+    small: true,
+    onClick: onChoose
+  }, "Choose a plan")));
+}
+function PlanModal({
+  billing,
+  isOwner,
+  lastQuote,
+  notify,
+  onClose
+}) {
+  const max = billing.quoteLimit || 7;
+  const hasCard = billing.billingStatus === "trialing";
+  return React.createElement("div", {
+    onClick: onClose,
+    style: {
+      position: "fixed",
+      inset: 0,
+      background: "rgba(11,31,58,0.6)",
+      zIndex: 60,
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "center",
+      padding: 16,
+      overflowY: "auto"
+    }
+  }, React.createElement("div", {
+    onClick: e => e.stopPropagation(),
+    style: {
+      background: BRAND.paper,
+      borderRadius: 14,
+      padding: 22,
+      width: "100%",
+      maxWidth: 760,
+      maxHeight: "92vh",
+      overflowY: "auto"
+    }
+  }, React.createElement("div", {
+    style: {
+      fontFamily: "'Barlow Condensed', sans-serif",
+      fontSize: 26,
+      fontWeight: 700,
+      color: BRAND.navy,
+      lineHeight: 1.05
+    }
+  }, lastQuote ? "HEADS UP: 1 FREE QUOTE LEFT" : "CHOOSE YOUR PLAN"), React.createElement("p", {
+    style: {
+      fontSize: 14,
+      color: BRAND.sub,
+      margin: "8px 0 16px"
+    }
+  }, lastQuote ? hasCard ? `You've made ${billing.quotesUsed} of your ${max} free quotes. Your ${PLAN_LABEL[billing.plan] || ""} plan starts when you make your next quote — nothing to do, your card is on file.` : isOwner ? `You've made ${billing.quotesUsed} of your ${max} free quotes. Your next quote is the last free one — after that, a plan keeps you quoting. Pick one now so you're never stopped mid-job.` : `Your company has made ${billing.quotesUsed} of its ${max} free quotes. Let your company's owner know: after the next quote, they'll need to choose a plan to keep everyone quoting.` : "Pick the plan that fits your crew. You can switch or cancel any time."), isOwner && !hasCard && React.createElement(PlanPicker, {
+    billing: billing,
+    onError: notify
+  }), React.createElement("div", {
+    className: "mt-4"
+  }, React.createElement(Btn, {
+    kind: "ghost",
+    small: true,
+    onClick: onClose
+  }, lastQuote ? "Got it" : "Close"))));
+}
 function BillingGate({
   billing,
   isOwner,
   onSignOut,
-  notify
+  notify,
+  onBilling
 }) {
-  const locked = billing.access === "locked";
+  const limit = billing.access === "limit";
+  const locked = billing.access === "locked" || limit;
+  const [starting, setStarting] = useState(false);
+  const startNow = async () => {
+    setStarting(true);
+    try {
+      const b = await billingCall("startNow");
+      onBilling && onBilling(b);
+      notify(b.access === "ok" ? "Your plan is active. Thanks — keep quoting!" : "The payment didn't go through. Update your card in Manage billing.");
+    } catch (e) {
+      notify(e.message);
+    }
+    setStarting(false);
+  };
   return React.createElement("div", {
     className: "min-h-screen px-4 py-10",
     style: {
@@ -7905,7 +8081,7 @@ function BillingGate({
       color: BRAND.navy,
       marginBottom: 6
     }
-  }, billing.access === "suspended" ? "YOUR ACCOUNT IS ON HOLD" : !isOwner ? "YOUR COMPANY'S PLAN NEEDS ATTENTION" : locked ? billing.hasCard ? "YOUR PLAN IS NOT ACTIVE" : "YOUR FREE TRIAL HAS ENDED" : "START YOUR FREE TRIAL — " + billing.trialDaysLeft + " DAYS FREE"), billing.access === "suspended" ? React.createElement("p", {
+  }, billing.access === "suspended" ? "YOUR ACCOUNT IS ON HOLD" : !isOwner ? "YOUR COMPANY'S PLAN NEEDS ATTENTION" : limit ? "YOU'VE USED YOUR " + (billing.quoteLimit || 7) + " FREE QUOTES" : locked ? billing.hasCard ? "YOUR PLAN IS NOT ACTIVE" : "YOUR FREE TRIAL HAS ENDED" : "START YOUR FREE TRIAL — " + billing.trialDaysLeft + " DAYS FREE"), billing.access === "suspended" ? React.createElement("p", {
     style: {
       fontSize: 14,
       color: BRAND.sub
@@ -7927,7 +8103,36 @@ function BillingGate({
       fontSize: 14,
       color: BRAND.sub
     }
-  }, "Your quotes are safe. Ask your company's owner to sign in and choose a plan \u2014 the app unlocks for everyone as soon as they do.") : locked && billing.hasCard ? React.createElement(React.Fragment, null, React.createElement("p", {
+  }, limit ? "Your company has used its free quotes. " : "", "Your quotes are safe. Ask your company's owner to sign in and choose a plan \u2014 the app unlocks for everyone as soon as they do.") : limit && billing.hasCard && billing.billingStatus === "trialing" ? React.createElement(React.Fragment, null, React.createElement("p", {
+    style: {
+      fontSize: 14,
+      color: BRAND.sub,
+      marginBottom: 14
+    }
+  }, "Nice work \u2014 that's ", billing.quotesUsed, " quotes. Your free trial covers ", billing.quoteLimit || 7, ", so your ", React.createElement("strong", null, PLAN_LABEL[billing.plan] || billing.plan), " plan starts now. Your card on file is charged today and then monthly. Your quotes and settings are all still here."), React.createElement("div", {
+    className: "flex gap-2 flex-wrap"
+  }, React.createElement(Btn, {
+    kind: "gold",
+    disabled: starting,
+    onClick: startNow
+  }, starting ? "Starting…" : "Start my " + (PLAN_LABEL[billing.plan] || "") + " plan now"), React.createElement(ManageBillingBtn, {
+    notify: notify
+  })), React.createElement("p", {
+    style: {
+      fontSize: 12.5,
+      color: BRAND.sub,
+      marginTop: 10
+    }
+  }, "Want a different plan? Use Manage billing to switch first.")) : limit ? React.createElement(React.Fragment, null, React.createElement("p", {
+    style: {
+      fontSize: 14,
+      color: BRAND.sub,
+      marginBottom: 14
+    }
+  }, "Nice work \u2014 that's ", billing.quotesUsed, " quotes. Your free trial covers ", billing.quoteLimit || 7, ". Pick a plan to keep quoting; it starts today and you can cancel any time. Your quotes and settings are all still here."), React.createElement(PlanPicker, {
+    billing: billing,
+    onError: notify
+  })) : locked && billing.hasCard ? React.createElement(React.Fragment, null, React.createElement("p", {
     style: {
       fontSize: 14,
       color: BRAND.sub,
@@ -8002,7 +8207,7 @@ function BillingCard({
       fontSize: 14,
       lineHeight: 1.7
     }
-  }, React.createElement("div", null, "Plan: ", React.createElement("strong", null, PLAN_LABEL[billing.plan] || billing.plan), " \xB7 ", BILL_STATUS[billing.billingStatus] || billing.billingStatus), billing.billingStatus === "trialing" && billing.trialEnds && React.createElement("div", null, "Free until ", React.createElement("strong", null, fmtDay(billing.trialEnds)), " \u2014 first charge that day."), billing.billingStatus === "active" && billing.currentPeriodEnd && React.createElement("div", null, billing.cancelAtPeriodEnd ? "Ends" : "Renews", " on ", React.createElement("strong", null, fmtDay(billing.currentPeriodEnd)), "."), billing.cancelAtPeriodEnd && billing.billingStatus === "trialing" && React.createElement("div", {
+  }, React.createElement("div", null, "Plan: ", React.createElement("strong", null, PLAN_LABEL[billing.plan] || billing.plan), " \xB7 ", BILL_STATUS[billing.billingStatus] || billing.billingStatus), billing.billingStatus === "trialing" && billing.trialEnds && React.createElement("div", null, "Free until ", React.createElement("strong", null, fmtDay(billing.trialEnds)), " or your ", billing.quoteLimit || 7, "th quote (", billing.quotesUsed || 0, " used so far), whichever comes first."), billing.billingStatus === "active" && billing.currentPeriodEnd && React.createElement("div", null, billing.cancelAtPeriodEnd ? "Ends" : "Renews", " on ", React.createElement("strong", null, fmtDay(billing.currentPeriodEnd)), "."), billing.cancelAtPeriodEnd && billing.billingStatus === "trialing" && React.createElement("div", {
     style: {
       color: BRAND.amber
     }
@@ -8027,7 +8232,7 @@ function BillingCard({
       color: BRAND.sub,
       marginBottom: 12
     }
-  }, billing.trialDaysLeft > 0 ? billing.trialDaysLeft + " days left in your free trial." : "Your free trial has ended."), React.createElement(PlanPicker, {
+  }, billing.access === "trial" ? `Free trial: ${billing.quotesUsed || 0} of ${billing.quoteLimit || 7} quotes used · ${billing.trialDaysLeft} days left.` : "Your free trial has ended."), React.createElement(PlanPicker, {
     billing: billing,
     onError: notify
   })), billing.testMode && React.createElement("p", {

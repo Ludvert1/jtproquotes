@@ -103,6 +103,7 @@ async function summary(co) {
     leadConnected: !!(settings && settings.leadSetup && settings.leadSetup.done), leadReplyMode: (settings && settings.leadReplyMode) || "",
     openHelp: help.filter((h) => !h.resolved).length,
     referredBy: co.referredBy || "", refRewardPaid: co.refRewardPaid || "",
+    trialQuotesUsed: Math.max(Number(co.trialQuotesUsed || 0), quotes || 0),
     // $25 is owed once a referred company has paid its first month.
     rewardDue: !!co.referredBy && !co.refRewardPaid && co.billingStatus === "active",
   };

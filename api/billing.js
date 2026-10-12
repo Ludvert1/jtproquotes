@@ -14,7 +14,7 @@
 const { bad, parseBody, verifyCaller, getDocAsServer, setDocAsServer } = require("./_lib");
 const { withMonitor } = require("./_monitor");
 const { PLANS, TRIAL_DAYS, stripe, stripeOn, testMode, priceFor, portalConfig, billingFields } = require("./_stripe");
-const { loadCompany, accessOf, trialCap } = require("./_access");
+const { loadCompany, accessOf, trialCap, quotesUsed, TRIAL_QUOTES } = require("./_access");
 
 const DAY = 864e5;
 
@@ -44,8 +44,12 @@ async function referralCoupon() {
 
 function publicView(co) {
   const left = co.trialEnds ? Math.max(0, Math.ceil((new Date(co.trialEnds).getTime() - Date.now()) / DAY)) : 0;
+  const used = Number(co.trialQuotesUsed || 0);
   return {
-    access: accessOf(co), trialDaysLeft: left, referralDiscount: !!co.referredBy && !co.stripeSubscriptionId,
+    access: accessOf(co), trialDaysLeft: left,
+    quotesUsed: used, quoteLimit: TRIAL_QUOTES,
+    // Can a new checkout still start with free days? (not once the 7 free quotes are used)
+    trialAvailable: !co.stripeSubscriptionId && left > 0 && used < TRIAL_QUOTES, referralDiscount: !!co.referredBy && !co.stripeSubscriptionId,
     plan: co.plan || "trial", billingStatus: co.billingStatus || "", trialEnds: co.trialEnds || "",
     currentPeriodEnd: co.currentPeriodEnd || "", cancelAtPeriodEnd: !!co.cancelAtPeriodEnd,
     hasCard: !!co.stripeSubscriptionId, cardCheck: co.cardCheck || "",
@@ -132,6 +136,7 @@ const handler = async (req, res) => {
 
   try {
     let co = await loadCompany(cid);
+    await quotesUsed(cid, co);
 
     if (action === "status") {
       // Refresh from Stripe now and then, and whenever a trial or period has run out.
@@ -147,6 +152,15 @@ const handler = async (req, res) => {
 
     if (action === "sync") {
       co = await syncFromStripe(cid, co, typeof body.sessionId === "string" ? body.sessionId.slice(0, 200) : "");
+      return res.status(200).json(publicView(co));
+    }
+
+    // Free quotes used up while the card-on-file trial is still running: start the paid plan now.
+    if (action === "startNow") {
+      if (!co.stripeSubscriptionId || co.billingStatus !== "trialing") return bad(res, 400, "There's no trial to end. Choose a plan instead.");
+      await stripe("POST", "subscriptions/" + co.stripeSubscriptionId, { trial_end: "now", proration_behavior: "none" }, "siq-startnow-" + co.stripeSubscriptionId);
+      co = await syncFromStripe(cid, co);
+      await quotesUsed(cid, co);
       return res.status(200).json(publicView(co));
     }
 
@@ -173,7 +187,8 @@ const handler = async (req, res) => {
       // Whatever is left of the 14-day trial that started when the company was created
       // (never a fresh trial for a company that cancels and comes back).
       const ends = trialCap(co);
-      const daysLeft = Math.ceil((ends - Date.now()) / DAY);
+      // No free days left once the 7 free quotes are used: the plan starts today.
+      const daysLeft = Number(co.trialQuotesUsed || 0) >= TRIAL_QUOTES ? 0 : Math.ceil((ends - Date.now()) / DAY);
       const origin = originOf(req);
       const session = await stripe("POST", "checkout/sessions", {
         mode: "subscription", customer: co.stripeCustomerId, client_reference_id: cid,
@@ -183,7 +198,7 @@ const handler = async (req, res) => {
         ...(co.referredBy && !co.referralDiscountUsed ? { discounts: [{ coupon: await referralCoupon() }] } : { allow_promotion_codes: true }),
         subscription_data: Object.assign({ metadata: { siq_company: cid, siq_plan: plan } }, daysLeft >= 1 ? { trial_period_days: Math.min(daysLeft, TRIAL_DAYS) } : {}),
         custom_text: { submit: { message: daysLeft >= 1
-          ? "Nothing is charged today. Your card gets a $1 hold that's released right away, and your plan starts after your free trial ends. Cancel any time before then."
+          ? "Nothing is charged today. Your card gets a $1 hold that's released right away. Your plan starts when your free trial ends: after 14 days or your 7th quote, whichever comes first. Cancel any time before then."
           : "Your plan starts today. Cancel any time." } },
         success_url: origin + "/?billing=done&session_id={CHECKOUT_SESSION_ID}",
         cancel_url: origin + "/?billing=cancel",

@@ -390,3 +390,7 @@ admin access to specific sign-in emails.
 - **Health checks** (`/api/health?deep=1`): website, app, Firestore, Anthropic key, Stripe key, push/email/maps settings. Run every 30 min by `.github/workflows/health.yml`, daily by Vercel cron, or "Run check now" in Admin. Alerts on failure (repeats every 6 h) and on recovery.
 - **Admin → System health** shows the checks, open errors (with details) and "Mark fixed".
 - Paid features (AI quotes, materials, lead inbox) are refused for companies that are on hold or whose trial ended without a plan (`api/_access.js`).
+
+## Free trial limit (14 days or 7 quotes)
+
+A new company starts free with no card: 14 days or 7 quotes, whichever comes first (`TRIAL_QUOTES` in `api/_access.js`). The count is a high-water mark on the company (`trialQuotesUsed`), so deleting quotes doesn't reset it. At the 6th quote everyone gets an in-app heads-up (owners can pick a plan right there); after the 7th the app shows the plan screen and AI features stop server-side until a plan starts. Checkout after the 7th quote charges right away; a company that already added a card during the trial gets "Start my plan now", which ends the Stripe trial and charges the card.

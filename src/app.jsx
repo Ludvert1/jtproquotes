@@ -719,6 +719,21 @@ function App() {
     return () => { live = false; clearInterval(t); };
   }, [me && me.id]);
 
+  /* Free trial = 14 days or 7 quotes. Re-check the count whenever a quote is
+     added, so the 6th-quote heads-up and the 7th-quote gate appear right away. */
+  const quoteCount = quotes ? Object.keys(quotes).length : 0;
+  useEffect(() => {
+    if (!CLOUD || !me || !TENANT || !billing || !billing.enabled || billing.access === "ok" && billing.billingStatus === "active") return;
+    const t = setTimeout(() => { billingCall("status").then(setBilling).catch(warn("billing refresh")); }, 2500);
+    return () => clearTimeout(t);
+  }, [quoteCount]);
+  const [planOpen, setPlanOpen] = useState(false);
+  const inTrial = !!(TENANT && billing && billing.enabled && billing.quoteLimit && billing.billingStatus !== "active" && ["trial", "ok"].includes(billing.access));
+  const warnKey = "siq_warn_lastquote_" + (TENANT || "");
+  const [warned, setWarned] = useState(() => { try { return !!localStorage.getItem(warnKey); } catch { return false; } });
+  const showLastQuoteAlert = inTrial && !warned && billing.quotesUsed === billing.quoteLimit - 1;
+  const dismissLastQuote = () => { try { localStorage.setItem(warnKey, "1"); } catch {} setWarned(true); };
+
   /* A help-request alert opens that company in the admin portal (?admin=<cid>). */
   useEffect(() => {
     if (!me || TENANT) return;
@@ -807,8 +822,8 @@ function App() {
   };
 
   // A plan is needed: owners pick one (card + $1 hold), others wait for the owner.
-  if (TENANT && billing && billing.access && billing.access !== "ok" && (isOwner || billing.access !== "needs_card")) {
-    return <><BillingGate billing={billing} isOwner={isOwner} onSignOut={logout} notify={notify} />{toast && <div style={{ position: "fixed", bottom: 20, left: "50%", transform: "translateX(-50%)", background: BRAND.navy, color: "#fff", padding: "10px 18px", borderRadius: 8, fontSize: 14, zIndex: 50 }}>{toast}</div>}</>;
+  if (TENANT && billing && ["locked", "limit", "suspended"].includes(billing.access)) {
+    return <><BillingGate billing={billing} isOwner={isOwner} onSignOut={logout} notify={notify} onBilling={setBilling} />{toast && <div style={{ position: "fixed", bottom: 20, left: "50%", transform: "translateX(-50%)", background: BRAND.navy, color: "#fff", padding: "10px 18px", borderRadius: 8, fontSize: 14, zIndex: 50 }}>{toast}</div>}</>;
   }
 
   const navItems = [["dashboard", "Dashboard"], ["new", "New quote"]];
@@ -846,6 +861,7 @@ function App() {
           Signed in as <strong style={{ color: BRAND.ink }}>{me.name}</strong> · {ROLE_LABEL[roleOf(me)]}
         </div>
 
+        {view === "dashboard" && inTrial && <TrialBanner billing={billing} isOwner={isOwner} onChoose={() => setPlanOpen(true)} />}
         {view === "dashboard" && TENANT && isOwner && !(settings.leadSetup && settings.leadSetup.done) && !leadLater && (
           <ThumbtackSetup settings={settings} quotes={quotes} compact onPatch={mergeSettings} onDismiss={(done) => { setLeadLater(true); if (done) notify("Lead inbox connected — new leads will show up here."); }} />
         )}
@@ -888,6 +904,7 @@ function App() {
 
       {previewQuote && <PreviewModal quote={previewQuote} settings={settings} users={users} me={me} onClose={() => setPreviewQuote(null)} />}
       {helpOpen && <HelpModal me={me} notify={notify} onClose={() => setHelpOpen(false)} />}
+      {(planOpen || showLastQuoteAlert) && <PlanModal billing={billing} isOwner={isOwner} lastQuote={showLastQuoteAlert && !planOpen} notify={notify} onClose={() => { setPlanOpen(false); dismissLastQuote(); }} />}
 
       {toast && <div style={{ position: "fixed", bottom: 20, left: "50%", transform: "translateX(-50%)", background: BRAND.navy, color: BRAND.goldBright, padding: "10px 22px", borderRadius: 99, fontWeight: 600, fontSize: 14, boxShadow: "0 6px 20px rgba(0,0,0,0.25)", zIndex: 60 }}>{toast}</div>}
     </div>
@@ -1035,12 +1052,12 @@ function CloudAuth({ gate }) {
         <div className="text-center mb-6">
           <div style={{ display: "inline-flex", width: 56, height: 56, background: BRAND.gold, borderRadius: 12, alignItems: "center", justifyContent: "center", fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 28, color: BRAND.navy }}>SI</div>
           <h1 style={{ color: "#fff", fontFamily: "'Barlow Condensed', sans-serif", fontSize: 34, fontWeight: 700, letterSpacing: "0.08em", margin: "12px 0 2px" }}>{PRODUCT.toUpperCase()}</h1>
-          <p style={{ color: BRAND.goldBright, fontSize: 13, letterSpacing: "0.08em" }}>{mode === "company" ? "FAST QUOTES AND LEADS WINNER · 14-DAY FREE TRIAL" : "FAST QUOTES AND LEADS WINNER"}</p>
+          <p style={{ color: BRAND.goldBright, fontSize: 13, letterSpacing: "0.08em" }}>{mode === "company" ? "FAST QUOTES AND LEADS WINNER · FREE TRIAL: 7 QUOTES" : "FAST QUOTES AND LEADS WINNER"}</p>
         </div>
         <div style={{ background: "#fff", borderRadius: 14, padding: 26 }}>
           {mode === "company" && <React.Fragment>
             <h2 style={{ fontFamily: "'Barlow Condensed', sans-serif", fontSize: 22, fontWeight: 700, color: BRAND.navy, marginBottom: 4 }}>START YOUR COMPANY ACCOUNT</h2>
-            <p style={{ fontSize: 13, color: BRAND.sub, marginBottom: 14 }}>Photo-to-quote AI, branded PDF quotes with your name and logo, and a lead inbox — set up in two minutes. Nothing is charged for 14 days.</p>
+            <p style={{ fontSize: 13, color: BRAND.sub, marginBottom: 14 }}>Photo-to-quote AI, branded PDF quotes with your name and logo, and a lead inbox — set up in two minutes. Free for 14 days or 7 quotes, whichever comes first. No card needed to start.</p>
             {REF_CODE && <div style={{ background: "#E2F2E9", color: BRAND.green, borderRadius: 8, padding: "9px 12px", fontSize: 13.5, fontWeight: 700, marginBottom: 14 }}>Referred by a friend: you get 25% off your first paid month.</div>}
             <Field label="Company name"><input style={inputStyle} value={company} onChange={(e) => setCompany(e.target.value)} placeholder="e.g. Lone Star Remodeling LLC" /></Field>
             <div className="grid grid-cols-2 gap-x-3">
@@ -3388,7 +3405,8 @@ function planPill(c) {
     return <span style={PILL("#F9E5E3", BRAND.red)}>{BILL_STATUS[st] || st}</span>;
   }
   const left = Math.ceil((new Date(c.trialEnds).getTime() - Date.now()) / 864e5);
-  return left > 0 ? <span style={PILL("#FBF3DE", BRAND.amber)}>Trial · {left}d left · no card</span> : <span style={PILL("#ECEEF1", BRAND.sub)}>Trial ended</span>;
+  if (c.trialQuotesUsed >= 7) return <span style={PILL("#F9E5E3", BRAND.red)}>7 free quotes used · needs plan</span>;
+  return left > 0 ? <span style={PILL("#FBF3DE", BRAND.amber)}>Trial · {c.trialQuotesUsed || 0}/7 quotes · {left}d left</span> : <span style={PILL("#ECEEF1", BRAND.sub)}>Trial ended</span>;
 }
 
 function SystemHealth({ notify }) {
@@ -3689,7 +3707,7 @@ const BILL_STATUS = { trialing: "Free trial", active: "Active", past_due: "Payme
 function PlanPicker({ billing, onError }) {
   const [busy, setBusy] = useState("");
   const plans = (billing && billing.plans) || [];
-  const trial = billing && billing.access !== "locked" && billing.trialDaysLeft > 0;
+  const trial = !!(billing && billing.trialAvailable);
   const go = async (plan) => {
     setBusy(plan);
     try { const r = await billingCall("checkout", { plan }); window.location.href = r.url; }
@@ -3710,7 +3728,7 @@ function PlanPicker({ billing, onError }) {
       </div>
       <p style={{ fontSize: 12.5, color: BRAND.sub, marginTop: 12, lineHeight: 1.5 }}>
         {trial
-          ? <>Nothing is charged today. To confirm your card we place a <strong>$1 hold that's released right away</strong> (it may show as pending for a few days, then disappears). Your plan starts automatically after your {billing.trialDaysLeft}-day free trial — cancel any time before then and you pay nothing.</>
+          ? <>Nothing is charged today. To confirm your card we place a <strong>$1 hold that's released right away</strong> (it may show as pending for a few days, then disappears). Your plan starts when your free trial ends: in {billing.trialDaysLeft} days or at your {billing.quoteLimit || 7}th quote, whichever comes first. Cancel before then and you pay nothing.</>
           : <>Your plan starts today and renews monthly. Cancel any time in Manage billing.</>}
         {billing && billing.referralDiscount ? <> <strong style={{ color: BRAND.green }}>Your 25% referral discount is applied to your first paid month.</strong></> : null}
         {" "}Secure checkout by Stripe.
@@ -3720,9 +3738,63 @@ function PlanPicker({ billing, onError }) {
   );
 }
 
+/* Trial progress on the dashboard: quotes used, days left, a way to choose a plan. */
+function TrialBanner({ billing, isOwner, onChoose }) {
+  const used = billing.quotesUsed || 0, max = billing.quoteLimit || 7;
+  const left = Math.max(0, max - used);
+  const pct = Math.min(100, Math.round((used / max) * 100));
+  const hot = left <= 1;
+  return (
+    <div style={{ background: hot ? "#FBF3DE" : "#fff", border: `1.5px solid ${hot ? BRAND.gold : BRAND.line}`, borderRadius: 12, padding: "12px 14px", marginBottom: 14 }} className="flex items-center justify-between flex-wrap gap-3">
+      <div style={{ minWidth: 220, flex: 1 }}>
+        <div style={{ fontWeight: 800, color: BRAND.navy, fontSize: 14.5 }}>Free trial · {used} of {max} quotes used{billing.billingStatus !== "trialing" && billing.trialDaysLeft ? " · " + billing.trialDaysLeft + " day" + (billing.trialDaysLeft === 1 ? "" : "s") + " left" : ""}</div>
+        <div style={{ height: 8, background: BRAND.paper, borderRadius: 99, marginTop: 7, overflow: "hidden" }}><div style={{ width: pct + "%", height: "100%", background: hot ? BRAND.amber : BRAND.gold }} /></div>
+        <div style={{ fontSize: 12.5, color: BRAND.sub, marginTop: 5 }}>{left === 0 ? "Your free quotes are used." : left === 1 ? "1 free quote left — choose a plan so you're never stopped mid-job." : left + " free quotes left. Plans start at $49/month."}</div>
+      </div>
+      {isOwner && (billing.billingStatus === "trialing"
+        ? <span style={{ fontSize: 13, color: BRAND.green, fontWeight: 700 }}>Card on file · your {PLAN_LABEL[billing.plan] || ""} plan starts after quote {max}</span>
+        : <Btn kind="gold" small onClick={onChoose}>Choose a plan</Btn>)}
+    </div>
+  );
+}
+
+/* Plan chooser in a pop-up: from the trial banner, and the automatic heads-up at the 6th quote. */
+function PlanModal({ billing, isOwner, lastQuote, notify, onClose }) {
+  const max = billing.quoteLimit || 7;
+  const hasCard = billing.billingStatus === "trialing";
+  return (
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(11,31,58,0.6)", zIndex: 60, display: "flex", alignItems: "center", justifyContent: "center", padding: 16, overflowY: "auto" }}>
+      <div onClick={(e) => e.stopPropagation()} style={{ background: BRAND.paper, borderRadius: 14, padding: 22, width: "100%", maxWidth: 760, maxHeight: "92vh", overflowY: "auto" }}>
+        <div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontSize: 26, fontWeight: 700, color: BRAND.navy, lineHeight: 1.05 }}>
+          {lastQuote ? "HEADS UP: 1 FREE QUOTE LEFT" : "CHOOSE YOUR PLAN"}
+        </div>
+        <p style={{ fontSize: 14, color: BRAND.sub, margin: "8px 0 16px" }}>
+          {lastQuote
+            ? (hasCard
+                ? `You've made ${billing.quotesUsed} of your ${max} free quotes. Your ${PLAN_LABEL[billing.plan] || ""} plan starts when you make your next quote — nothing to do, your card is on file.`
+                : isOwner
+                  ? `You've made ${billing.quotesUsed} of your ${max} free quotes. Your next quote is the last free one — after that, a plan keeps you quoting. Pick one now so you're never stopped mid-job.`
+                  : `Your company has made ${billing.quotesUsed} of its ${max} free quotes. Let your company's owner know: after the next quote, they'll need to choose a plan to keep everyone quoting.`)
+            : "Pick the plan that fits your crew. You can switch or cancel any time."}
+        </p>
+        {isOwner && !hasCard && <PlanPicker billing={billing} onError={notify} />}
+        <div className="mt-4"><Btn kind="ghost" small onClick={onClose}>{lastQuote ? "Got it" : "Close"}</Btn></div>
+      </div>
+    </div>
+  );
+}
+
 /* Full screen shown instead of the app when a plan is needed. */
-function BillingGate({ billing, isOwner, onSignOut, notify }) {
-  const locked = billing.access === "locked";
+function BillingGate({ billing, isOwner, onSignOut, notify, onBilling }) {
+  const limit = billing.access === "limit";
+  const locked = billing.access === "locked" || limit;
+  const [starting, setStarting] = useState(false);
+  const startNow = async () => {
+    setStarting(true);
+    try { const b = await billingCall("startNow"); onBilling && onBilling(b); notify(b.access === "ok" ? "Your plan is active. Thanks — keep quoting!" : "The payment didn't go through. Update your card in Manage billing."); }
+    catch (e) { notify(e.message); }
+    setStarting(false);
+  };
   return (
     <div className="min-h-screen px-4 py-10" style={{ background: BRAND.navy }}>
       <div className="mx-auto" style={{ maxWidth: 760 }}>
@@ -3732,12 +3804,23 @@ function BillingGate({ billing, isOwner, onSignOut, notify }) {
         </div>
         <div style={{ background: BRAND.paper, borderRadius: 14, padding: 24 }}>
           <h2 style={{ fontFamily: "'Barlow Condensed', sans-serif", fontSize: 26, fontWeight: 700, color: BRAND.navy, marginBottom: 6 }}>
-            {billing.access === "suspended" ? "YOUR ACCOUNT IS ON HOLD" : !isOwner ? "YOUR COMPANY'S PLAN NEEDS ATTENTION" : locked ? (billing.hasCard ? "YOUR PLAN IS NOT ACTIVE" : "YOUR FREE TRIAL HAS ENDED") : "START YOUR FREE TRIAL — " + billing.trialDaysLeft + " DAYS FREE"}
+            {billing.access === "suspended" ? "YOUR ACCOUNT IS ON HOLD" : !isOwner ? "YOUR COMPANY'S PLAN NEEDS ATTENTION" : limit ? "YOU'VE USED YOUR " + (billing.quoteLimit || 7) + " FREE QUOTES" : locked ? (billing.hasCard ? "YOUR PLAN IS NOT ACTIVE" : "YOUR FREE TRIAL HAS ENDED") : "START YOUR FREE TRIAL — " + billing.trialDaysLeft + " DAYS FREE"}
           </h2>
           {billing.access === "suspended" ? (
             <p style={{ fontSize: 14, color: BRAND.sub }}>Your quotes are safe. Please contact {PRODUCT} support at <a href={"tel:" + SUPPORT.phone.replace(/[^\d+]/g, "")} style={{ color: BRAND.navySoft, fontWeight: 700 }}>{SUPPORT.phone}</a> or <a href={"mailto:" + SUPPORT.email} style={{ color: BRAND.navySoft, fontWeight: 700 }}>{SUPPORT.email}</a> — Support ID <b>{supportIdOf(TENANT)}</b>.</p>
           ) : !isOwner ? (
-            <p style={{ fontSize: 14, color: BRAND.sub }}>Your quotes are safe. Ask your company's owner to sign in and choose a plan — the app unlocks for everyone as soon as they do.</p>
+            <p style={{ fontSize: 14, color: BRAND.sub }}>{limit ? "Your company has used its free quotes. " : ""}Your quotes are safe. Ask your company's owner to sign in and choose a plan — the app unlocks for everyone as soon as they do.</p>
+          ) : limit && billing.hasCard && billing.billingStatus === "trialing" ? (
+            <>
+              <p style={{ fontSize: 14, color: BRAND.sub, marginBottom: 14 }}>Nice work — that's {billing.quotesUsed} quotes. Your free trial covers {billing.quoteLimit || 7}, so your <strong>{PLAN_LABEL[billing.plan] || billing.plan}</strong> plan starts now. Your card on file is charged today and then monthly. Your quotes and settings are all still here.</p>
+              <div className="flex gap-2 flex-wrap"><Btn kind="gold" disabled={starting} onClick={startNow}>{starting ? "Starting…" : "Start my " + (PLAN_LABEL[billing.plan] || "") + " plan now"}</Btn><ManageBillingBtn notify={notify} /></div>
+              <p style={{ fontSize: 12.5, color: BRAND.sub, marginTop: 10 }}>Want a different plan? Use Manage billing to switch first.</p>
+            </>
+          ) : limit ? (
+            <>
+              <p style={{ fontSize: 14, color: BRAND.sub, marginBottom: 14 }}>Nice work — that's {billing.quotesUsed} quotes. Your free trial covers {billing.quoteLimit || 7}. Pick a plan to keep quoting; it starts today and you can cancel any time. Your quotes and settings are all still here.</p>
+              <PlanPicker billing={billing} onError={notify} />
+            </>
           ) : locked && billing.hasCard ? (
             <>
               <p style={{ fontSize: 14, color: BRAND.sub, marginBottom: 14 }}>Status: <strong>{BILL_STATUS[billing.billingStatus] || billing.billingStatus || "not active"}</strong>. Your quotes are safe — update your card or pick a plan again to unlock.</p>
@@ -3776,7 +3859,7 @@ function BillingCard({ billing, notify }) {
         <>
           <div style={{ fontSize: 14, lineHeight: 1.7 }}>
             <div>Plan: <strong>{PLAN_LABEL[billing.plan] || billing.plan}</strong> · {BILL_STATUS[billing.billingStatus] || billing.billingStatus}</div>
-            {billing.billingStatus === "trialing" && billing.trialEnds && <div>Free until <strong>{fmtDay(billing.trialEnds)}</strong> — first charge that day.</div>}
+            {billing.billingStatus === "trialing" && billing.trialEnds && <div>Free until <strong>{fmtDay(billing.trialEnds)}</strong> or your {billing.quoteLimit || 7}th quote ({billing.quotesUsed || 0} used so far), whichever comes first.</div>}
             {billing.billingStatus === "active" && billing.currentPeriodEnd && <div>{billing.cancelAtPeriodEnd ? "Ends" : "Renews"} on <strong>{fmtDay(billing.currentPeriodEnd)}</strong>.</div>}
             {billing.cancelAtPeriodEnd && billing.billingStatus === "trialing" && <div style={{ color: BRAND.amber }}>Set to cancel — you won't be charged.</div>}
             {billing.cardCheck && <div style={{ color: billing.cardCheck === "ok" ? BRAND.green : BRAND.red, fontSize: 13 }}>{card.check[billing.cardCheck] || ""}</div>}
@@ -3786,7 +3869,7 @@ function BillingCard({ billing, notify }) {
         </>
       ) : (
         <>
-          <p style={{ fontSize: 13.5, color: BRAND.sub, marginBottom: 12 }}>{billing.trialDaysLeft > 0 ? billing.trialDaysLeft + " days left in your free trial." : "Your free trial has ended."}</p>
+          <p style={{ fontSize: 13.5, color: BRAND.sub, marginBottom: 12 }}>{billing.access === "trial" ? `Free trial: ${billing.quotesUsed || 0} of ${billing.quoteLimit || 7} quotes used · ${billing.trialDaysLeft} days left.` : "Your free trial has ended."}</p>
           <PlanPicker billing={billing} onError={notify} />
         </>
       )}

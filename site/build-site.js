@@ -18,7 +18,7 @@ let out;
 if (preview) out = src;
 else {
   const cut = src.indexOf("</style>") + "</style>".length;
-  out = `<!doctype html>\n<html lang="en">\n<head>\n<meta charset="utf-8">\n<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">\n<meta name="theme-color" content="#0B1F3A">\n<link rel="icon" href="/icons/icon-192.png">\n<meta property="og:title" content="S-I-Quotespro · Fast quotes and leads winner">\n<meta property="og:description" content="AI turns your Thumbtack, Angi and email leads and job photos into branded quotes in minutes. 14 days free.">\n<meta property="og:image" content="${LIVE}/site/img/manphone.jpg">\n<meta property="og:url" content="${LIVE}/">\n` + src.slice(0, cut) + "\n</head>\n<body>\n" + src.slice(cut) + "\n</body>\n</html>\n";
+  out = `<!doctype html>\n<html lang="en">\n<head>\n<meta charset="utf-8">\n<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">\n<meta name="theme-color" content="#0B1F3A">\n<link rel="icon" href="/icons/icon-192.png">\n<meta property="og:title" content="S-I-Quotespro · Fast quotes and leads winner">\n<meta property="og:description" content="AI turns your Thumbtack, Angi and email leads and job photos into branded quotes in minutes. Start free with 7 quotes on us.">\n<meta property="og:image" content="${LIVE}/site/img/manphone.jpg">\n<meta property="og:url" content="${LIVE}/">\n` + src.slice(0, cut) + "\n</head>\n<body>\n" + src.slice(cut) + "\n</body>\n</html>\n";
 }
 const dest = preview ? process.argv[process.argv.indexOf("--preview") + 1] || path.join(dir, "preview.html") : path.join(dir, "index.html");
 fs.writeFileSync(dest, out);

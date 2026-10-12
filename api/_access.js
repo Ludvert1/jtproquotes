@@ -4,10 +4,11 @@
    (AI quotes, materials, lead inbox), so a locked or suspended
    company can't keep spending AI credit through the back door.
 ============================================================ */
-const { getDocAsServer } = require("./_lib");
+const { getDocAsServer, setDocAsServer, adminToken, DOCS } = require("./_lib");
 const { TRIAL_DAYS, stripeOn } = require("./_stripe");
 
 const DAY = 864e5;
+const TRIAL_QUOTES = 7; // free quotes in the trial (14 days or 7 quotes, whichever comes first)
 
 async function loadCompany(cid) {
   const got = await getDocAsServer("companies/" + cid, { meta: true });
@@ -28,11 +29,45 @@ function trialCap(co) {
   return cap;
 }
 
+/* How many quotes the company has made. Kept as a high-water mark on the
+   company, so deleting quotes doesn't buy more free ones. */
+async function countQuotes(cid) {
+  const token = await adminToken();
+  const r = await fetch(`${DOCS}/companies/${cid}:runAggregationQuery`, {
+    method: "POST", headers: { "Content-Type": "application/json", Authorization: "Bearer " + token },
+    body: JSON.stringify({ structuredAggregationQuery: { structuredQuery: { from: [{ collectionId: "quotes" }] }, aggregations: [{ alias: "n", count: {} }] } }),
+  });
+  if (!r.ok) throw new Error("count failed " + r.status);
+  const rows = await r.json();
+  const v = rows && rows[0] && rows[0].result && rows[0].result.aggregateFields && rows[0].result.aggregateFields.n;
+  return v ? Number(v.integerValue || 0) : 0;
+}
+async function quotesUsed(cid, co) {
+  const stored = Number(co.trialQuotesUsed || 0);
+  let n = stored;
+  try { n = Math.max(stored, await countQuotes(cid)); } catch (e) { console.error("[access] count:", e.message); }
+  if (n > stored) {
+    try {
+      const fresh = (await getDocAsServer("companies/" + cid)) || {};
+      if (n > Number(fresh.trialQuotesUsed || 0)) await setDocAsServer("companies/" + cid, Object.assign({}, fresh, { trialQuotesUsed: n }));
+    } catch (e) { console.error("[access] save count:", e.message); }
+  }
+  co.trialQuotesUsed = n;
+  return n;
+}
+
+/* ok · trial (free, still allowed) · limit (7 free quotes used) · locked · suspended */
 function accessOf(co) {
   if (co.suspended) return "suspended";
   if (!stripeOn()) return "ok"; // billing not switched on yet
-  if (co.stripeSubscriptionId) return ["trialing", "active", "past_due"].includes(co.billingStatus) ? "ok" : "locked";
-  return trialCap(co) > Date.now() ? "needs_card" : "locked";
+  const used = Number(co.trialQuotesUsed || 0);
+  if (co.stripeSubscriptionId) {
+    if (["active", "past_due"].includes(co.billingStatus)) return "ok";
+    if (co.billingStatus === "trialing") return used >= TRIAL_QUOTES ? "limit" : "ok";
+    return "locked";
+  }
+  if (trialCap(co) <= Date.now()) return "locked";
+  return used >= TRIAL_QUOTES ? "limit" : "trial";
 }
 
 /* For paid features: null when allowed, otherwise a message. Cached briefly per instance. */
@@ -43,12 +78,15 @@ async function blockedReason(cid) {
   if (hit && Date.now() - hit.at < 60e3) return hit.reason;
   let reason = null;
   try {
-    const a = accessOf(await loadCompany(cid));
-    if (a === "suspended") reason = "This account is on hold. Please contact S-I-Quotespro support.";
+    const co = await loadCompany(cid);
+    await quotesUsed(cid, co);
+    const a = accessOf(co);
+    if (a === "limit") reason = "You've used your 7 free quotes. Choose a plan in S-I-Quotespro to keep quoting.";
+    else if (a === "suspended") reason = "This account is on hold. Please contact S-I-Quotespro support.";
     else if (a === "locked") reason = "Your free trial has ended. Ask your company's owner to choose a plan in S-I-Quotespro.";
   } catch (e) { reason = null; } // never block on a read hiccup
   cache.set(cid, { at: Date.now(), reason });
   return reason;
 }
 
-module.exports = { loadCompany, accessOf, trialCap, blockedReason };
+module.exports = { loadCompany, accessOf, trialCap, blockedReason, quotesUsed, TRIAL_QUOTES };
