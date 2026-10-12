@@ -114,9 +114,6 @@
     },
     "api/health.js": {
       "maxDuration": 60
-    },
-    "api/report.js": {
-      "maxDuration": 15
     }
   },
   "redirects": [
@@ -230,8 +227,14 @@
   ],
   "crons": [
     {
-      "path": "/api/health?deep=1",
+      "path": "/api/health",
       "schedule": "13 12 * * *"
+    }
+  ],
+  "rewrites": [
+    {
+      "source": "/api/report",
+      "destination": "/api/health"
     }
   ]
 }
