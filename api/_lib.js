@@ -29,7 +29,9 @@ const CATEGORIES = [
   "Flooring", "Painting", "Drywall", "Kitchen Remodel", "Bath Remodel",
   "Exterior / Siding", "Concrete", "Covered Structure / Patio",
   "Fencing", "Roofing Repair", "Plumbing Repair", "Electrical (minor)",
-  "Water Damage Restoration", "General Repair", "Other",
+  "Water Damage Restoration", "General Repair",
+  "Holiday Lighting", "Room & Home Arranging", "Cleaning", "Moving",
+  "Other",
 ];
 
 // The same "Not included" lines the app prints — one shared copy.

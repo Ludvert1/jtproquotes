@@ -51,13 +51,47 @@ const CATEGORIES = [
   "Flooring", "Painting", "Drywall", "Kitchen Remodel", "Bath Remodel",
   "Exterior / Siding", "Concrete", "Covered Structure / Patio",
   "Fencing", "Roofing Repair", "Plumbing Repair", "Electrical (minor)",
-  "Water Damage Restoration", "General Repair", "Other",
+  "Water Damage Restoration", "General Repair",
+  "Holiday Lighting", "Room & Home Arranging", "Cleaning", "Moving",
+  "Other",
 ];
+
+/* Service jobs (not construction): most of the standard construction
+   exclusions don't apply, so picking one of these unticks them and adds a
+   few lines that do. Only "client-supplied materials" stays ticked. */
+const SERVICE_EXCLUSIONS = {
+  "Holiday Lighting": [
+    "Taking the lights down after the season (quoted separately)",
+    "Repairs to outlets, wiring, gutters, or roofing found during install",
+  ],
+  "Room & Home Arranging": [
+    "Mounting TVs or wall items over 50 lbs",
+    "Buying new furniture, décor, or storage products",
+  ],
+  "Cleaning": [
+    "Inside of oven/refrigerator, interior windows above first floor, and carpet shampooing unless listed",
+    "Biohazard, mold, or pest cleanup",
+  ],
+  "Moving": [
+    "Pianos, safes, and single items over 300 lbs unless listed",
+    "Damage to items boxed by the client, and contents of boxes not packed by our crew",
+  ],
+};
+const KEEP_FOR_SERVICE = "Defects or delays arising from client-supplied materials";
+const exclusionsFor = (cat, current) => {
+  const base = (current || buildExclusions()).filter((e) => !e.service);
+  if (!SERVICE_EXCLUSIONS[cat]) return base.map((e) => Object.assign({}, e, { on: true }));
+  return base.map((e) => Object.assign({}, e, { on: e.text === KEEP_FOR_SERVICE }))
+    .concat(SERVICE_EXCLUSIONS[cat].map((t) => ({ id: uid(), text: t, on: true, service: true })));
+};
 
 /* SCOPE_TEMPLATES and STANDARD_EXCLUSIONS live in src/scope-templates.js,
    shared with the server. build.js inlines that file above this one. */
 
-const buildScope = (cat) => (SCOPE_TEMPLATES[cat] || SCOPE_TEMPLATES["Other"]).map((t) => ({ id: uid(), text: t, on: true }));
+const buildScope = (cat, q) => (cat === "Holiday Lighting" && q
+  ? holidayScope(q.holidayStories || "1", q.holidayCoverage || "all")
+  : (SCOPE_TEMPLATES[cat] || SCOPE_TEMPLATES["Other"])).map((t) => ({ id: uid(), text: t, on: true }));
+const holidayTitle = (st, cov) => "Holiday lights — " + (HOLIDAY_STORIES[st] || HOLIDAY_STORIES["1"]) + ", " + (HOLIDAY_COVERAGE[cov] || HOLIDAY_COVERAGE.all).toLowerCase();
 const buildExclusions = () => STANDARD_EXCLUSIONS.map((t) => ({ id: uid(), text: t, on: true }));
 
 const STATUS = {
@@ -2106,14 +2140,38 @@ function QuoteForm({ me, isOwner, isManager, settings, notify, existing, onSave,
   const editScope = (id, text) => { setDirty(true); setScope(scopeItems.map((s) => (s.id === id ? Object.assign({}, s, { text }) : s))); };
   const rmScope = (id) => { setDirty(true); setScope(scopeItems.filter((s) => s.id !== id)); };
   const addScope = () => { setDirty(true); setScope(scopeItems.concat([{ id: uid(), text: "", on: true }])); };
-  const loadScope = () => { setDirty(true); setQ((p) => Object.assign({}, p, { scopeItems: buildScope(p.category), scopeSource: p.category, scopeEdited: false })); };
+  const loadScope = () => { setDirty(true); setQ((p) => Object.assign({}, p, { scopeItems: buildScope(p.category, p), scopeSource: p.category, scopeEdited: false })); };
   const toggleExcl = (id) => { setDirty(true); setQ((p) => Object.assign({}, p, { exclusions: exclusions.map((s) => (s.id === id ? Object.assign({}, s, { on: !s.on }) : s)) })); };
 
   const changeCategory = (cat) => {
     setDirty(true);
     setQ((p) => {
       const fresh = !p.scopeEdited || !(p.scopeItems || []).length;
-      return Object.assign({}, p, { category: cat }, fresh ? { scopeItems: buildScope(cat), scopeSource: cat, scopeEdited: false } : {});
+      const next = Object.assign({}, p, { category: cat });
+      if (cat === "Holiday Lighting") {
+        next.holidayStories = p.holidayStories || "1";
+        next.holidayCoverage = p.holidayCoverage || "all";
+        Object.assign(next, HOLIDAY_LABOR[next.holidayStories + "-" + next.holidayCoverage]);
+        if (!p.jobTitle) next.jobTitle = holidayTitle(next.holidayStories, next.holidayCoverage);
+      }
+      if (fresh) Object.assign(next, { scopeItems: buildScope(cat, next), scopeSource: cat, scopeEdited: false });
+      if (SERVICE_EXCLUSIONS[cat] || SERVICE_EXCLUSIONS[p.category]) next.exclusions = exclusionsFor(cat, p.exclusions);
+      return next;
+    });
+  };
+
+  /* Holiday Lighting: house height and how much of it gets lights. Each
+     change rewrites the scope (unless it was hand-edited), the starting
+     crew and hours, and an auto-filled job title. */
+  const setHoliday = (k, v) => {
+    setDirty(true);
+    setQ((p) => {
+      const next = Object.assign({}, p, { [k]: v });
+      const st = next.holidayStories || "1", cov = next.holidayCoverage || "all";
+      Object.assign(next, HOLIDAY_LABOR[st + "-" + cov]);
+      if (!p.jobTitle || p.jobTitle === holidayTitle(p.holidayStories || "1", p.holidayCoverage || "all")) next.jobTitle = holidayTitle(st, cov);
+      if (!p.scopeEdited) Object.assign(next, { scopeItems: buildScope("Holiday Lighting", next), scopeSource: "Holiday Lighting", scopeEdited: false });
+      return next;
     });
   };
 
@@ -2449,6 +2507,37 @@ function QuoteForm({ me, isOwner, isManager, settings, notify, existing, onSave,
             </Field>
             <Field label="Job title"><input style={inputStyle} disabled={locked} value={q.jobTitle} onChange={(e) => set("jobTitle", e.target.value)} placeholder="e.g. Master bath tile & vanity replacement" /></Field>
           </div>
+          {q.category === "Holiday Lighting" && (
+            <div className="grid md-grid-cols-2 gap-x-4">
+              <div className="mb-4"><span className="block text-xs mb-1" style={{ color: BRAND.sub, fontFamily: "'Barlow Condensed', sans-serif", letterSpacing: "0.08em", fontWeight: 600, textTransform: "uppercase" }}>House height</span>
+                <div className="flex gap-2">
+                  {Object.keys(HOLIDAY_STORIES).map((k) => (
+                    <button key={k} type="button" disabled={locked} onClick={() => setHoliday("holidayStories", k)}
+                      style={{ flex: 1, padding: "10px 8px", borderRadius: 8, fontSize: 14, fontWeight: 700, cursor: locked ? "default" : "pointer",
+                        border: `1.5px solid ${(q.holidayStories || "1") === k ? BRAND.gold : BRAND.line}`,
+                        background: (q.holidayStories || "1") === k ? BRAND.gold : "#fff", color: BRAND.navy }}>
+                      {k === "1" ? "1 story" : "2 stories"}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div className="mb-4"><span className="block text-xs mb-1" style={{ color: BRAND.sub, fontFamily: "'Barlow Condensed', sans-serif", letterSpacing: "0.08em", fontWeight: 600, textTransform: "uppercase" }}>Where the lights go</span>
+                <div className="flex gap-2">
+                  {Object.keys(HOLIDAY_COVERAGE).map((k) => (
+                    <button key={k} type="button" disabled={locked} onClick={() => setHoliday("holidayCoverage", k)}
+                      style={{ flex: 1, padding: "10px 8px", borderRadius: 8, fontSize: 14, fontWeight: 700, cursor: locked ? "default" : "pointer",
+                        border: `1.5px solid ${(q.holidayCoverage || "all") === k ? BRAND.gold : BRAND.line}`,
+                        background: (q.holidayCoverage || "all") === k ? BRAND.gold : "#fff", color: BRAND.navy }}>
+                      {k === "front" ? "Front only" : "All around"}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div style={{ fontSize: 12, color: BRAND.sub, marginTop: -8, marginBottom: 12, gridColumn: "1 / -1" }}>
+                These set the scope and a starting crew and hours — adjust under Labor. Add the lights, clips and timer as materials.
+              </div>
+            </div>
+          )}
           <Field label="Extra detail for the client (optional)" hint="Sizes, colors, brands, or anything specific to this job. Appears above the scope list.">
             <textarea style={Object.assign({}, inputStyle, { minHeight: 70 })} disabled={locked} value={q.description} onChange={(e) => set("description", e.target.value)} placeholder="Approx. 120 sq ft of porcelain tile in master bath; client selecting 12x24 in matte finish…" />
           </Field>

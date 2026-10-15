@@ -241,6 +241,45 @@ const SCOPE_TEMPLATES = {
     "Test operation and confirm with client",
     "Cleanup and haul away debris",
   ],
+  "Holiday Lighting": [
+    "Walk the property with the client to confirm layout, colors, and power sources",
+    "Furnish commercial-grade LED holiday lights, clips, extension cords, and timer as listed",
+    "Install lights along the rooflines, gutters, and eaves of the whole house (front, sides, and back)",
+    "Secure all strands with plastic clips — no nails, staples, or damage to shingles or gutters",
+    "Route cords neatly and connect to outdoor GFCI outlets with a weatherproof timer",
+    "Test every strand, replace any dead bulbs, and set the on/off schedule with the client",
+    "Clean up the work area and haul away packaging",
+  ],
+  "Room & Home Arranging": [
+    "Walk through with the client to agree on the layout and what stays, goes, or gets stored",
+    "Protect floors, door frames, and walls in the work area",
+    "Move and arrange furniture into the agreed layout",
+    "Sort, organize, and arrange closets, shelves, and storage areas as scoped",
+    "Hang pictures, mirrors, and décor at the client's chosen spots",
+    "Assemble or take apart furniture as listed",
+    "Final walkthrough with the client and adjust anything they want changed",
+    "Remove packaging and haul away items the client marked for disposal",
+  ],
+  "Cleaning": [
+    "Walk through with the client to confirm rooms and areas included",
+    "Dust all reachable surfaces, ceiling fans, light fixtures, baseboards, and window sills",
+    "Clean and disinfect kitchen counters, sink, stovetop, appliance exteriors, and cabinet fronts",
+    "Clean and disinfect bathrooms — toilets, tubs, showers, sinks, mirrors, and fixtures",
+    "Vacuum carpets and rugs; sweep and mop all hard floors",
+    "Clean interior glass, door handles, light switches, and high-touch surfaces",
+    "Empty trash and replace liners",
+    "Final walkthrough with the client",
+  ],
+  "Moving": [
+    "Confirm inventory, pickup and drop-off addresses, and move date with the client",
+    "Protect floors, door frames, and stair rails at both locations",
+    "Disassemble beds, tables, and other large furniture as needed",
+    "Wrap and pad furniture; box and label loose items as scoped",
+    "Load, secure, and transport all listed items",
+    "Unload and place furniture and boxes in the rooms the client chooses",
+    "Reassemble furniture taken apart for the move",
+    "Final walkthrough with the client and remove moving blankets and packaging",
+  ],
   "Other": [
     "Assess site conditions and confirm scope with client",
     "Protect surrounding areas and set up the work zone",
@@ -263,8 +302,38 @@ const STANDARD_EXCLUSIONS = [
   "Final detail cleaning beyond removal of construction debris",
 ];
 
+/* Holiday Lighting has two choices: how tall the house is and how much of
+   it gets lights. Each pair sets the scope wording and a starting crew/hours
+   (lights and supplies are priced separately as materials). */
+const HOLIDAY_STORIES = { "1": "1-story house", "2": "2-story house" };
+const HOLIDAY_COVERAGE = { front: "Front of house only", all: "All around the house" };
+const HOLIDAY_LABOR = {
+  "1-front": { crew: 2, days: 1, hoursPerDay: 3 },
+  "1-all":   { crew: 2, days: 1, hoursPerDay: 6 },
+  "2-front": { crew: 2, days: 1, hoursPerDay: 5 },
+  "2-all":   { crew: 3, days: 1, hoursPerDay: 8 },
+};
+function holidayScope(stories, coverage) {
+  const two = stories === "2";
+  const where = coverage === "front"
+    ? "the front of the house only (front rooflines, gutters, and eaves)"
+    : "the whole house — front, both sides, and back (all rooflines, gutters, and eaves)";
+  return [
+    "Walk the property with the client to confirm layout, colors, and power sources",
+    "Furnish commercial-grade LED holiday lights, clips, extension cords, and timer as listed",
+    "Install lights on " + where + " of the " + (two ? "2-story" : "1-story") + " house",
+    two
+      ? "Work safely at second-story height using extension ladders with stabilizers and fall protection"
+      : "Work from ladders at first-story height with stabilizers to protect gutters",
+    "Secure all strands with plastic clips — no nails, staples, or damage to shingles or gutters",
+    "Route cords neatly and connect to outdoor GFCI outlets with a weatherproof timer",
+    "Test every strand, replace any dead bulbs, and set the on/off schedule with the client",
+    "Clean up the work area and haul away packaging",
+  ];
+}
+
 if (typeof module !== "undefined" && module.exports) {
-  module.exports = { SCOPE_TEMPLATES, STANDARD_EXCLUSIONS };
+  module.exports = { SCOPE_TEMPLATES, STANDARD_EXCLUSIONS, HOLIDAY_STORIES, HOLIDAY_COVERAGE, HOLIDAY_LABOR, holidayScope };
 }
 
 const {
@@ -339,12 +408,34 @@ function applyBrand(settings, isDefaultCompany) {
     initials: isDefaultCompany && !p.name ? JTPRO_COMPANY.initials : initialsOf(name)
   };
 }
-const CATEGORIES = ["Flooring", "Painting", "Drywall", "Kitchen Remodel", "Bath Remodel", "Exterior / Siding", "Concrete", "Covered Structure / Patio", "Fencing", "Roofing Repair", "Plumbing Repair", "Electrical (minor)", "Water Damage Restoration", "General Repair", "Other"];
-const buildScope = cat => (SCOPE_TEMPLATES[cat] || SCOPE_TEMPLATES["Other"]).map(t => ({
+const CATEGORIES = ["Flooring", "Painting", "Drywall", "Kitchen Remodel", "Bath Remodel", "Exterior / Siding", "Concrete", "Covered Structure / Patio", "Fencing", "Roofing Repair", "Plumbing Repair", "Electrical (minor)", "Water Damage Restoration", "General Repair", "Holiday Lighting", "Room & Home Arranging", "Cleaning", "Moving", "Other"];
+const SERVICE_EXCLUSIONS = {
+  "Holiday Lighting": ["Taking the lights down after the season (quoted separately)", "Repairs to outlets, wiring, gutters, or roofing found during install"],
+  "Room & Home Arranging": ["Mounting TVs or wall items over 50 lbs", "Buying new furniture, décor, or storage products"],
+  "Cleaning": ["Inside of oven/refrigerator, interior windows above first floor, and carpet shampooing unless listed", "Biohazard, mold, or pest cleanup"],
+  "Moving": ["Pianos, safes, and single items over 300 lbs unless listed", "Damage to items boxed by the client, and contents of boxes not packed by our crew"]
+};
+const KEEP_FOR_SERVICE = "Defects or delays arising from client-supplied materials";
+const exclusionsFor = (cat, current) => {
+  const base = (current || buildExclusions()).filter(e => !e.service);
+  if (!SERVICE_EXCLUSIONS[cat]) return base.map(e => Object.assign({}, e, {
+    on: true
+  }));
+  return base.map(e => Object.assign({}, e, {
+    on: e.text === KEEP_FOR_SERVICE
+  })).concat(SERVICE_EXCLUSIONS[cat].map(t => ({
+    id: uid(),
+    text: t,
+    on: true,
+    service: true
+  })));
+};
+const buildScope = (cat, q) => (cat === "Holiday Lighting" && q ? holidayScope(q.holidayStories || "1", q.holidayCoverage || "all") : SCOPE_TEMPLATES[cat] || SCOPE_TEMPLATES["Other"]).map(t => ({
   id: uid(),
   text: t,
   on: true
 }));
+const holidayTitle = (st, cov) => "Holiday lights — " + (HOLIDAY_STORIES[st] || HOLIDAY_STORIES["1"]) + ", " + (HOLIDAY_COVERAGE[cov] || HOLIDAY_COVERAGE.all).toLowerCase();
 const buildExclusions = () => STANDARD_EXCLUSIONS.map(t => ({
   id: uid(),
   text: t,
@@ -4224,7 +4315,7 @@ function QuoteForm({
   const loadScope = () => {
     setDirty(true);
     setQ(p => Object.assign({}, p, {
-      scopeItems: buildScope(p.category),
+      scopeItems: buildScope(p.category, p),
       scopeSource: p.category,
       scopeEdited: false
     }));
@@ -4241,13 +4332,40 @@ function QuoteForm({
     setDirty(true);
     setQ(p => {
       const fresh = !p.scopeEdited || !(p.scopeItems || []).length;
-      return Object.assign({}, p, {
+      const next = Object.assign({}, p, {
         category: cat
-      }, fresh ? {
-        scopeItems: buildScope(cat),
+      });
+      if (cat === "Holiday Lighting") {
+        next.holidayStories = p.holidayStories || "1";
+        next.holidayCoverage = p.holidayCoverage || "all";
+        Object.assign(next, HOLIDAY_LABOR[next.holidayStories + "-" + next.holidayCoverage]);
+        if (!p.jobTitle) next.jobTitle = holidayTitle(next.holidayStories, next.holidayCoverage);
+      }
+      if (fresh) Object.assign(next, {
+        scopeItems: buildScope(cat, next),
         scopeSource: cat,
         scopeEdited: false
-      } : {});
+      });
+      if (SERVICE_EXCLUSIONS[cat] || SERVICE_EXCLUSIONS[p.category]) next.exclusions = exclusionsFor(cat, p.exclusions);
+      return next;
+    });
+  };
+  const setHoliday = (k, v) => {
+    setDirty(true);
+    setQ(p => {
+      const next = Object.assign({}, p, {
+        [k]: v
+      });
+      const st = next.holidayStories || "1",
+        cov = next.holidayCoverage || "all";
+      Object.assign(next, HOLIDAY_LABOR[st + "-" + cov]);
+      if (!p.jobTitle || p.jobTitle === holidayTitle(p.holidayStories || "1", p.holidayCoverage || "all")) next.jobTitle = holidayTitle(st, cov);
+      if (!p.scopeEdited) Object.assign(next, {
+        scopeItems: buildScope("Holiday Lighting", next),
+        scopeSource: "Holiday Lighting",
+        scopeEdited: false
+      });
+      return next;
     });
   };
   const addItem = () => set("items", q.items.concat([{
@@ -4859,7 +4977,75 @@ function QuoteForm({
     value: q.jobTitle,
     onChange: e => set("jobTitle", e.target.value),
     placeholder: "e.g. Master bath tile & vanity replacement"
-  }))), React.createElement(Field, {
+  }))), q.category === "Holiday Lighting" && React.createElement("div", {
+    className: "grid md-grid-cols-2 gap-x-4"
+  }, React.createElement("div", {
+    className: "mb-4"
+  }, React.createElement("span", {
+    className: "block text-xs mb-1",
+    style: {
+      color: BRAND.sub,
+      fontFamily: "'Barlow Condensed', sans-serif",
+      letterSpacing: "0.08em",
+      fontWeight: 600,
+      textTransform: "uppercase"
+    }
+  }, "House height"), React.createElement("div", {
+    className: "flex gap-2"
+  }, Object.keys(HOLIDAY_STORIES).map(k => React.createElement("button", {
+    key: k,
+    type: "button",
+    disabled: locked,
+    onClick: () => setHoliday("holidayStories", k),
+    style: {
+      flex: 1,
+      padding: "10px 8px",
+      borderRadius: 8,
+      fontSize: 14,
+      fontWeight: 700,
+      cursor: locked ? "default" : "pointer",
+      border: `1.5px solid ${(q.holidayStories || "1") === k ? BRAND.gold : BRAND.line}`,
+      background: (q.holidayStories || "1") === k ? BRAND.gold : "#fff",
+      color: BRAND.navy
+    }
+  }, k === "1" ? "1 story" : "2 stories")))), React.createElement("div", {
+    className: "mb-4"
+  }, React.createElement("span", {
+    className: "block text-xs mb-1",
+    style: {
+      color: BRAND.sub,
+      fontFamily: "'Barlow Condensed', sans-serif",
+      letterSpacing: "0.08em",
+      fontWeight: 600,
+      textTransform: "uppercase"
+    }
+  }, "Where the lights go"), React.createElement("div", {
+    className: "flex gap-2"
+  }, Object.keys(HOLIDAY_COVERAGE).map(k => React.createElement("button", {
+    key: k,
+    type: "button",
+    disabled: locked,
+    onClick: () => setHoliday("holidayCoverage", k),
+    style: {
+      flex: 1,
+      padding: "10px 8px",
+      borderRadius: 8,
+      fontSize: 14,
+      fontWeight: 700,
+      cursor: locked ? "default" : "pointer",
+      border: `1.5px solid ${(q.holidayCoverage || "all") === k ? BRAND.gold : BRAND.line}`,
+      background: (q.holidayCoverage || "all") === k ? BRAND.gold : "#fff",
+      color: BRAND.navy
+    }
+  }, k === "front" ? "Front only" : "All around")))), React.createElement("div", {
+    style: {
+      fontSize: 12,
+      color: BRAND.sub,
+      marginTop: -8,
+      marginBottom: 12,
+      gridColumn: "1 / -1"
+    }
+  }, "These set the scope and a starting crew and hours \u2014 adjust under Labor. Add the lights, clips and timer as materials.")), React.createElement(Field, {
     label: "Extra detail for the client (optional)",
     hint: "Sizes, colors, brands, or anything specific to this job. Appears above the scope list."
   }, React.createElement("textarea", {

@@ -163,6 +163,45 @@ const SCOPE_TEMPLATES = {
     "Test operation and confirm with client",
     "Cleanup and haul away debris",
   ],
+  "Holiday Lighting": [
+    "Walk the property with the client to confirm layout, colors, and power sources",
+    "Furnish commercial-grade LED holiday lights, clips, extension cords, and timer as listed",
+    "Install lights along the rooflines, gutters, and eaves of the whole house (front, sides, and back)",
+    "Secure all strands with plastic clips — no nails, staples, or damage to shingles or gutters",
+    "Route cords neatly and connect to outdoor GFCI outlets with a weatherproof timer",
+    "Test every strand, replace any dead bulbs, and set the on/off schedule with the client",
+    "Clean up the work area and haul away packaging",
+  ],
+  "Room & Home Arranging": [
+    "Walk through with the client to agree on the layout and what stays, goes, or gets stored",
+    "Protect floors, door frames, and walls in the work area",
+    "Move and arrange furniture into the agreed layout",
+    "Sort, organize, and arrange closets, shelves, and storage areas as scoped",
+    "Hang pictures, mirrors, and décor at the client's chosen spots",
+    "Assemble or take apart furniture as listed",
+    "Final walkthrough with the client and adjust anything they want changed",
+    "Remove packaging and haul away items the client marked for disposal",
+  ],
+  "Cleaning": [
+    "Walk through with the client to confirm rooms and areas included",
+    "Dust all reachable surfaces, ceiling fans, light fixtures, baseboards, and window sills",
+    "Clean and disinfect kitchen counters, sink, stovetop, appliance exteriors, and cabinet fronts",
+    "Clean and disinfect bathrooms — toilets, tubs, showers, sinks, mirrors, and fixtures",
+    "Vacuum carpets and rugs; sweep and mop all hard floors",
+    "Clean interior glass, door handles, light switches, and high-touch surfaces",
+    "Empty trash and replace liners",
+    "Final walkthrough with the client",
+  ],
+  "Moving": [
+    "Confirm inventory, pickup and drop-off addresses, and move date with the client",
+    "Protect floors, door frames, and stair rails at both locations",
+    "Disassemble beds, tables, and other large furniture as needed",
+    "Wrap and pad furniture; box and label loose items as scoped",
+    "Load, secure, and transport all listed items",
+    "Unload and place furniture and boxes in the rooms the client chooses",
+    "Reassemble furniture taken apart for the move",
+    "Final walkthrough with the client and remove moving blankets and packaging",
+  ],
   "Other": [
     "Assess site conditions and confirm scope with client",
     "Protect surrounding areas and set up the work zone",
@@ -185,6 +224,36 @@ const STANDARD_EXCLUSIONS = [
   "Final detail cleaning beyond removal of construction debris",
 ];
 
+/* Holiday Lighting has two choices: how tall the house is and how much of
+   it gets lights. Each pair sets the scope wording and a starting crew/hours
+   (lights and supplies are priced separately as materials). */
+const HOLIDAY_STORIES = { "1": "1-story house", "2": "2-story house" };
+const HOLIDAY_COVERAGE = { front: "Front of house only", all: "All around the house" };
+const HOLIDAY_LABOR = {
+  "1-front": { crew: 2, days: 1, hoursPerDay: 3 },
+  "1-all":   { crew: 2, days: 1, hoursPerDay: 6 },
+  "2-front": { crew: 2, days: 1, hoursPerDay: 5 },
+  "2-all":   { crew: 3, days: 1, hoursPerDay: 8 },
+};
+function holidayScope(stories, coverage) {
+  const two = stories === "2";
+  const where = coverage === "front"
+    ? "the front of the house only (front rooflines, gutters, and eaves)"
+    : "the whole house — front, both sides, and back (all rooflines, gutters, and eaves)";
+  return [
+    "Walk the property with the client to confirm layout, colors, and power sources",
+    "Furnish commercial-grade LED holiday lights, clips, extension cords, and timer as listed",
+    "Install lights on " + where + " of the " + (two ? "2-story" : "1-story") + " house",
+    two
+      ? "Work safely at second-story height using extension ladders with stabilizers and fall protection"
+      : "Work from ladders at first-story height with stabilizers to protect gutters",
+    "Secure all strands with plastic clips — no nails, staples, or damage to shingles or gutters",
+    "Route cords neatly and connect to outdoor GFCI outlets with a weatherproof timer",
+    "Test every strand, replace any dead bulbs, and set the on/off schedule with the client",
+    "Clean up the work area and haul away packaging",
+  ];
+}
+
 if (typeof module !== "undefined" && module.exports) {
-  module.exports = { SCOPE_TEMPLATES, STANDARD_EXCLUSIONS };
+  module.exports = { SCOPE_TEMPLATES, STANDARD_EXCLUSIONS, HOLIDAY_STORIES, HOLIDAY_COVERAGE, HOLIDAY_LABOR, holidayScope };
 }
