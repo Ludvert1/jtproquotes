@@ -360,7 +360,6 @@ footer small { font: 600 12px/1 var(--mono); letter-spacing: .1em; color: var(--
       <div class="contact" id="contact">
         <h3>Talk to a person</h3>
         <div class="line"><small>CALL OR TEXT</small><a href="tel:+17138358245">(713) 835-8245</a></div>
-        <div class="line"><small>EMAIL</small><a href="mailto:info@jtproconstruction.com">info@jtproconstruction.com</a></div>
         <p style="color:#C3CEDC;font-size:15px">Already signed up? Use the <b>Help</b> button in the app. It sends us your Support ID with your message.</p>
         <form id="contact-form" novalidate>
           <div class="two">
@@ -395,18 +394,18 @@ footer small { font: 600 12px/1 var(--mono); letter-spacing: .1em; color: var(--
 <section id="about" style="padding-top:0">
   <div class="wrap about">
     <div class="jt">
-      <p class="eyebrow">THE CONTRACTOR BEHIND IT</p>
-      <h3>JTProconstruction LLC</h3>
-      <p>Licensed &amp; insured · New Caney, TX · Serving the Greater Houston area</p>
-      <ul><li>Flooring</li><li>Painting</li><li>Drywall</li><li>Kitchen &amp; bath remodels</li><li>Exterior work</li><li>Concrete</li><li>Covered structures</li><li>General repairs</li></ul>
-      <a href="https://jtproconstruction.com">jtproconstruction.com →</a>
+      <p class="eyebrow">BUILT FOR THE TRADES</p>
+      <h3>Every kind of job</h3>
+      <p>Used by contractors anywhere in the U.S. Your prices, your area, your brand.</p>
+      <ul><li>Remodeling</li><li>Painting</li><li>Drywall</li><li>Flooring</li><li>Kitchen &amp; bath</li><li>Roofing</li><li>Concrete</li><li>Fencing &amp; decks</li><li>Handyman</li><li>Holiday lighting</li><li>Cleaning</li><li>Moving</li></ul>
+      <a href="{{APP}}/?start">Start free →</a>
     </div>
     <div>
       <p class="eyebrow">About us</p>
-      <h2 style="margin-top:12px">Built by a contractor, for contractors</h2>
-      <p class="lead" style="margin-top:18px">S-I-Quotespro was built by Joel Ludvert, owner of JTProconstruction LLC in New Caney, Texas. His crew does flooring, painting, drywall, kitchens and baths, exteriors and concrete across the Houston area.</p>
-      <p class="lead">The jobs kept going to whoever answered first. So he built a tool that reads every lead the moment it comes in, drafts the quote with his own numbers, and lets him send it from the truck. JTProconstruction runs on it every day. Now other contractors can too.</p>
-      <div class="facts"><span>NEW CANEY, TX</span><span>LICENSED &amp; INSURED CONTRACTOR</span><span>USED DAILY BY JTPROCONSTRUCTION</span></div>
+      <h2 style="margin-top:12px">Built by contractors, for contractors</h2>
+      <p class="lead" style="margin-top:18px">S-I-Quotespro was designed by people who run crews and win jobs every day, together with software experts. Every screen follows the way real jobs get quoted: read the request, size up the work, price it right and answer before anyone else.</p>
+      <p class="lead">It works the same whether you're in Texas, Florida, Ohio or California. Your labor rate, your margins, your service area and your logo are built in, so every quote sounds like you.</p>
+      <div class="facts"><span>NATIONWIDE</span><span>BUILT WITH WORKING CONTRACTORS</span><span>REAL PERSON ON SUPPORT</span></div>
     </div>
   </div>
 </section>
@@ -428,10 +427,10 @@ footer small { font: 600 12px/1 var(--mono); letter-spacing: .1em; color: var(--
     <div class="cols">
       <div><small>PRODUCT</small><a href="#how">How it works</a><a href="#pricing">Pricing</a><a href="{{APP}}/?start">Start free trial</a><a href="{{APP}}/app">Sign in</a></div>
       <div><small>SUPPORT</small><a href="#help">Help center</a><a href="#contact">Contact us</a><span>(713) 835-8245</span></div>
-      <div><small>COMPANY</small><a href="#about">About</a><a href="https://jtproconstruction.com">JTProconstruction LLC</a></div>
+      <div><small>COMPANY</small><a href="#about">About</a><a href="#reviews">Reviews</a></div>
     </div>
   </div>
-  <div class="wrap" style="margin-top:28px;font-size:13px">© 2026 S-I-Quotespro · A JTProconstruction LLC product · New Caney, Texas</div>
+  <div class="wrap" style="margin-top:28px;font-size:13px">© 2026 S-I-Quotespro · Serving contractors nationwide</div>
 </footer>
 
 <script>
@@ -450,7 +449,7 @@ footer small { font: 600 12px/1 var(--mono); letter-spacing: .1em; color: var(--
     fetch("{{API}}/api/contact", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data) })
       .then(function (r) { return r.json().catch(function () { return {}; }).then(function (j) { if (!r.ok) throw new Error(j.error || "fail"); return j; }); })
       .then(function () { status.className = "status ok"; status.textContent = "Thanks, " + data.name.split(" ")[0] + ". We got your message and will get back to you soon."; form.reset(); })
-      .catch(function () { status.className = "status err"; status.textContent = "That didn't send. Call or text (713) 835-8245, or email info@jtproconstruction.com."; })
+      .catch(function () { status.className = "status err"; status.textContent = "That didn't send. Call or text (713) 835-8245."; })
       .then(function () { btn.disabled = false; });
   });
 })();
