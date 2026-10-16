@@ -63,7 +63,8 @@ function accessOf(co) {
   const used = Number(co.trialQuotesUsed || 0);
   if (co.stripeSubscriptionId) {
     if (["active", "past_due"].includes(co.billingStatus)) return "ok";
-    if (co.billingStatus === "trialing") return used >= TRIAL_QUOTES ? "limit" : "ok";
+    // A paying customer who took "2 extra weeks free" is on a trial again, but not a quote-limited one.
+    if (co.billingStatus === "trialing") return used >= TRIAL_QUOTES && !(co.retentionOffers || []).includes("extend14") ? "limit" : "ok";
     return "locked";
   }
   if (trialCap(co) <= Date.now()) return "locked";

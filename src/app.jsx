@@ -560,6 +560,7 @@ function App() {
   const [leadLater, setLeadLater] = useState(false);
   const [billing, setBilling] = useState(null);
   const [helpOpen, setHelpOpen] = useState(false);
+  const [receiptId, setReceiptId] = useState("");
   const [adminOpen, setAdminOpen] = useState("");
 
   const DEFAULT_SETTINGS ={ laborRate: 35, overheadPct: 10, targetMargin: 25, requireTeamCode: false, teamCode: "JTPRO-" + Math.random().toString(36).slice(2, 6).toUpperCase() };
@@ -869,6 +870,7 @@ function App() {
 
   const navItems = [["dashboard", "Dashboard"], ["new", "New quote"]];
   if (isManager) navItems.push(["team", "Team & review"]);
+  if (isManager) navItems.push(["receipts", "Receipts"]);
   if (isOwner) navItems.push(["settings", "Settings"]);
   if (!TENANT && isOwner && CLOUD) navItems.push(["admin", "Admin"]);
 
@@ -907,7 +909,7 @@ function App() {
           <ThumbtackSetup settings={settings} quotes={quotes} compact onPatch={mergeSettings} onDismiss={(done) => { setLeadLater(true); if (done) notify("Lead inbox connected — new leads will show up here."); }} />
         )}
         {view === "dashboard" && <Dashboard me={me} isOwner={isOwner} isManager={isManager} quotes={visibleQuotes} users={users} settings={settings}
-          onOpen={(q) => { setActiveQuote(q); setView("edit"); }} onPreview={setPreviewQuote} onNew={() => setView("new")}
+          onOpen={(q) => { setActiveQuote(q); setView("edit"); }} onPreview={setPreviewQuote} onNew={() => setView("new")} onReceipt={(q) => setReceiptId(q.id)}
           onDelete={async (q) => {
             if (!window.confirm("Permanently delete quote " + q.quoteNo + " for " + (q.clientName || "this client") + "?\n\nThis erases it from the database. It cannot be undone and leaves no record of what was quoted.\n\nIf you only want it out of the way, cancel and use Void instead.")) return;
             if (!window.confirm("Last check — delete " + q.quoteNo + " forever?")) return;
@@ -937,13 +939,15 @@ function App() {
 
         {view === "team" && isManager && <TeamView quotes={Object.values(quotes)} users={users} settings={settings} me={me}
           onUpdateQuote={upsertQuote} onSaveUsers={saveUsers} onDeleteUser={deleteUser} onDeleteQuote={deleteQuote} onSaveSettings={saveSettings} onPreview={setPreviewQuote}
-          onOpen={(q) => { setActiveQuote(q); setView("edit"); }} notify={notify} />}
+          onOpen={(q) => { setActiveQuote(q); setView("edit"); }} notify={notify} onReceipt={(q) => setReceiptId(q.id)} />}
 
+        {view === "receipts" && isManager && <ReceiptsView quotes={Object.values(quotes)} settings={settings} onReceipt={(q) => setReceiptId(q.id)} />}
         {view === "admin" && !TENANT && isOwner && <AdminView notify={notify} openCid={adminOpen} />}
-        {view === "settings" && isOwner && <SettingsView settings={settings} quotes={quotes} billing={billing} notify={notify} onSave={async (s) => { try { await saveSettings(s); notify("Settings saved"); } catch (e) { notify(e.message || "Couldn't save settings. Try again."); } }} />}
+        {view === "settings" && isOwner && <SettingsView settings={settings} quotes={quotes} billing={billing} notify={notify} onBilling={setBilling} onSave={async (s) => { try { await saveSettings(s); notify("Settings saved"); } catch (e) { notify(e.message || "Couldn't save settings. Try again."); } }} />}
       </main>
 
       {previewQuote && <PreviewModal quote={previewQuote} settings={settings} users={users} me={me} onClose={() => setPreviewQuote(null)} />}
+      {receiptId && quotes[receiptId] && <ReceiptModal quote={quotes[receiptId]} settings={settings} me={me} notify={notify} onSave={upsertQuote} onClose={() => setReceiptId("")} />}
       {helpOpen && <HelpModal me={me} notify={notify} onClose={() => setHelpOpen(false)} onReview={() => { setHelpOpen(false); setReviewOpen(true); }} />}
       {(reviewOpen || askReview) && <ReviewModal me={me} notify={notify} onClose={() => { setReviewOpen(false); setAskedReview(true); try { localStorage.setItem("siq_asked_review_" + (TENANT || ""), "1"); } catch {} }} />}
       {(planOpen || showLastQuoteAlert) && <PlanModal billing={billing} isOwner={isOwner} lastQuote={showLastQuoteAlert && !planOpen} notify={notify} onClose={() => { setPlanOpen(false); dismissLastQuote(); }} />}
@@ -1269,7 +1273,7 @@ function inPeriod(iso, p) {
   return d.getFullYear() === n.getFullYear() && d.getMonth() === n.getMonth();
 }
 
-function Dashboard({ me, isOwner, isManager, quotes, users, settings, onOpen, onPreview, onNew, onDelete }) {
+function Dashboard({ me, isOwner, isManager, quotes, users, settings, onOpen, onPreview, onNew, onDelete, onReceipt }) {
   const [period, setPeriod] = useState("month");
   const [filter, setFilter] = useState("all");
 
@@ -1370,6 +1374,7 @@ function Dashboard({ me, isOwner, isManager, quotes, users, settings, onOpen, on
                     <div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontSize: 22, fontWeight: 700, color: BRAND.navy, textDecoration: isVoid(q) ? "line-through" : "none" }}>{money(q.status === "won" ? wonValue(q, settings) : c.total)}</div>
                     <Badge status={q.status} />
                     <Btn small kind="ghost" onClick={() => onPreview(q)}>Preview</Btn>
+                    {q.status === "won" && isManager && onReceipt && <Btn small kind="gold" onClick={() => onReceipt(q)}>{paymentsOf(q).length ? "Receipts" : "Receipt"}</Btn>}
                     {(q.createdBy === me.id || isManager) && !isVoid(q) && <Btn small kind="ghost" onClick={() => onOpen(q)}>Open</Btn>}
                     {isOwner && onDelete && <Btn small kind="danger" onClick={() => onDelete(q)}>Delete</Btn>}
                   </div>
@@ -2791,7 +2796,7 @@ function QuoteForm({ me, isOwner, isManager, settings, notify, existing, onSave,
 }
 
 /* ================= OWNER: TEAM & REVIEW ================= */
-function TeamView({ quotes, users, settings, me, onUpdateQuote, onSaveUsers, onDeleteUser, onDeleteQuote, onSaveSettings, onPreview, onOpen, notify }) {
+function TeamView({ quotes, users, settings, me, onUpdateQuote, onSaveUsers, onDeleteUser, onDeleteQuote, onSaveSettings, onPreview, onOpen, notify, onReceipt }) {
   const [period, setPeriod] = useState("month");
   const [activity, setActivity] = useState([]);
   useEffect(() => {
@@ -2853,6 +2858,8 @@ function TeamView({ quotes, users, settings, me, onUpdateQuote, onSaveUsers, onD
       outcomeNote: "",
     });
     logActivity(who, "Marked won" + (amount !== quoted ? " at " + money(amount) : ""), q.quoteNo);
+    // Straight to the receipt: record the client's payment and send them a receipt.
+    if (onReceipt && q.status !== "won") onReceipt(q);
   };
 
   const markLost = async (q) => {
@@ -3191,6 +3198,7 @@ function TeamView({ quotes, users, settings, me, onUpdateQuote, onSaveUsers, onD
                       </div>
                     </div>
                     <div className="flex gap-2 flex-wrap justify-end">
+                      {q.status === "won" && <Btn small kind="gold" onClick={() => onReceipt && onReceipt(q)}>{paymentsOf(q).length ? "Receipts (" + paymentsOf(q).length + ")" : "Record payment"}</Btn>}
                       {q.status === "won" && <Btn small kind="ghost" onClick={() => markWon(q)}>Edit amount</Btn>}
                       {q.status === "lost" && <Btn small kind="gold" onClick={() => markWon(q)}>Actually won</Btn>}
                       <Btn small kind="ghost" onClick={() => reopen(q, "negotiating")}>Reopen</Btn>
@@ -4038,7 +4046,105 @@ function ManageBillingBtn({ notify }) {
   }}>{busy ? "Opening…" : "Manage billing"}</Btn>;
 }
 
-function BillingCard({ billing, notify }) {
+/* Cancelling: ask why, offer something that fits, and keep "cancel" one clear tap away. */
+const CANCEL_REASONS = [
+  ["price", "It costs too much right now"],
+  ["slow", "Work is slow / seasonal"],
+  ["notusing", "I'm not using it enough"],
+  ["feature", "It's missing something I need"],
+  ["hard", "It's hard to use or set up"],
+  ["switch", "I'm switching to another tool"],
+  ["other", "Something else"],
+];
+const OFFER_TEXT = {
+  extend14: { title: "2 extra weeks free", body: "Your next charge moves back 14 days. Keep every quote, lead and setting.", cta: "Give me 2 weeks free" },
+  off35: { title: "35% off your next month", body: "Stay on your plan and pay 35% less on your next bill.", cta: "Take 35% off" },
+  off50: { title: "50% off your next month", body: "Half price on your next bill while things pick up.", cta: "Take 50% off" },
+};
+function CancelFlow({ billing, onBilling, onClose, notify }) {
+  const [step, setStep] = useState("why");
+  const [reason, setReason] = useState("");
+  const [detail, setDetail] = useState("");
+  const [busy, setBusy] = useState("");
+  const [result, setResult] = useState(null);
+  const used = billing.offersUsed || [];
+  const primary = reason === "price" ? "off50" : (reason === "slow" || reason === "notusing") ? "extend14" : "off35";
+  const order = [primary].concat(["off50", "extend14", "off35"].filter((o) => o !== primary)).filter((o) => !used.includes(o));
+  const reasonLabel = (CANCEL_REASONS.find((r) => r[0] === reason) || [, ""])[1];
+  const take = async (offer) => {
+    setBusy(offer);
+    try { const b = await billingCall("saveOffer", { offer, reason: reasonLabel }); onBilling(b); setResult({ saved: offer }); setStep("done"); }
+    catch (e) { notify(e.message); }
+    setBusy("");
+  };
+  const cancel = async () => {
+    setBusy("cancel");
+    try { const b = await billingCall("cancel", { reason: reasonLabel, detail }); onBilling(b); setResult({ cancelled: true, until: b.currentPeriodEnd || b.trialEnds }); setStep("done"); }
+    catch (e) { notify(e.message); }
+    setBusy("");
+  };
+  const box = { border: `2px solid ${BRAND.line}`, borderRadius: 12, padding: 14, background: "#fff" };
+  return (
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(11,31,58,0.6)", zIndex: 60, display: "flex", alignItems: "center", justifyContent: "center", padding: 16, overflowY: "auto" }}>
+      <div onClick={(e) => e.stopPropagation()} style={{ background: BRAND.paper, borderRadius: 14, padding: 22, width: "100%", maxWidth: 560, maxHeight: "92vh", overflowY: "auto" }}>
+        {step === "why" && <>
+          <div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontSize: 26, fontWeight: 700, color: BRAND.navy }}>BEFORE YOU GO</div>
+          <p style={{ fontSize: 14, color: BRAND.sub, margin: "6px 0 14px" }}>What's the main reason you want to cancel? It helps us make {PRODUCT} better.</p>
+          <div className="grid gap-2">
+            {CANCEL_REASONS.map(([k, l]) => (
+              <label key={k} style={Object.assign({}, box, { padding: "10px 12px", display: "flex", gap: 10, alignItems: "center", cursor: "pointer", borderColor: reason === k ? BRAND.gold : BRAND.line })}>
+                <input type="radio" name="cancel-reason" checked={reason === k} onChange={() => setReason(k)} /> <span style={{ fontSize: 14.5 }}>{l}</span>
+              </label>
+            ))}
+          </div>
+          <Field label="Anything else? (optional)"><textarea style={Object.assign({}, inputStyle, { minHeight: 60, marginTop: 10 })} value={detail} onChange={(e) => setDetail(e.target.value)} /></Field>
+          <div className="flex gap-2 flex-wrap"><Btn disabled={!reason} onClick={() => setStep("offer")}>Continue</Btn><Btn kind="ghost" onClick={onClose}>Keep my plan</Btn></div>
+        </>}
+
+        {step === "offer" && <>
+          <div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontSize: 26, fontWeight: 700, color: BRAND.navy }}>WE'D LOVE TO KEEP YOU</div>
+          <p style={{ fontSize: 14, color: BRAND.sub, margin: "6px 0 14px" }}>{reason === "feature" || reason === "hard" ? "Tell us what's in the way. We can usually fix it or set it up for you on a quick call. Or take one of these:" : "Here's something to make staying easier:"}</p>
+          <div className="grid gap-2">
+            {order.map((o, i) => (
+              <div key={o} style={Object.assign({}, box, { borderColor: i === 0 ? BRAND.gold : BRAND.line })} className="flex items-center justify-between gap-3 flex-wrap">
+                <div style={{ minWidth: 200, flex: 1 }}>
+                  {i === 0 && <div style={{ fontSize: 11, fontWeight: 800, color: BRAND.amber, letterSpacing: "0.08em" }}>BEST FOR YOU</div>}
+                  <div style={{ fontWeight: 800, color: BRAND.navy, fontSize: 16 }}>{OFFER_TEXT[o].title}</div>
+                  <div style={{ fontSize: 13, color: BRAND.sub }}>{OFFER_TEXT[o].body}</div>
+                </div>
+                <Btn kind={i === 0 ? "gold" : "primary"} small disabled={!!busy} onClick={() => take(o)}>{busy === o ? "Applying…" : OFFER_TEXT[o].cta}</Btn>
+              </div>
+            ))}
+            {(reason === "feature" || reason === "hard" || !order.length) && (
+              <div style={box}>
+                <div style={{ fontWeight: 800, color: BRAND.navy, fontSize: 16 }}>Free help from a real person</div>
+                <div style={{ fontSize: 13, color: BRAND.sub, marginBottom: 8 }}>Call or text {SUPPORT.phone}, or email {SUPPORT.email}. We'll set it up with you.</div>
+                <a href={"tel:" + SUPPORT.phone.replace(/[^\d+]/g, "")} style={{ textDecoration: "none" }}><Btn small kind="ghost">Call {SUPPORT.phone}</Btn></a>
+              </div>
+            )}
+          </div>
+          <div style={{ borderTop: `1px solid ${BRAND.line}`, marginTop: 16, paddingTop: 14 }} className="flex gap-2 flex-wrap items-center">
+            <Btn kind="danger" disabled={!!busy} onClick={cancel}>{busy === "cancel" ? "Cancelling…" : "No thanks, cancel my plan"}</Btn>
+            <Btn kind="ghost" onClick={onClose}>Keep my plan</Btn>
+          </div>
+          <p style={{ fontSize: 12, color: BRAND.sub, marginTop: 8 }}>If you cancel, your plan stays active until the end of what you've paid for, and you can turn it back on any time before then.</p>
+        </>}
+
+        {step === "done" && result && <>
+          <div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontSize: 26, fontWeight: 700, color: result.saved ? BRAND.green : BRAND.navy }}>{result.saved ? "DONE — THANKS FOR STAYING!" : "YOUR PLAN IS CANCELLED"}</div>
+          <p style={{ fontSize: 14, color: BRAND.sub, margin: "8px 0 16px" }}>
+            {result.saved ? OFFER_TEXT[result.saved].title + " is applied to your account. Nothing else changes." : "You can keep using " + PRODUCT + " until " + (result.until ? fmtDay(result.until) : "the end of your billing period") + ". Changed your mind? Turn it back on from Settings → Plan & billing."}
+          </p>
+          <Btn onClick={onClose}>Close</Btn>
+        </>}
+      </div>
+    </div>
+  );
+}
+
+function BillingCard({ billing, notify, onBilling }) {
+  const [cancelOpen, setCancelOpen] = useState(false);
+  const [resuming, setResuming] = useState(false);
   if (!billing || billing.exempt || !billing.enabled) return null;
   const card = { check: { ok: "Card confirmed ($1 hold released)", declined: "Card was declined on the $1 check — update it", needs_auth: "Your bank wants to confirm the card — update it", failed: "Card check didn't go through — update it" } };
   return (
@@ -4053,8 +4159,15 @@ function BillingCard({ billing, notify }) {
             {billing.cancelAtPeriodEnd && billing.billingStatus === "trialing" && <div style={{ color: BRAND.amber }}>Set to cancel — you won't be charged.</div>}
             {billing.cardCheck && <div style={{ color: billing.cardCheck === "ok" ? BRAND.green : BRAND.red, fontSize: 13 }}>{card.check[billing.cardCheck] || ""}</div>}
           </div>
-          <div className="mt-3"><ManageBillingBtn notify={notify} /></div>
-          <p style={{ fontSize: 12, color: BRAND.sub, marginTop: 8 }}>Change card, switch plan, see invoices or cancel.</p>
+          {billing.cancelAtPeriodEnd && <div style={{ background: "#FBF3DE", borderRadius: 8, padding: "10px 12px", fontSize: 13.5, marginTop: 8 }}>
+            Your plan is set to end on <b>{fmtDay(billing.currentPeriodEnd || billing.trialEnds)}</b>.
+            <div className="mt-2"><Btn small kind="gold" disabled={resuming} onClick={async () => { setResuming(true); try { const b = await billingCall("resume"); onBilling && onBilling(b); notify("Welcome back — your plan will keep going."); } catch (e) { notify(e.message); } setResuming(false); }}>{resuming ? "Turning back on…" : "Keep my plan"}</Btn></div>
+          </div>}
+          <div className="mt-3 flex gap-2 flex-wrap items-center"><ManageBillingBtn notify={notify} />
+            {!billing.cancelAtPeriodEnd && ["trialing", "active", "past_due"].includes(billing.billingStatus) && <button onClick={() => setCancelOpen(true)} style={{ background: "none", border: "none", color: BRAND.sub, textDecoration: "underline", fontSize: 13, cursor: "pointer" }}>Cancel plan</button>}
+          </div>
+          <p style={{ fontSize: 12, color: BRAND.sub, marginTop: 8 }}>Change card, switch plan or see invoices.</p>
+          {cancelOpen && <CancelFlow billing={billing} onBilling={(b) => onBilling && onBilling(b)} notify={notify} onClose={() => setCancelOpen(false)} />}
         </>
       ) : (
         <>
@@ -4067,12 +4180,12 @@ function BillingCard({ billing, notify }) {
   );
 }
 
-function SettingsView({ settings, onSave, quotes, billing, notify }) {
+function SettingsView({ settings, onSave, quotes, billing, notify, onBilling }) {
   const [s, setS] = useState(settings);
   return (
     <div style={{ maxWidth: 560 }}>
       <h2 style={{ fontFamily: "'Barlow Condensed', sans-serif", fontSize: 26, fontWeight: 700, color: BRAND.navy, letterSpacing: "0.03em", marginBottom: 14 }}>COMPANY SETTINGS</h2>
-      {TENANT && <BillingCard billing={billing} notify={notify} />}
+      {TENANT && <BillingCard billing={billing} notify={notify} onBilling={onBilling} />}
       <CompanyProfileCard s={s} setS={setS} />
       {TENANT && <ThumbtackSetup settings={s} quotes={quotes} onPatch={async (p) => { await mergeSettings(p); setS((x) => Object.assign({}, x, p)); }} />}
       <Card>
@@ -4109,6 +4222,221 @@ function SettingsView({ settings, onSave, quotes, billing, notify }) {
 }
 
 /* ================= CLIENT-FACING PREVIEW ================= */
+/* ================= RECEIPTS =================
+   When a job is won, the contractor records each payment the client makes
+   (deposit, progress, final). Every payment gets a numbered receipt they
+   can download, print or send, and all receipts export to CSV for taxes. */
+const PAY_METHODS = ["Cash", "Check", "Zelle", "Card", "Cash App", "Venmo", "Bank transfer", "Other"];
+const paymentsOf = (q) => (q && Array.isArray(q.payments) ? q.payments : []);
+const paidOf = (q) => paymentsOf(q).reduce((n, p) => n + (Number(p.amount) || 0), 0);
+const todayISO = () => { const d = new Date(); return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10); };
+const fmtDay2 = (ymd) => { try { return new Date(ymd + "T12:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }); } catch { return ymd; } };
+
+function ReceiptModal({ quote: liveQuote, settings, me, onSave: saveQuote, onClose, notify }) {
+  /* Show what was just saved right away, even before the database echoes it back. */
+  const [saved, setSaved] = useState(null);
+  const quote = saved && String(saved.updatedAt || "") >= String(liveQuote.updatedAt || "") ? saved : liveQuote;
+  const onSave = async (next) => { setSaved(next); await saveQuote(next); };
+  const contract = wonValue(quote, settings);
+  const paid = paidOf(quote);
+  const balance = Math.max(0, Math.round((contract - paid) * 100) / 100);
+  const [amount, setAmount] = useState(String(balance || ""));
+  const [method, setMethod] = useState("Zelle");
+  const [date, setDate] = useState(todayISO());
+  const [ref, setRef] = useState("");
+  const [note, setNote] = useState("");
+  const [busy, setBusy] = useState("");
+  const [showId, setShowId] = useState(paymentsOf(quote).length ? paymentsOf(quote)[paymentsOf(quote).length - 1].id : "");
+  const [err, setErr] = useState("");
+  const pays = paymentsOf(quote);
+  const shown = pays.find((p) => p.id === showId);
+
+  const record = async () => {
+    const amt = Math.round((parseFloat(String(amount).replace(/[^0-9.]/g, "")) || 0) * 100) / 100;
+    if (!(amt > 0)) return setErr("Enter the amount the client paid.");
+    setErr(""); setBusy("save");
+    const n = pays.length + 1;
+    const pay = { id: uid(), receiptNo: "R-" + quote.quoteNo + (n > 1 ? "-" + n : ""), amount: amt, method, ref: ref.trim(), date, note: note.trim(), by: me ? me.name : "", at: new Date().toISOString() };
+    const next = Object.assign({}, quote, {
+      payments: pays.concat([pay]), updatedAt: new Date().toISOString(),
+      history: (quote.history || []).concat([{ at: pay.at, by: pay.by, action: "Payment received " + money(amt) + " (" + method + ") — receipt " + pay.receiptNo }]),
+    });
+    try { await onSave(next); logActivity(pay.by, "Recorded payment " + money(amt) + " · receipt " + pay.receiptNo, quote.quoteNo); setShowId(pay.id); notify("Receipt " + pay.receiptNo + " created"); }
+    catch (e) { setErr("Couldn't save the payment. Try again."); }
+    setBusy("");
+  };
+  const removePay = async (p) => {
+    if (!window.confirm("Delete receipt " + p.receiptNo + " for " + money(p.amount) + "? Only do this if it was entered by mistake.")) return;
+    const next = Object.assign({}, quote, { updatedAt: new Date().toISOString(), payments: pays.filter((x) => x.id !== p.id), history: (quote.history || []).concat([{ at: new Date().toISOString(), by: me ? me.name : "", action: "Deleted receipt " + p.receiptNo }]) });
+    await onSave(next); if (showId === p.id) setShowId("");
+  };
+
+  const fileName = shown ? (shown.receiptNo + " " + (quote.clientName || "Client") + " - " + COMPANY.name + " Receipt").replace(/[^\w .\-]+/g, "").trim() + ".pdf" : "";
+  const makePdf = async () => {
+    const lib = await loadHtml2pdf();
+    const el = document.getElementById("receipt-doc");
+    const sx = window.scrollX, sy = window.scrollY; window.scrollTo(0, 0);
+    try {
+      return await lib().set({ margin: [8, 8, 8, 8], filename: fileName, image: { type: "jpeg", quality: 0.95 }, html2canvas: { scale: 2, useCORS: true, backgroundColor: "#ffffff", scrollX: 0, scrollY: 0 }, jsPDF: { unit: "mm", format: "letter", orientation: "portrait" } }).from(el).outputPdf("blob");
+    } finally { window.scrollTo(sx, sy); }
+  };
+  const download = async () => {
+    setBusy("pdf");
+    try { const blob = await makePdf(); const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = fileName; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 4000); }
+    catch (e) { setErr("Couldn't make the PDF. Use Print instead."); }
+    setBusy("");
+  };
+  const canShare = typeof navigator !== "undefined" && !!navigator.share && !!navigator.canShare;
+  const share = async () => {
+    setBusy("share");
+    try {
+      const file = new File([await makePdf()], fileName, { type: "application/pdf" });
+      if (!navigator.canShare({ files: [file] })) throw new Error("This device can't share files — use Download PDF.");
+      const first = (quote.clientName || "").split(" ")[0];
+      await navigator.share({ files: [file], title: fileName, text: "Hi" + (first ? " " + first : "") + ", thank you for your payment. Here is your receipt from " + COMPANY.name + " (" + shown.receiptNo + "). — " + (COMPANY.signer || COMPANY.name) });
+    } catch (e) { if (e && e.name !== "AbortError") setErr(e.message || "Couldn't share."); }
+    setBusy("");
+  };
+  const paidThrough = shown ? pays.slice(0, pays.findIndex((p) => p.id === shown.id) + 1).reduce((n, p) => n + (Number(p.amount) || 0), 0) : 0;
+  const lbl = { fontSize: 11, fontWeight: 700, letterSpacing: "0.1em", color: BRAND.gold };
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(11,31,58,0.75)", zIndex: 55, overflowY: "auto", padding: "24px 12px" }} onClick={onClose}>
+      <div style={{ maxWidth: 720, margin: "0 auto" }} onClick={(e) => e.stopPropagation()}>
+        <div style={{ background: "#fff", borderRadius: 12, padding: 18, marginBottom: 12 }}>
+          <div className="flex justify-between items-center flex-wrap gap-2">
+            <div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontSize: 22, fontWeight: 700, color: BRAND.navy }}>PAYMENTS · {quote.quoteNo} · {quote.clientName}</div>
+            <Btn small kind="ghost" onClick={onClose}>Close</Btn>
+          </div>
+          <div style={{ fontSize: 14, margin: "6px 0 10px" }}>Job total <b>{money(contract)}</b> · paid <b style={{ color: BRAND.green }}>{money(paid)}</b> · balance <b style={{ color: balance > 0 ? BRAND.amber : BRAND.green }}>{money(balance)}</b></div>
+          {pays.length > 0 && <div style={{ marginBottom: 12 }}>
+            {pays.map((p) => (
+              <div key={p.id} className="flex justify-between items-center gap-2 flex-wrap" style={{ borderTop: `1px solid ${BRAND.line}`, padding: "7px 0", fontSize: 13.5 }}>
+                <span><b>{p.receiptNo}</b> · {fmtDay2(p.date)} · {p.method}{p.ref ? " #" + p.ref : ""} · <b>{money(p.amount)}</b></span>
+                <span className="flex gap-2"><Btn small kind={showId === p.id ? "gold" : "ghost"} onClick={() => setShowId(p.id)}>View receipt</Btn><Btn small kind="danger" onClick={() => removePay(p)}>Delete</Btn></span>
+              </div>
+            ))}
+          </div>}
+          {balance > 0 && <>
+            <div style={{ fontSize: 12, fontWeight: 700, color: BRAND.sub, letterSpacing: "0.06em", margin: "6px 0" }}>{pays.length ? "RECORD ANOTHER PAYMENT" : "RECORD THE PAYMENT"}</div>
+            <div className="grid gap-x-3" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))" }}>
+              <Field label="Amount received"><input style={inputStyle} inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} /></Field>
+              <Field label="Paid by"><select style={inputStyle} value={method} onChange={(e) => setMethod(e.target.value)}>{PAY_METHODS.map((m) => <option key={m}>{m}</option>)}</select></Field>
+              <Field label="Date received"><input style={inputStyle} type="date" value={date} onChange={(e) => setDate(e.target.value)} /></Field>
+              <Field label="Check / ref # (optional)"><input style={inputStyle} value={ref} onChange={(e) => setRef(e.target.value)} /></Field>
+            </div>
+            <Field label="Note on receipt (optional)"><input style={inputStyle} value={note} onChange={(e) => setNote(e.target.value)} placeholder="e.g. 50% deposit, balance due on completion" /></Field>
+            <Btn kind="gold" disabled={!!busy} onClick={record}>{busy === "save" ? "Saving…" : "Save payment & create receipt"}</Btn>
+          </>}
+          {balance <= 0 && pays.length > 0 && <div style={{ color: BRAND.green, fontWeight: 700, fontSize: 14 }}>Paid in full.</div>}
+          {err && <div style={{ color: BRAND.red, fontSize: 13, marginTop: 8 }}>{err}</div>}
+        </div>
+
+        {shown && <>
+          <div className="flex justify-end gap-2 mb-2 flex-wrap">
+            {canShare && <Btn small kind="gold" disabled={!!busy} onClick={share}>{busy === "share" ? "Making PDF…" : "Send to client"}</Btn>}
+            <Btn small kind={canShare ? "primary" : "gold"} disabled={!!busy} onClick={download}>{busy === "pdf" ? "Making PDF…" : "Download PDF"}</Btn>
+            <button onClick={() => window.print()} style={{ background: "transparent", color: "#fff", border: "1.5px solid rgba(255,255,255,0.5)", padding: "6px 14px", borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: "pointer" }}>Print</button>
+          </div>
+          <div id="receipt-doc" style={{ background: "#fff", padding: "42px 46px", color: BRAND.ink }}>
+            <div className="flex justify-between items-start gap-4" style={{ borderBottom: `3px solid ${BRAND.gold}`, paddingBottom: 14 }}>
+              <div className="flex items-center gap-3">
+                {COMPANY.logo ? <img src={COMPANY.logo} alt="" style={{ width: 54, height: 54, objectFit: "contain" }} /> : <div style={{ width: 54, height: 54, background: BRAND.navy, color: BRAND.gold, borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 24 }}>{COMPANY.initials}</div>}
+                <div>
+                  <div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontSize: 24, fontWeight: 700, color: BRAND.navy, lineHeight: 1 }}>{COMPANY.name}</div>
+                  <div style={{ fontSize: 12, color: BRAND.sub, marginTop: 3 }}>{[COMPANY.phone, COMPANY.email, COMPANY.site].filter(Boolean).join(" · ")}</div>
+                  {COMPANY.area && <div style={{ fontSize: 12, color: BRAND.sub }}>{COMPANY.area}</div>}
+                </div>
+              </div>
+              <div style={{ textAlign: "right" }}>
+                <div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontSize: 30, fontWeight: 700, color: BRAND.navy, letterSpacing: "0.06em" }}>RECEIPT</div>
+                <div style={{ fontSize: 13 }}><b>{shown.receiptNo}</b></div>
+                <div style={{ fontSize: 13, color: BRAND.sub }}>{fmtDay2(shown.date)}</div>
+              </div>
+            </div>
+            <div className="grid gap-4" style={{ gridTemplateColumns: "1fr 1fr", marginTop: 18 }}>
+              <div><div style={lbl}>RECEIVED FROM</div><div style={{ fontWeight: 700, marginTop: 3 }}>{quote.clientName || "—"}</div>{quote.clientAddress && <div style={{ fontSize: 13, color: BRAND.sub }}>{quote.clientAddress}</div>}{quote.clientPhone && <div style={{ fontSize: 13, color: BRAND.sub }}>{quote.clientPhone}</div>}{quote.clientEmail && <div style={{ fontSize: 13, color: BRAND.sub }}>{quote.clientEmail}</div>}</div>
+              <div><div style={lbl}>FOR</div><div style={{ fontWeight: 700, marginTop: 3 }}>{quote.jobTitle || "Project"}</div><div style={{ fontSize: 13, color: BRAND.sub }}>Quote {quote.quoteNo}</div></div>
+            </div>
+            <table style={{ width: "100%", borderCollapse: "collapse", marginTop: 22, fontSize: 14 }}>
+              <tbody>
+                <tr style={{ background: BRAND.navy, color: "#fff" }}><td style={{ padding: "9px 12px", fontWeight: 700 }}>Payment</td><td style={{ padding: "9px 12px", textAlign: "right", fontWeight: 700 }}>Amount</td></tr>
+                <tr style={{ borderBottom: `1px solid ${BRAND.line}` }}><td style={{ padding: "10px 12px" }}>{shown.method}{shown.ref ? " · ref " + shown.ref : ""}{shown.note ? <div style={{ fontSize: 12.5, color: BRAND.sub }}>{shown.note}</div> : null}</td><td style={{ padding: "10px 12px", textAlign: "right", fontWeight: 700 }}>{money(Number(shown.amount))}</td></tr>
+              </tbody>
+            </table>
+            <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 12 }}>
+              <div style={{ minWidth: 280, fontSize: 14 }}>
+                <div className="flex justify-between" style={{ padding: "4px 0" }}><span>Job total</span><span>{money(contract)}</span></div>
+                <div className="flex justify-between" style={{ padding: "4px 0" }}><span>Paid to date</span><span>{money(paidThrough)}</span></div>
+                <div className="flex justify-between" style={{ padding: "8px 0", borderTop: `2px solid ${BRAND.navy}`, fontWeight: 700, fontSize: 16 }}><span>Balance due</span><span>{money(Math.max(0, contract - paidThrough))}</span></div>
+              </div>
+            </div>
+            <div style={{ marginTop: 26, background: BRAND.paper, borderRadius: 8, padding: "12px 14px", fontSize: 14 }}>
+              <b style={{ color: BRAND.green }}>PAID — thank you!</b> {money(Number(shown.amount))} received on {fmtDay2(shown.date)}.
+            </div>
+            <div style={{ marginTop: 26, fontSize: 13, color: BRAND.sub }}>Received by {shown.by || COMPANY.signer || COMPANY.name} for {COMPANY.name}.</div>
+          </div>
+        </>}
+      </div>
+    </div>
+  );
+}
+
+/* All receipts in one place, with an export for the accountant. */
+function ReceiptsView({ quotes, settings, onReceipt }) {
+  const years = Array.from(new Set(quotes.flatMap((q) => paymentsOf(q).map((p) => String(p.date || "").slice(0, 4))).concat([String(new Date().getFullYear())]))).filter(Boolean).sort().reverse();
+  const [year, setYear] = useState(years[0]);
+  const rows = quotes.flatMap((q) => paymentsOf(q).map((p) => ({ q, p }))).filter((r) => String(r.p.date || "").slice(0, 4) === year).sort((a, b) => String(b.p.date).localeCompare(String(a.p.date)));
+  const total = rows.reduce((n, r) => n + (Number(r.p.amount) || 0), 0);
+  const byMonth = {};
+  rows.forEach((r) => { const m = String(r.p.date).slice(0, 7); byMonth[m] = (byMonth[m] || 0) + (Number(r.p.amount) || 0); });
+  const owed = quotes.filter((q) => q.status === "won" && !isVoid(q)).map((q) => ({ q, bal: Math.round((wonValue(q, settings) - paidOf(q)) * 100) / 100 })).filter((x) => x.bal > 0.009);
+  const exportCsv = () => {
+    const esc = (v) => { const t = String(v == null ? "" : v); return /[",\n]/.test(t) ? '"' + t.replace(/"/g, '""') + '"' : t; };
+    const head = ["Date", "Receipt #", "Quote #", "Client", "Job", "Job address", "Payment method", "Reference", "Amount", "Job total", "Recorded by", "Note"];
+    const lines = [head.join(",")].concat(rows.slice().reverse().map(({ q, p }) => [p.date, p.receiptNo, q.quoteNo, q.clientName, q.jobTitle, q.clientAddress, p.method, p.ref, (Number(p.amount) || 0).toFixed(2), wonValue(q, settings).toFixed(2), p.by, p.note].map(esc).join(",")));
+    lines.push(["", "", "", "", "", "", "", "TOTAL", total.toFixed(2), "", "", ""].join(","));
+    const blob = new Blob(["﻿" + lines.join("\r\n")], { type: "text/csv;charset=utf-8" });
+    const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = (COMPANY.name + " receipts " + year).replace(/[^\w .\-]+/g, "") + ".csv";
+    document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+  };
+  return (
+    <div className="grid gap-4">
+      <div className="flex items-center justify-between flex-wrap gap-2">
+        <h2 style={{ fontFamily: "'Barlow Condensed', sans-serif", fontSize: 26, fontWeight: 700, color: BRAND.navy, letterSpacing: "0.03em" }}>RECEIPTS & PAYMENTS</h2>
+        <div className="flex gap-2 items-center">
+          <select style={Object.assign({}, inputStyle, { width: "auto" })} value={year} onChange={(e) => setYear(e.target.value)}>{years.map((y) => <option key={y}>{y}</option>)}</select>
+          <Btn kind="gold" disabled={!rows.length} onClick={exportCsv}>Export CSV for taxes</Btn>
+        </div>
+      </div>
+      <div className="grid gap-3" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))" }}>
+        <Card style={{ padding: 14 }}><div style={{ fontSize: 11.5, fontWeight: 700, color: BRAND.sub, letterSpacing: "0.06em" }}>RECEIVED IN {year}</div><div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontSize: 30, fontWeight: 700, color: BRAND.green }}>{money(total)}</div></Card>
+        <Card style={{ padding: 14 }}><div style={{ fontSize: 11.5, fontWeight: 700, color: BRAND.sub, letterSpacing: "0.06em" }}>RECEIPTS</div><div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontSize: 30, fontWeight: 700, color: BRAND.navy }}>{rows.length}</div></Card>
+        <Card style={{ padding: 14 }}><div style={{ fontSize: 11.5, fontWeight: 700, color: BRAND.sub, letterSpacing: "0.06em" }}>STILL OWED ON WON JOBS</div><div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontSize: 30, fontWeight: 700, color: owed.length ? BRAND.amber : BRAND.navy }}>{money(owed.reduce((n, x) => n + x.bal, 0))}</div></Card>
+      </div>
+      {owed.length > 0 && <Card>
+        <div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontSize: 19, fontWeight: 700, color: BRAND.navy, marginBottom: 6 }}>WAITING FOR PAYMENT</div>
+        {owed.map(({ q, bal }) => (
+          <div key={q.id} className="flex justify-between items-center flex-wrap gap-2" style={{ borderTop: `1px solid ${BRAND.line}`, padding: "8px 0", fontSize: 14 }}>
+            <span><b>{q.quoteNo}</b> · {q.clientName} · balance <b style={{ color: BRAND.amber }}>{money(bal)}</b> of {money(wonValue(q, settings))}</span>
+            <Btn small kind="gold" onClick={() => onReceipt(q)}>Record payment</Btn>
+          </div>
+        ))}
+      </Card>}
+      <Card>
+        <div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontSize: 19, fontWeight: 700, color: BRAND.navy, marginBottom: 6 }}>RECEIPTS IN {year}</div>
+        {rows.length === 0 ? <p style={{ fontSize: 13.5, color: BRAND.sub }}>No payments recorded in {year}. When a job is marked Won, record the client's payment and a receipt is created.</p> : rows.map(({ q, p }) => (
+          <div key={p.id} className="flex justify-between items-center flex-wrap gap-2" style={{ borderTop: `1px solid ${BRAND.line}`, padding: "8px 0", fontSize: 14 }}>
+            <span><b>{fmtDay2(p.date)}</b> · {p.receiptNo} · {q.clientName} · {p.method} · <b>{money(Number(p.amount))}</b></span>
+            <Btn small kind="ghost" onClick={() => onReceipt(q)}>Open</Btn>
+          </div>
+        ))}
+        {Object.keys(byMonth).length > 1 && <div style={{ fontSize: 12.5, color: BRAND.sub, marginTop: 10 }}>By month: {Object.keys(byMonth).sort().map((m) => new Date(m + "-15").toLocaleDateString("en-US", { month: "short" }) + " " + money(byMonth[m])).join(" · ")}</div>}
+      </Card>
+      <p style={{ fontSize: 12, color: BRAND.sub }}>The CSV opens in Excel or Google Sheets. Give it to your accountant along with your expenses; this is a record of payments received, not tax advice.</p>
+    </div>
+  );
+}
+
 function PreviewModal({ quote, settings, users, me, onClose }) {
   const c = computeQuote(quote, settings);
   const author = users[quote.createdBy];
@@ -4333,7 +4661,7 @@ function PreviewModal({ quote, settings, users, me, onClose }) {
                 </tr>
               ))}
               <tr style={{ borderBottom: `1px solid ${BRAND.line}` }}>
-                <td style={{ padding: "9px 12px" }}>Project management, equipment & site overhead</td>
+                <td style={{ padding: "9px 12px" }}>Miscellaneous</td>
                 <td style={{ textAlign: "right", padding: "9px 12px" }}>—</td>
                 <td style={{ textAlign: "right", padding: "9px 12px" }}>—</td>
                 <td style={{ textAlign: "right", padding: "9px 12px", fontWeight: 600 }}>{money(c.rawPrice - c.labor - c.materials)}</td>

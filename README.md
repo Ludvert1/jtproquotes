@@ -398,3 +398,11 @@ A new company starts free with no card: 14 days or 7 quotes, whichever comes fir
 ## Reviews
 
 Contractors leave a review from **Help → Leave a review** in the app; owners are also asked once after their 5th quote. Reviews are stored server-only in `reviews/{uid}` (one per person, a new one replaces the old) and alert the owner. In **Admin → Reviews** you publish them to the website or hide them for a listed reason (spam, offensive, private info, …). The website section "What contractors say" (`/api/reviews`, served by `api/contact.js`) shows only published reviews and stays hidden until there is at least one.
+
+## Receipts & tax export
+
+Marking a quote **Won** opens the payment screen: record each payment (deposit, progress, final) with amount, method, date and reference, and a numbered receipt (`R-<quote no>`, `-2`, `-3`…) is created that can be downloaded as PDF, printed or sent to the client. Payments live on the quote (`payments[]`). The **Receipts** tab (owner/assistants) lists receipts by year, what's still owed on won jobs, and **Export CSV for taxes**.
+
+## Cancelling (save offers)
+
+Owners cancel from Settings → Plan & billing → Cancel plan (the Stripe portal's cancel button is turned off). They pick a reason, then see offers (2 extra weeks free, 35% off next month, 50% off next month — each usable once; the best fit for their reason is shown first) and a clear "No thanks, cancel my plan" button. Cancelling ends the plan at the end of the paid period; "Keep my plan" turns it back on. You get an alert for every save and every cancellation (with the reason).

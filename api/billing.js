@@ -15,6 +15,20 @@ const { bad, parseBody, verifyCaller, getDocAsServer, setDocAsServer } = require
 const { withMonitor } = require("./_monitor");
 const { PLANS, TRIAL_DAYS, stripe, stripeOn, testMode, priceFor, portalConfig, billingFields } = require("./_stripe");
 const { loadCompany, accessOf, trialCap, quotesUsed, TRIAL_QUOTES } = require("./_access");
+const { alertOwner } = require("./_monitor");
+
+/* Offers shown before someone cancels. Each one can be used once per company. */
+const SAVE_OFFERS = {
+  extend14: { label: "2 extra weeks free" },
+  off35: { label: "35% off your next month", pct: 35 },
+  off50: { label: "50% off your next month", pct: 50 },
+};
+async function saveCoupon(pct) {
+  const id = "siq_save" + pct;
+  try { const c = await stripe("GET", "coupons/" + id); if (c && c.id) return id; } catch {}
+  await stripe("POST", "coupons", { id, percent_off: pct, duration: "once", name: pct + "% off next month (thanks for staying)" }, "siq-coupon-save" + pct);
+  return id;
+}
 
 const DAY = 864e5;
 
@@ -53,6 +67,7 @@ function publicView(co) {
     plan: co.plan || "trial", billingStatus: co.billingStatus || "", trialEnds: co.trialEnds || "",
     currentPeriodEnd: co.currentPeriodEnd || "", cancelAtPeriodEnd: !!co.cancelAtPeriodEnd,
     hasCard: !!co.stripeSubscriptionId, cardCheck: co.cardCheck || "",
+    offersUsed: co.retentionOffers || [],
     testMode: testMode(), enabled: stripeOn(),
     plans: Object.keys(PLANS).map((k) => ({ id: k, name: PLANS[k].name, price: PLANS[k].amount / 100, users: PLANS[k].users, blurb: PLANS[k].blurb })),
   };
@@ -161,6 +176,45 @@ const handler = async (req, res) => {
       await stripe("POST", "subscriptions/" + co.stripeSubscriptionId, { trial_end: "now", proration_behavior: "none" }, "siq-startnow-" + co.stripeSubscriptionId);
       co = await syncFromStripe(cid, co);
       await quotesUsed(cid, co);
+      return res.status(200).json(publicView(co));
+    }
+
+    /* ---- Cancelling: offers first, cancel always one tap away ---- */
+    if (action === "saveOffer") {
+      const offer = String(body.offer || "");
+      if (!SAVE_OFFERS[offer]) return bad(res, 400, "Pick an offer.");
+      if (!co.stripeSubscriptionId || !["trialing", "active", "past_due"].includes(co.billingStatus)) return bad(res, 400, "There's no active plan to apply this to.");
+      const used = co.retentionOffers || [];
+      if (used.includes(offer)) return bad(res, 409, "You've already used that offer.");
+      const subId = co.stripeSubscriptionId;
+      if (offer === "extend14") {
+        // Push the next charge back 14 days: the trial (or the current month) runs 2 weeks longer.
+        const anchor = co.billingStatus === "trialing" && co.trialEnds ? new Date(co.trialEnds).getTime() : new Date(co.currentPeriodEnd || Date.now()).getTime();
+        const until = Math.floor((Math.max(anchor, Date.now()) + 14 * DAY) / 1000);
+        await stripe("POST", "subscriptions/" + subId, { trial_end: until, proration_behavior: "none", cancel_at_period_end: false }, "siq-save-extend-" + subId);
+      } else {
+        await stripe("POST", "subscriptions/" + subId, { discounts: [{ coupon: await saveCoupon(SAVE_OFFERS[offer].pct) }], cancel_at_period_end: false }, "siq-save-" + offer + "-" + subId);
+      }
+      co = await saveCompany(cid, { retentionOffers: used.concat([offer]), lastSaveOffer: { offer, at: new Date().toISOString(), reason: String(body.reason || "").slice(0, 200) } });
+      co = await syncFromStripe(cid, co);
+      try { await alertOwner("Saved a cancellation: " + (co.name || cid), `${co.name || cid} was about to cancel (${String(body.reason || "no reason given")}) and took "${SAVE_OFFERS[offer].label}".`); } catch {}
+      return res.status(200).json(publicView(co));
+    }
+    if (action === "cancel") {
+      if (!co.stripeSubscriptionId) return bad(res, 400, "There's no plan to cancel.");
+      const reason = String(body.reason || "").slice(0, 200), detail = String(body.detail || "").slice(0, 1000);
+      await stripe("POST", "subscriptions/" + co.stripeSubscriptionId, { cancel_at_period_end: true, cancellation_details: { comment: (reason + (detail ? " — " + detail : "")).slice(0, 500) } });
+      co = await saveCompany(cid, { cancelReason: reason, cancelDetail: detail, cancelRequestedAt: new Date().toISOString() });
+      co = await syncFromStripe(cid, co);
+      try { await alertOwner("Cancellation: " + (co.name || cid), `${co.name || cid} (${co.ownerEmail || ""}) cancelled. Plan ends ${String(co.currentPeriodEnd || co.trialEnds || "").slice(0, 10)}.\nReason: ${reason || "—"}${detail ? "\n\"" + detail + "\"" : ""}\n\nA personal call before that date can still win them back.`); } catch {}
+      return res.status(200).json(publicView(co));
+    }
+    if (action === "resume") {
+      if (!co.stripeSubscriptionId) return bad(res, 400, "There's no plan to resume.");
+      await stripe("POST", "subscriptions/" + co.stripeSubscriptionId, { cancel_at_period_end: false });
+      co = await saveCompany(cid, { cancelReason: "", cancelDetail: "", cancelRequestedAt: "" });
+      co = await syncFromStripe(cid, co);
+      try { await alertOwner("Came back: " + (co.name || cid), `${co.name || cid} turned their subscription back on.`); } catch {}
       return res.status(200).json(publicView(co));
     }
 

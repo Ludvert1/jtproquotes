@@ -66,8 +66,8 @@
   input:focus, select:focus, textarea:focus { border-color: #C9A227 !important; outline: none; }
   @media print {
     body * { visibility: hidden !important; }
-    #print-doc, #print-doc * { visibility: visible !important; }
-    #print-doc { position: absolute !important; left: 0; top: 0; width: 100%; }
+    #print-doc, #print-doc *, #receipt-doc, #receipt-doc * { visibility: visible !important; }
+    #print-doc, #receipt-doc { position: absolute !important; left: 0; top: 0; width: 100%; }
   }
 </style>
 </head>

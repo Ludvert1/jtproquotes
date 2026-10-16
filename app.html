@@ -66,8 +66,8 @@
   input:focus, select:focus, textarea:focus { border-color: #C9A227 !important; outline: none; }
   @media print {
     body * { visibility: hidden !important; }
-    #print-doc, #print-doc * { visibility: visible !important; }
-    #print-doc { position: absolute !important; left: 0; top: 0; width: 100%; }
+    #print-doc, #print-doc *, #receipt-doc, #receipt-doc * { visibility: visible !important; }
+    #print-doc, #receipt-doc { position: absolute !important; left: 0; top: 0; width: 100%; }
   }
 </style>
 </head>
@@ -1201,6 +1201,7 @@ function App() {
   const [leadLater, setLeadLater] = useState(false);
   const [billing, setBilling] = useState(null);
   const [helpOpen, setHelpOpen] = useState(false);
+  const [receiptId, setReceiptId] = useState("");
   const [adminOpen, setAdminOpen] = useState("");
   const DEFAULT_SETTINGS = {
     laborRate: 35,
@@ -1671,6 +1672,7 @@ function App() {
   }
   const navItems = [["dashboard", "Dashboard"], ["new", "New quote"]];
   if (isManager) navItems.push(["team", "Team & review"]);
+  if (isManager) navItems.push(["receipts", "Receipts"]);
   if (isOwner) navItems.push(["settings", "Settings"]);
   if (!TENANT && isOwner && CLOUD) navItems.push(["admin", "Admin"]);
   return React.createElement("div", {
@@ -1806,6 +1808,7 @@ function App() {
     },
     onPreview: setPreviewQuote,
     onNew: () => setView("new"),
+    onReceipt: q => setReceiptId(q.id),
     onDelete: async q => {
       if (!window.confirm("Permanently delete quote " + q.quoteNo + " for " + (q.clientName || "this client") + "?\n\nThis erases it from the database. It cannot be undone and leaves no record of what was quoted.\n\nIf you only want it out of the way, cancel and use Void instead.")) return;
       if (!window.confirm("Last check — delete " + q.quoteNo + " forever?")) return;
@@ -1854,7 +1857,12 @@ function App() {
       setActiveQuote(q);
       setView("edit");
     },
-    notify: notify
+    notify: notify,
+    onReceipt: q => setReceiptId(q.id)
+  }), view === "receipts" && isManager && React.createElement(ReceiptsView, {
+    quotes: Object.values(quotes),
+    settings: settings,
+    onReceipt: q => setReceiptId(q.id)
   }), view === "admin" && !TENANT && isOwner && React.createElement(AdminView, {
     notify: notify,
     openCid: adminOpen
@@ -1863,6 +1871,7 @@ function App() {
     quotes: quotes,
     billing: billing,
     notify: notify,
+    onBilling: setBilling,
     onSave: async s => {
       try {
         await saveSettings(s);
@@ -1877,6 +1886,13 @@ function App() {
     users: users,
     me: me,
     onClose: () => setPreviewQuote(null)
+  }), receiptId && quotes[receiptId] && React.createElement(ReceiptModal, {
+    quote: quotes[receiptId],
+    settings: settings,
+    me: me,
+    notify: notify,
+    onSave: upsertQuote,
+    onClose: () => setReceiptId("")
   }), helpOpen && React.createElement(HelpModal, {
     me: me,
     notify: notify,
@@ -2662,7 +2678,8 @@ function Dashboard({
   onOpen,
   onPreview,
   onNew,
-  onDelete
+  onDelete,
+  onReceipt
 }) {
   const [period, setPeriod] = useState("month");
   const [filter, setFilter] = useState("all");
@@ -2849,7 +2866,11 @@ function Dashboard({
       small: true,
       kind: "ghost",
       onClick: () => onPreview(q)
-    }, "Preview"), (q.createdBy === me.id || isManager) && !isVoid(q) && React.createElement(Btn, {
+    }, "Preview"), q.status === "won" && isManager && onReceipt && React.createElement(Btn, {
+      small: true,
+      kind: "gold",
+      onClick: () => onReceipt(q)
+    }, paymentsOf(q).length ? "Receipts" : "Receipt"), (q.createdBy === me.id || isManager) && !isVoid(q) && React.createElement(Btn, {
       small: true,
       kind: "ghost",
       onClick: () => onOpen(q)
@@ -5786,7 +5807,8 @@ function TeamView({
   onSaveSettings,
   onPreview,
   onOpen,
-  notify
+  notify,
+  onReceipt
 }) {
   const [period, setPeriod] = useState("month");
   const [activity, setActivity] = useState([]);
@@ -5847,6 +5869,7 @@ function TeamView({
       outcomeNote: ""
     });
     logActivity(who, "Marked won" + (amount !== quoted ? " at " + money(amount) : ""), q.quoteNo);
+    if (onReceipt && q.status !== "won") onReceipt(q);
   };
   const markLost = async q => {
     const reason = window.prompt("Quote " + q.quoteNo + " — " + (q.clientName || "client") + " declined.\n\n" + "Why? (e.g. price, timing, went with another contractor)");
@@ -6371,6 +6394,10 @@ function TeamView({
     }, q.status === "won" ? "Signed" : "Declined", " ", fmtDate(decidedDate(q)), q.decidedBy ? " · recorded by " + q.decidedBy : "", moved ? " · quoted " + money(quoted) : "", q.outcomeNote ? " — " + q.outcomeNote : "")), React.createElement("div", {
       className: "flex gap-2 flex-wrap justify-end"
     }, q.status === "won" && React.createElement(Btn, {
+      small: true,
+      kind: "gold",
+      onClick: () => onReceipt && onReceipt(q)
+    }, paymentsOf(q).length ? "Receipts (" + paymentsOf(q).length + ")" : "Record payment"), q.status === "won" && React.createElement(Btn, {
       small: true,
       kind: "ghost",
       onClick: () => markWon(q)
@@ -8680,10 +8707,270 @@ function ManageBillingBtn({
     }
   }, busy ? "Opening…" : "Manage billing");
 }
-function BillingCard({
+const CANCEL_REASONS = [["price", "It costs too much right now"], ["slow", "Work is slow / seasonal"], ["notusing", "I'm not using it enough"], ["feature", "It's missing something I need"], ["hard", "It's hard to use or set up"], ["switch", "I'm switching to another tool"], ["other", "Something else"]];
+const OFFER_TEXT = {
+  extend14: {
+    title: "2 extra weeks free",
+    body: "Your next charge moves back 14 days. Keep every quote, lead and setting.",
+    cta: "Give me 2 weeks free"
+  },
+  off35: {
+    title: "35% off your next month",
+    body: "Stay on your plan and pay 35% less on your next bill.",
+    cta: "Take 35% off"
+  },
+  off50: {
+    title: "50% off your next month",
+    body: "Half price on your next bill while things pick up.",
+    cta: "Take 50% off"
+  }
+};
+function CancelFlow({
   billing,
+  onBilling,
+  onClose,
   notify
 }) {
+  const [step, setStep] = useState("why");
+  const [reason, setReason] = useState("");
+  const [detail, setDetail] = useState("");
+  const [busy, setBusy] = useState("");
+  const [result, setResult] = useState(null);
+  const used = billing.offersUsed || [];
+  const primary = reason === "price" ? "off50" : reason === "slow" || reason === "notusing" ? "extend14" : "off35";
+  const order = [primary].concat(["off50", "extend14", "off35"].filter(o => o !== primary)).filter(o => !used.includes(o));
+  const reasonLabel = (CANCEL_REASONS.find(r => r[0] === reason) || [, ""])[1];
+  const take = async offer => {
+    setBusy(offer);
+    try {
+      const b = await billingCall("saveOffer", {
+        offer,
+        reason: reasonLabel
+      });
+      onBilling(b);
+      setResult({
+        saved: offer
+      });
+      setStep("done");
+    } catch (e) {
+      notify(e.message);
+    }
+    setBusy("");
+  };
+  const cancel = async () => {
+    setBusy("cancel");
+    try {
+      const b = await billingCall("cancel", {
+        reason: reasonLabel,
+        detail
+      });
+      onBilling(b);
+      setResult({
+        cancelled: true,
+        until: b.currentPeriodEnd || b.trialEnds
+      });
+      setStep("done");
+    } catch (e) {
+      notify(e.message);
+    }
+    setBusy("");
+  };
+  const box = {
+    border: `2px solid ${BRAND.line}`,
+    borderRadius: 12,
+    padding: 14,
+    background: "#fff"
+  };
+  return React.createElement("div", {
+    onClick: onClose,
+    style: {
+      position: "fixed",
+      inset: 0,
+      background: "rgba(11,31,58,0.6)",
+      zIndex: 60,
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "center",
+      padding: 16,
+      overflowY: "auto"
+    }
+  }, React.createElement("div", {
+    onClick: e => e.stopPropagation(),
+    style: {
+      background: BRAND.paper,
+      borderRadius: 14,
+      padding: 22,
+      width: "100%",
+      maxWidth: 560,
+      maxHeight: "92vh",
+      overflowY: "auto"
+    }
+  }, step === "why" && React.createElement(React.Fragment, null, React.createElement("div", {
+    style: {
+      fontFamily: "'Barlow Condensed', sans-serif",
+      fontSize: 26,
+      fontWeight: 700,
+      color: BRAND.navy
+    }
+  }, "BEFORE YOU GO"), React.createElement("p", {
+    style: {
+      fontSize: 14,
+      color: BRAND.sub,
+      margin: "6px 0 14px"
+    }
+  }, "What's the main reason you want to cancel? It helps us make ", PRODUCT, " better."), React.createElement("div", {
+    className: "grid gap-2"
+  }, CANCEL_REASONS.map(([k, l]) => React.createElement("label", {
+    key: k,
+    style: Object.assign({}, box, {
+      padding: "10px 12px",
+      display: "flex",
+      gap: 10,
+      alignItems: "center",
+      cursor: "pointer",
+      borderColor: reason === k ? BRAND.gold : BRAND.line
+    })
+  }, React.createElement("input", {
+    type: "radio",
+    name: "cancel-reason",
+    checked: reason === k,
+    onChange: () => setReason(k)
+  }), " ", React.createElement("span", {
+    style: {
+      fontSize: 14.5
+    }
+  }, l)))), React.createElement(Field, {
+    label: "Anything else? (optional)"
+  }, React.createElement("textarea", {
+    style: Object.assign({}, inputStyle, {
+      minHeight: 60,
+      marginTop: 10
+    }),
+    value: detail,
+    onChange: e => setDetail(e.target.value)
+  })), React.createElement("div", {
+    className: "flex gap-2 flex-wrap"
+  }, React.createElement(Btn, {
+    disabled: !reason,
+    onClick: () => setStep("offer")
+  }, "Continue"), React.createElement(Btn, {
+    kind: "ghost",
+    onClick: onClose
+  }, "Keep my plan"))), step === "offer" && React.createElement(React.Fragment, null, React.createElement("div", {
+    style: {
+      fontFamily: "'Barlow Condensed', sans-serif",
+      fontSize: 26,
+      fontWeight: 700,
+      color: BRAND.navy
+    }
+  }, "WE'D LOVE TO KEEP YOU"), React.createElement("p", {
+    style: {
+      fontSize: 14,
+      color: BRAND.sub,
+      margin: "6px 0 14px"
+    }
+  }, reason === "feature" || reason === "hard" ? "Tell us what's in the way. We can usually fix it or set it up for you on a quick call. Or take one of these:" : "Here's something to make staying easier:"), React.createElement("div", {
+    className: "grid gap-2"
+  }, order.map((o, i) => React.createElement("div", {
+    key: o,
+    style: Object.assign({}, box, {
+      borderColor: i === 0 ? BRAND.gold : BRAND.line
+    }),
+    className: "flex items-center justify-between gap-3 flex-wrap"
+  }, React.createElement("div", {
+    style: {
+      minWidth: 200,
+      flex: 1
+    }
+  }, i === 0 && React.createElement("div", {
+    style: {
+      fontSize: 11,
+      fontWeight: 800,
+      color: BRAND.amber,
+      letterSpacing: "0.08em"
+    }
+  }, "BEST FOR YOU"), React.createElement("div", {
+    style: {
+      fontWeight: 800,
+      color: BRAND.navy,
+      fontSize: 16
+    }
+  }, OFFER_TEXT[o].title), React.createElement("div", {
+    style: {
+      fontSize: 13,
+      color: BRAND.sub
+    }
+  }, OFFER_TEXT[o].body)), React.createElement(Btn, {
+    kind: i === 0 ? "gold" : "primary",
+    small: true,
+    disabled: !!busy,
+    onClick: () => take(o)
+  }, busy === o ? "Applying…" : OFFER_TEXT[o].cta))), (reason === "feature" || reason === "hard" || !order.length) && React.createElement("div", {
+    style: box
+  }, React.createElement("div", {
+    style: {
+      fontWeight: 800,
+      color: BRAND.navy,
+      fontSize: 16
+    }
+  }, "Free help from a real person"), React.createElement("div", {
+    style: {
+      fontSize: 13,
+      color: BRAND.sub,
+      marginBottom: 8
+    }
+  }, "Call or text ", SUPPORT.phone, ", or email ", SUPPORT.email, ". We'll set it up with you."), React.createElement("a", {
+    href: "tel:" + SUPPORT.phone.replace(/[^\d+]/g, ""),
+    style: {
+      textDecoration: "none"
+    }
+  }, React.createElement(Btn, {
+    small: true,
+    kind: "ghost"
+  }, "Call ", SUPPORT.phone)))), React.createElement("div", {
+    style: {
+      borderTop: `1px solid ${BRAND.line}`,
+      marginTop: 16,
+      paddingTop: 14
+    },
+    className: "flex gap-2 flex-wrap items-center"
+  }, React.createElement(Btn, {
+    kind: "danger",
+    disabled: !!busy,
+    onClick: cancel
+  }, busy === "cancel" ? "Cancelling…" : "No thanks, cancel my plan"), React.createElement(Btn, {
+    kind: "ghost",
+    onClick: onClose
+  }, "Keep my plan")), React.createElement("p", {
+    style: {
+      fontSize: 12,
+      color: BRAND.sub,
+      marginTop: 8
+    }
+  }, "If you cancel, your plan stays active until the end of what you've paid for, and you can turn it back on any time before then.")), step === "done" && result && React.createElement(React.Fragment, null, React.createElement("div", {
+    style: {
+      fontFamily: "'Barlow Condensed', sans-serif",
+      fontSize: 26,
+      fontWeight: 700,
+      color: result.saved ? BRAND.green : BRAND.navy
+    }
+  }, result.saved ? "DONE — THANKS FOR STAYING!" : "YOUR PLAN IS CANCELLED"), React.createElement("p", {
+    style: {
+      fontSize: 14,
+      color: BRAND.sub,
+      margin: "8px 0 16px"
+    }
+  }, result.saved ? OFFER_TEXT[result.saved].title + " is applied to your account. Nothing else changes." : "You can keep using " + PRODUCT + " until " + (result.until ? fmtDay(result.until) : "the end of your billing period") + ". Changed your mind? Turn it back on from Settings → Plan & billing."), React.createElement(Btn, {
+    onClick: onClose
+  }, "Close"))));
+}
+function BillingCard({
+  billing,
+  notify,
+  onBilling
+}) {
+  const [cancelOpen, setCancelOpen] = useState(false);
+  const [resuming, setResuming] = useState(false);
   if (!billing || billing.exempt || !billing.enabled) return null;
   const card = {
     check: {
@@ -8715,17 +9002,57 @@ function BillingCard({
       color: billing.cardCheck === "ok" ? BRAND.green : BRAND.red,
       fontSize: 13
     }
-  }, card.check[billing.cardCheck] || "")), React.createElement("div", {
-    className: "mt-3"
+  }, card.check[billing.cardCheck] || "")), billing.cancelAtPeriodEnd && React.createElement("div", {
+    style: {
+      background: "#FBF3DE",
+      borderRadius: 8,
+      padding: "10px 12px",
+      fontSize: 13.5,
+      marginTop: 8
+    }
+  }, "Your plan is set to end on ", React.createElement("b", null, fmtDay(billing.currentPeriodEnd || billing.trialEnds)), ".", React.createElement("div", {
+    className: "mt-2"
+  }, React.createElement(Btn, {
+    small: true,
+    kind: "gold",
+    disabled: resuming,
+    onClick: async () => {
+      setResuming(true);
+      try {
+        const b = await billingCall("resume");
+        onBilling && onBilling(b);
+        notify("Welcome back — your plan will keep going.");
+      } catch (e) {
+        notify(e.message);
+      }
+      setResuming(false);
+    }
+  }, resuming ? "Turning back on…" : "Keep my plan"))), React.createElement("div", {
+    className: "mt-3 flex gap-2 flex-wrap items-center"
   }, React.createElement(ManageBillingBtn, {
     notify: notify
-  })), React.createElement("p", {
+  }), !billing.cancelAtPeriodEnd && ["trialing", "active", "past_due"].includes(billing.billingStatus) && React.createElement("button", {
+    onClick: () => setCancelOpen(true),
+    style: {
+      background: "none",
+      border: "none",
+      color: BRAND.sub,
+      textDecoration: "underline",
+      fontSize: 13,
+      cursor: "pointer"
+    }
+  }, "Cancel plan")), React.createElement("p", {
     style: {
       fontSize: 12,
       color: BRAND.sub,
       marginTop: 8
     }
-  }, "Change card, switch plan, see invoices or cancel.")) : React.createElement(React.Fragment, null, React.createElement("p", {
+  }, "Change card, switch plan or see invoices."), cancelOpen && React.createElement(CancelFlow, {
+    billing: billing,
+    onBilling: b => onBilling && onBilling(b),
+    notify: notify,
+    onClose: () => setCancelOpen(false)
+  })) : React.createElement(React.Fragment, null, React.createElement("p", {
     style: {
       fontSize: 13.5,
       color: BRAND.sub,
@@ -8747,7 +9074,8 @@ function SettingsView({
   onSave,
   quotes,
   billing,
-  notify
+  notify,
+  onBilling
 }) {
   const [s, setS] = useState(settings);
   return React.createElement("div", {
@@ -8765,7 +9093,8 @@ function SettingsView({
     }
   }, "COMPANY SETTINGS"), TENANT && React.createElement(BillingCard, {
     billing: billing,
-    notify: notify
+    notify: notify,
+    onBilling: onBilling
   }), React.createElement(CompanyProfileCard, {
     s: s,
     setS: setS
@@ -8883,6 +9212,742 @@ function SettingsView({
       color: BRAND.ink
     }
   }, React.createElement("strong", null, "Control & security in place:"), " PIN sign-in with a team code required to register \xB7 drafts autosave to your view the moment an associate starts typing \xB7 quotes carry a DRAFT \xB7 NOT APPROVED watermark and cannot be printed or saved as PDF until you approve them \xB7 no one can delete a quote \xB7 every sign-in, draft, edit, preview, and print is recorded in the activity log \xB7 internal cost/profit figures never appear on client documents.")));
+}
+const PAY_METHODS = ["Cash", "Check", "Zelle", "Card", "Cash App", "Venmo", "Bank transfer", "Other"];
+const paymentsOf = q => q && Array.isArray(q.payments) ? q.payments : [];
+const paidOf = q => paymentsOf(q).reduce((n, p) => n + (Number(p.amount) || 0), 0);
+const todayISO = () => {
+  const d = new Date();
+  return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+};
+const fmtDay2 = ymd => {
+  try {
+    return new Date(ymd + "T12:00:00").toLocaleDateString("en-US", {
+      month: "short",
+      day: "numeric",
+      year: "numeric"
+    });
+  } catch {
+    return ymd;
+  }
+};
+function ReceiptModal({
+  quote: liveQuote,
+  settings,
+  me,
+  onSave: saveQuote,
+  onClose,
+  notify
+}) {
+  const [saved, setSaved] = useState(null);
+  const quote = saved && String(saved.updatedAt || "") >= String(liveQuote.updatedAt || "") ? saved : liveQuote;
+  const onSave = async next => {
+    setSaved(next);
+    await saveQuote(next);
+  };
+  const contract = wonValue(quote, settings);
+  const paid = paidOf(quote);
+  const balance = Math.max(0, Math.round((contract - paid) * 100) / 100);
+  const [amount, setAmount] = useState(String(balance || ""));
+  const [method, setMethod] = useState("Zelle");
+  const [date, setDate] = useState(todayISO());
+  const [ref, setRef] = useState("");
+  const [note, setNote] = useState("");
+  const [busy, setBusy] = useState("");
+  const [showId, setShowId] = useState(paymentsOf(quote).length ? paymentsOf(quote)[paymentsOf(quote).length - 1].id : "");
+  const [err, setErr] = useState("");
+  const pays = paymentsOf(quote);
+  const shown = pays.find(p => p.id === showId);
+  const record = async () => {
+    const amt = Math.round((parseFloat(String(amount).replace(/[^0-9.]/g, "")) || 0) * 100) / 100;
+    if (!(amt > 0)) return setErr("Enter the amount the client paid.");
+    setErr("");
+    setBusy("save");
+    const n = pays.length + 1;
+    const pay = {
+      id: uid(),
+      receiptNo: "R-" + quote.quoteNo + (n > 1 ? "-" + n : ""),
+      amount: amt,
+      method,
+      ref: ref.trim(),
+      date,
+      note: note.trim(),
+      by: me ? me.name : "",
+      at: new Date().toISOString()
+    };
+    const next = Object.assign({}, quote, {
+      payments: pays.concat([pay]),
+      updatedAt: new Date().toISOString(),
+      history: (quote.history || []).concat([{
+        at: pay.at,
+        by: pay.by,
+        action: "Payment received " + money(amt) + " (" + method + ") — receipt " + pay.receiptNo
+      }])
+    });
+    try {
+      await onSave(next);
+      logActivity(pay.by, "Recorded payment " + money(amt) + " · receipt " + pay.receiptNo, quote.quoteNo);
+      setShowId(pay.id);
+      notify("Receipt " + pay.receiptNo + " created");
+    } catch (e) {
+      setErr("Couldn't save the payment. Try again.");
+    }
+    setBusy("");
+  };
+  const removePay = async p => {
+    if (!window.confirm("Delete receipt " + p.receiptNo + " for " + money(p.amount) + "? Only do this if it was entered by mistake.")) return;
+    const next = Object.assign({}, quote, {
+      updatedAt: new Date().toISOString(),
+      payments: pays.filter(x => x.id !== p.id),
+      history: (quote.history || []).concat([{
+        at: new Date().toISOString(),
+        by: me ? me.name : "",
+        action: "Deleted receipt " + p.receiptNo
+      }])
+    });
+    await onSave(next);
+    if (showId === p.id) setShowId("");
+  };
+  const fileName = shown ? (shown.receiptNo + " " + (quote.clientName || "Client") + " - " + COMPANY.name + " Receipt").replace(/[^\w .\-]+/g, "").trim() + ".pdf" : "";
+  const makePdf = async () => {
+    const lib = await loadHtml2pdf();
+    const el = document.getElementById("receipt-doc");
+    const sx = window.scrollX,
+      sy = window.scrollY;
+    window.scrollTo(0, 0);
+    try {
+      return await lib().set({
+        margin: [8, 8, 8, 8],
+        filename: fileName,
+        image: {
+          type: "jpeg",
+          quality: 0.95
+        },
+        html2canvas: {
+          scale: 2,
+          useCORS: true,
+          backgroundColor: "#ffffff",
+          scrollX: 0,
+          scrollY: 0
+        },
+        jsPDF: {
+          unit: "mm",
+          format: "letter",
+          orientation: "portrait"
+        }
+      }).from(el).outputPdf("blob");
+    } finally {
+      window.scrollTo(sx, sy);
+    }
+  };
+  const download = async () => {
+    setBusy("pdf");
+    try {
+      const blob = await makePdf();
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = fileName;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+    } catch (e) {
+      setErr("Couldn't make the PDF. Use Print instead.");
+    }
+    setBusy("");
+  };
+  const canShare = typeof navigator !== "undefined" && !!navigator.share && !!navigator.canShare;
+  const share = async () => {
+    setBusy("share");
+    try {
+      const file = new File([await makePdf()], fileName, {
+        type: "application/pdf"
+      });
+      if (!navigator.canShare({
+        files: [file]
+      })) throw new Error("This device can't share files — use Download PDF.");
+      const first = (quote.clientName || "").split(" ")[0];
+      await navigator.share({
+        files: [file],
+        title: fileName,
+        text: "Hi" + (first ? " " + first : "") + ", thank you for your payment. Here is your receipt from " + COMPANY.name + " (" + shown.receiptNo + "). — " + (COMPANY.signer || COMPANY.name)
+      });
+    } catch (e) {
+      if (e && e.name !== "AbortError") setErr(e.message || "Couldn't share.");
+    }
+    setBusy("");
+  };
+  const paidThrough = shown ? pays.slice(0, pays.findIndex(p => p.id === shown.id) + 1).reduce((n, p) => n + (Number(p.amount) || 0), 0) : 0;
+  const lbl = {
+    fontSize: 11,
+    fontWeight: 700,
+    letterSpacing: "0.1em",
+    color: BRAND.gold
+  };
+  return React.createElement("div", {
+    style: {
+      position: "fixed",
+      inset: 0,
+      background: "rgba(11,31,58,0.75)",
+      zIndex: 55,
+      overflowY: "auto",
+      padding: "24px 12px"
+    },
+    onClick: onClose
+  }, React.createElement("div", {
+    style: {
+      maxWidth: 720,
+      margin: "0 auto"
+    },
+    onClick: e => e.stopPropagation()
+  }, React.createElement("div", {
+    style: {
+      background: "#fff",
+      borderRadius: 12,
+      padding: 18,
+      marginBottom: 12
+    }
+  }, React.createElement("div", {
+    className: "flex justify-between items-center flex-wrap gap-2"
+  }, React.createElement("div", {
+    style: {
+      fontFamily: "'Barlow Condensed', sans-serif",
+      fontSize: 22,
+      fontWeight: 700,
+      color: BRAND.navy
+    }
+  }, "PAYMENTS \xB7 ", quote.quoteNo, " \xB7 ", quote.clientName), React.createElement(Btn, {
+    small: true,
+    kind: "ghost",
+    onClick: onClose
+  }, "Close")), React.createElement("div", {
+    style: {
+      fontSize: 14,
+      margin: "6px 0 10px"
+    }
+  }, "Job total ", React.createElement("b", null, money(contract)), " \xB7 paid ", React.createElement("b", {
+    style: {
+      color: BRAND.green
+    }
+  }, money(paid)), " \xB7 balance ", React.createElement("b", {
+    style: {
+      color: balance > 0 ? BRAND.amber : BRAND.green
+    }
+  }, money(balance))), pays.length > 0 && React.createElement("div", {
+    style: {
+      marginBottom: 12
+    }
+  }, pays.map(p => React.createElement("div", {
+    key: p.id,
+    className: "flex justify-between items-center gap-2 flex-wrap",
+    style: {
+      borderTop: `1px solid ${BRAND.line}`,
+      padding: "7px 0",
+      fontSize: 13.5
+    }
+  }, React.createElement("span", null, React.createElement("b", null, p.receiptNo), " \xB7 ", fmtDay2(p.date), " \xB7 ", p.method, p.ref ? " #" + p.ref : "", " \xB7 ", React.createElement("b", null, money(p.amount))), React.createElement("span", {
+    className: "flex gap-2"
+  }, React.createElement(Btn, {
+    small: true,
+    kind: showId === p.id ? "gold" : "ghost",
+    onClick: () => setShowId(p.id)
+  }, "View receipt"), React.createElement(Btn, {
+    small: true,
+    kind: "danger",
+    onClick: () => removePay(p)
+  }, "Delete"))))), balance > 0 && React.createElement(React.Fragment, null, React.createElement("div", {
+    style: {
+      fontSize: 12,
+      fontWeight: 700,
+      color: BRAND.sub,
+      letterSpacing: "0.06em",
+      margin: "6px 0"
+    }
+  }, pays.length ? "RECORD ANOTHER PAYMENT" : "RECORD THE PAYMENT"), React.createElement("div", {
+    className: "grid gap-x-3",
+    style: {
+      gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))"
+    }
+  }, React.createElement(Field, {
+    label: "Amount received"
+  }, React.createElement("input", {
+    style: inputStyle,
+    inputMode: "decimal",
+    value: amount,
+    onChange: e => setAmount(e.target.value)
+  })), React.createElement(Field, {
+    label: "Paid by"
+  }, React.createElement("select", {
+    style: inputStyle,
+    value: method,
+    onChange: e => setMethod(e.target.value)
+  }, PAY_METHODS.map(m => React.createElement("option", {
+    key: m
+  }, m)))), React.createElement(Field, {
+    label: "Date received"
+  }, React.createElement("input", {
+    style: inputStyle,
+    type: "date",
+    value: date,
+    onChange: e => setDate(e.target.value)
+  })), React.createElement(Field, {
+    label: "Check / ref # (optional)"
+  }, React.createElement("input", {
+    style: inputStyle,
+    value: ref,
+    onChange: e => setRef(e.target.value)
+  }))), React.createElement(Field, {
+    label: "Note on receipt (optional)"
+  }, React.createElement("input", {
+    style: inputStyle,
+    value: note,
+    onChange: e => setNote(e.target.value),
+    placeholder: "e.g. 50% deposit, balance due on completion"
+  })), React.createElement(Btn, {
+    kind: "gold",
+    disabled: !!busy,
+    onClick: record
+  }, busy === "save" ? "Saving…" : "Save payment & create receipt")), balance <= 0 && pays.length > 0 && React.createElement("div", {
+    style: {
+      color: BRAND.green,
+      fontWeight: 700,
+      fontSize: 14
+    }
+  }, "Paid in full."), err && React.createElement("div", {
+    style: {
+      color: BRAND.red,
+      fontSize: 13,
+      marginTop: 8
+    }
+  }, err)), shown && React.createElement(React.Fragment, null, React.createElement("div", {
+    className: "flex justify-end gap-2 mb-2 flex-wrap"
+  }, canShare && React.createElement(Btn, {
+    small: true,
+    kind: "gold",
+    disabled: !!busy,
+    onClick: share
+  }, busy === "share" ? "Making PDF…" : "Send to client"), React.createElement(Btn, {
+    small: true,
+    kind: canShare ? "primary" : "gold",
+    disabled: !!busy,
+    onClick: download
+  }, busy === "pdf" ? "Making PDF…" : "Download PDF"), React.createElement("button", {
+    onClick: () => window.print(),
+    style: {
+      background: "transparent",
+      color: "#fff",
+      border: "1.5px solid rgba(255,255,255,0.5)",
+      padding: "6px 14px",
+      borderRadius: 8,
+      fontSize: 13,
+      fontWeight: 600,
+      cursor: "pointer"
+    }
+  }, "Print")), React.createElement("div", {
+    id: "receipt-doc",
+    style: {
+      background: "#fff",
+      padding: "42px 46px",
+      color: BRAND.ink
+    }
+  }, React.createElement("div", {
+    className: "flex justify-between items-start gap-4",
+    style: {
+      borderBottom: `3px solid ${BRAND.gold}`,
+      paddingBottom: 14
+    }
+  }, React.createElement("div", {
+    className: "flex items-center gap-3"
+  }, COMPANY.logo ? React.createElement("img", {
+    src: COMPANY.logo,
+    alt: "",
+    style: {
+      width: 54,
+      height: 54,
+      objectFit: "contain"
+    }
+  }) : React.createElement("div", {
+    style: {
+      width: 54,
+      height: 54,
+      background: BRAND.navy,
+      color: BRAND.gold,
+      borderRadius: 8,
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "center",
+      fontFamily: "'Barlow Condensed', sans-serif",
+      fontWeight: 700,
+      fontSize: 24
+    }
+  }, COMPANY.initials), React.createElement("div", null, React.createElement("div", {
+    style: {
+      fontFamily: "'Barlow Condensed', sans-serif",
+      fontSize: 24,
+      fontWeight: 700,
+      color: BRAND.navy,
+      lineHeight: 1
+    }
+  }, COMPANY.name), React.createElement("div", {
+    style: {
+      fontSize: 12,
+      color: BRAND.sub,
+      marginTop: 3
+    }
+  }, [COMPANY.phone, COMPANY.email, COMPANY.site].filter(Boolean).join(" · ")), COMPANY.area && React.createElement("div", {
+    style: {
+      fontSize: 12,
+      color: BRAND.sub
+    }
+  }, COMPANY.area))), React.createElement("div", {
+    style: {
+      textAlign: "right"
+    }
+  }, React.createElement("div", {
+    style: {
+      fontFamily: "'Barlow Condensed', sans-serif",
+      fontSize: 30,
+      fontWeight: 700,
+      color: BRAND.navy,
+      letterSpacing: "0.06em"
+    }
+  }, "RECEIPT"), React.createElement("div", {
+    style: {
+      fontSize: 13
+    }
+  }, React.createElement("b", null, shown.receiptNo)), React.createElement("div", {
+    style: {
+      fontSize: 13,
+      color: BRAND.sub
+    }
+  }, fmtDay2(shown.date)))), React.createElement("div", {
+    className: "grid gap-4",
+    style: {
+      gridTemplateColumns: "1fr 1fr",
+      marginTop: 18
+    }
+  }, React.createElement("div", null, React.createElement("div", {
+    style: lbl
+  }, "RECEIVED FROM"), React.createElement("div", {
+    style: {
+      fontWeight: 700,
+      marginTop: 3
+    }
+  }, quote.clientName || "—"), quote.clientAddress && React.createElement("div", {
+    style: {
+      fontSize: 13,
+      color: BRAND.sub
+    }
+  }, quote.clientAddress), quote.clientPhone && React.createElement("div", {
+    style: {
+      fontSize: 13,
+      color: BRAND.sub
+    }
+  }, quote.clientPhone), quote.clientEmail && React.createElement("div", {
+    style: {
+      fontSize: 13,
+      color: BRAND.sub
+    }
+  }, quote.clientEmail)), React.createElement("div", null, React.createElement("div", {
+    style: lbl
+  }, "FOR"), React.createElement("div", {
+    style: {
+      fontWeight: 700,
+      marginTop: 3
+    }
+  }, quote.jobTitle || "Project"), React.createElement("div", {
+    style: {
+      fontSize: 13,
+      color: BRAND.sub
+    }
+  }, "Quote ", quote.quoteNo))), React.createElement("table", {
+    style: {
+      width: "100%",
+      borderCollapse: "collapse",
+      marginTop: 22,
+      fontSize: 14
+    }
+  }, React.createElement("tbody", null, React.createElement("tr", {
+    style: {
+      background: BRAND.navy,
+      color: "#fff"
+    }
+  }, React.createElement("td", {
+    style: {
+      padding: "9px 12px",
+      fontWeight: 700
+    }
+  }, "Payment"), React.createElement("td", {
+    style: {
+      padding: "9px 12px",
+      textAlign: "right",
+      fontWeight: 700
+    }
+  }, "Amount")), React.createElement("tr", {
+    style: {
+      borderBottom: `1px solid ${BRAND.line}`
+    }
+  }, React.createElement("td", {
+    style: {
+      padding: "10px 12px"
+    }
+  }, shown.method, shown.ref ? " · ref " + shown.ref : "", shown.note ? React.createElement("div", {
+    style: {
+      fontSize: 12.5,
+      color: BRAND.sub
+    }
+  }, shown.note) : null), React.createElement("td", {
+    style: {
+      padding: "10px 12px",
+      textAlign: "right",
+      fontWeight: 700
+    }
+  }, money(Number(shown.amount)))))), React.createElement("div", {
+    style: {
+      display: "flex",
+      justifyContent: "flex-end",
+      marginTop: 12
+    }
+  }, React.createElement("div", {
+    style: {
+      minWidth: 280,
+      fontSize: 14
+    }
+  }, React.createElement("div", {
+    className: "flex justify-between",
+    style: {
+      padding: "4px 0"
+    }
+  }, React.createElement("span", null, "Job total"), React.createElement("span", null, money(contract))), React.createElement("div", {
+    className: "flex justify-between",
+    style: {
+      padding: "4px 0"
+    }
+  }, React.createElement("span", null, "Paid to date"), React.createElement("span", null, money(paidThrough))), React.createElement("div", {
+    className: "flex justify-between",
+    style: {
+      padding: "8px 0",
+      borderTop: `2px solid ${BRAND.navy}`,
+      fontWeight: 700,
+      fontSize: 16
+    }
+  }, React.createElement("span", null, "Balance due"), React.createElement("span", null, money(Math.max(0, contract - paidThrough)))))), React.createElement("div", {
+    style: {
+      marginTop: 26,
+      background: BRAND.paper,
+      borderRadius: 8,
+      padding: "12px 14px",
+      fontSize: 14
+    }
+  }, React.createElement("b", {
+    style: {
+      color: BRAND.green
+    }
+  }, "PAID \u2014 thank you!"), " ", money(Number(shown.amount)), " received on ", fmtDay2(shown.date), "."), React.createElement("div", {
+    style: {
+      marginTop: 26,
+      fontSize: 13,
+      color: BRAND.sub
+    }
+  }, "Received by ", shown.by || COMPANY.signer || COMPANY.name, " for ", COMPANY.name, ".")))));
+}
+function ReceiptsView({
+  quotes,
+  settings,
+  onReceipt
+}) {
+  const years = Array.from(new Set(quotes.flatMap(q => paymentsOf(q).map(p => String(p.date || "").slice(0, 4))).concat([String(new Date().getFullYear())]))).filter(Boolean).sort().reverse();
+  const [year, setYear] = useState(years[0]);
+  const rows = quotes.flatMap(q => paymentsOf(q).map(p => ({
+    q,
+    p
+  }))).filter(r => String(r.p.date || "").slice(0, 4) === year).sort((a, b) => String(b.p.date).localeCompare(String(a.p.date)));
+  const total = rows.reduce((n, r) => n + (Number(r.p.amount) || 0), 0);
+  const byMonth = {};
+  rows.forEach(r => {
+    const m = String(r.p.date).slice(0, 7);
+    byMonth[m] = (byMonth[m] || 0) + (Number(r.p.amount) || 0);
+  });
+  const owed = quotes.filter(q => q.status === "won" && !isVoid(q)).map(q => ({
+    q,
+    bal: Math.round((wonValue(q, settings) - paidOf(q)) * 100) / 100
+  })).filter(x => x.bal > 0.009);
+  const exportCsv = () => {
+    const esc = v => {
+      const t = String(v == null ? "" : v);
+      return /[",\n]/.test(t) ? '"' + t.replace(/"/g, '""') + '"' : t;
+    };
+    const head = ["Date", "Receipt #", "Quote #", "Client", "Job", "Job address", "Payment method", "Reference", "Amount", "Job total", "Recorded by", "Note"];
+    const lines = [head.join(",")].concat(rows.slice().reverse().map(({
+      q,
+      p
+    }) => [p.date, p.receiptNo, q.quoteNo, q.clientName, q.jobTitle, q.clientAddress, p.method, p.ref, (Number(p.amount) || 0).toFixed(2), wonValue(q, settings).toFixed(2), p.by, p.note].map(esc).join(",")));
+    lines.push(["", "", "", "", "", "", "", "TOTAL", total.toFixed(2), "", "", ""].join(","));
+    const blob = new Blob(["﻿" + lines.join("\r\n")], {
+      type: "text/csv;charset=utf-8"
+    });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = (COMPANY.name + " receipts " + year).replace(/[^\w .\-]+/g, "") + ".csv";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+  };
+  return React.createElement("div", {
+    className: "grid gap-4"
+  }, React.createElement("div", {
+    className: "flex items-center justify-between flex-wrap gap-2"
+  }, React.createElement("h2", {
+    style: {
+      fontFamily: "'Barlow Condensed', sans-serif",
+      fontSize: 26,
+      fontWeight: 700,
+      color: BRAND.navy,
+      letterSpacing: "0.03em"
+    }
+  }, "RECEIPTS & PAYMENTS"), React.createElement("div", {
+    className: "flex gap-2 items-center"
+  }, React.createElement("select", {
+    style: Object.assign({}, inputStyle, {
+      width: "auto"
+    }),
+    value: year,
+    onChange: e => setYear(e.target.value)
+  }, years.map(y => React.createElement("option", {
+    key: y
+  }, y))), React.createElement(Btn, {
+    kind: "gold",
+    disabled: !rows.length,
+    onClick: exportCsv
+  }, "Export CSV for taxes"))), React.createElement("div", {
+    className: "grid gap-3",
+    style: {
+      gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))"
+    }
+  }, React.createElement(Card, {
+    style: {
+      padding: 14
+    }
+  }, React.createElement("div", {
+    style: {
+      fontSize: 11.5,
+      fontWeight: 700,
+      color: BRAND.sub,
+      letterSpacing: "0.06em"
+    }
+  }, "RECEIVED IN ", year), React.createElement("div", {
+    style: {
+      fontFamily: "'Barlow Condensed', sans-serif",
+      fontSize: 30,
+      fontWeight: 700,
+      color: BRAND.green
+    }
+  }, money(total))), React.createElement(Card, {
+    style: {
+      padding: 14
+    }
+  }, React.createElement("div", {
+    style: {
+      fontSize: 11.5,
+      fontWeight: 700,
+      color: BRAND.sub,
+      letterSpacing: "0.06em"
+    }
+  }, "RECEIPTS"), React.createElement("div", {
+    style: {
+      fontFamily: "'Barlow Condensed', sans-serif",
+      fontSize: 30,
+      fontWeight: 700,
+      color: BRAND.navy
+    }
+  }, rows.length)), React.createElement(Card, {
+    style: {
+      padding: 14
+    }
+  }, React.createElement("div", {
+    style: {
+      fontSize: 11.5,
+      fontWeight: 700,
+      color: BRAND.sub,
+      letterSpacing: "0.06em"
+    }
+  }, "STILL OWED ON WON JOBS"), React.createElement("div", {
+    style: {
+      fontFamily: "'Barlow Condensed', sans-serif",
+      fontSize: 30,
+      fontWeight: 700,
+      color: owed.length ? BRAND.amber : BRAND.navy
+    }
+  }, money(owed.reduce((n, x) => n + x.bal, 0))))), owed.length > 0 && React.createElement(Card, null, React.createElement("div", {
+    style: {
+      fontFamily: "'Barlow Condensed', sans-serif",
+      fontSize: 19,
+      fontWeight: 700,
+      color: BRAND.navy,
+      marginBottom: 6
+    }
+  }, "WAITING FOR PAYMENT"), owed.map(({
+    q,
+    bal
+  }) => React.createElement("div", {
+    key: q.id,
+    className: "flex justify-between items-center flex-wrap gap-2",
+    style: {
+      borderTop: `1px solid ${BRAND.line}`,
+      padding: "8px 0",
+      fontSize: 14
+    }
+  }, React.createElement("span", null, React.createElement("b", null, q.quoteNo), " \xB7 ", q.clientName, " \xB7 balance ", React.createElement("b", {
+    style: {
+      color: BRAND.amber
+    }
+  }, money(bal)), " of ", money(wonValue(q, settings))), React.createElement(Btn, {
+    small: true,
+    kind: "gold",
+    onClick: () => onReceipt(q)
+  }, "Record payment")))), React.createElement(Card, null, React.createElement("div", {
+    style: {
+      fontFamily: "'Barlow Condensed', sans-serif",
+      fontSize: 19,
+      fontWeight: 700,
+      color: BRAND.navy,
+      marginBottom: 6
+    }
+  }, "RECEIPTS IN ", year), rows.length === 0 ? React.createElement("p", {
+    style: {
+      fontSize: 13.5,
+      color: BRAND.sub
+    }
+  }, "No payments recorded in ", year, ". When a job is marked Won, record the client's payment and a receipt is created.") : rows.map(({
+    q,
+    p
+  }) => React.createElement("div", {
+    key: p.id,
+    className: "flex justify-between items-center flex-wrap gap-2",
+    style: {
+      borderTop: `1px solid ${BRAND.line}`,
+      padding: "8px 0",
+      fontSize: 14
+    }
+  }, React.createElement("span", null, React.createElement("b", null, fmtDay2(p.date)), " \xB7 ", p.receiptNo, " \xB7 ", q.clientName, " \xB7 ", p.method, " \xB7 ", React.createElement("b", null, money(Number(p.amount)))), React.createElement(Btn, {
+    small: true,
+    kind: "ghost",
+    onClick: () => onReceipt(q)
+  }, "Open"))), Object.keys(byMonth).length > 1 && React.createElement("div", {
+    style: {
+      fontSize: 12.5,
+      color: BRAND.sub,
+      marginTop: 10
+    }
+  }, "By month: ", Object.keys(byMonth).sort().map(m => new Date(m + "-15").toLocaleDateString("en-US", {
+    month: "short"
+  }) + " " + money(byMonth[m])).join(" · "))), React.createElement("p", {
+    style: {
+      fontSize: 12,
+      color: BRAND.sub
+    }
+  }, "The CSV opens in Excel or Google Sheets. Give it to your accountant along with your expenses; this is a record of payments received, not tax advice."));
 }
 function PreviewModal({
   quote,
@@ -9489,7 +10554,7 @@ function PreviewModal({
     style: {
       padding: "9px 12px"
     }
-  }, "Project management, equipment & site overhead"), React.createElement("td", {
+  }, "Miscellaneous"), React.createElement("td", {
     style: {
       textAlign: "right",
       padding: "9px 12px"

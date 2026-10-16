@@ -66,7 +66,14 @@ async function priceFor(plan) {
 /* A customer-portal setup, so owners can change card, switch plan or cancel. */
 async function portalConfig() {
   const list = await stripe("GET", "billing_portal/configurations", { is_default: true, limit: 1 });
-  if (list.data && list.data[0]) return list.data[0].id;
+  if (list.data && list.data[0]) {
+    const cfg = list.data[0];
+    // Cancelling goes through the app (with the save offers), not the portal.
+    if (cfg.features && cfg.features.subscription_cancel && cfg.features.subscription_cancel.enabled) {
+      try { await stripe("POST", "billing_portal/configurations/" + cfg.id, { features: { subscription_cancel: { enabled: false } } }); } catch (e) { console.error("[stripe] portal cancel off:", e.message); }
+    }
+    return cfg.id;
+  }
   const prices = await Promise.all(Object.keys(PLANS).map(priceFor));
   const prod = await Promise.all(prices.map((id) => stripe("GET", "prices/" + id)));
   const cfg = await stripe("POST", "billing_portal/configurations", {
@@ -74,7 +81,7 @@ async function portalConfig() {
     features: {
       payment_method_update: { enabled: true },
       invoice_history: { enabled: true },
-      subscription_cancel: { enabled: true, mode: "at_period_end" },
+      subscription_cancel: { enabled: false }, // cancelling happens in the app (save offers first)
       subscription_update: {
         enabled: true, default_allowed_updates: ["price"], proration_behavior: "create_prorations",
         products: prod.map((p) => ({ product: p.product, prices: [p.id] })),
