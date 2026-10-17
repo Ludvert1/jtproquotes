@@ -43,7 +43,7 @@ window.JTPQ_CONFIG = {
 
   // Shown to contractors under "Help" (S-I-Quotespro support line).
   supportPhone: "(713) 835-8245",
-  supportEmail: "info@jtproconstruction.com",
+  supportEmail: "support@s-i-quotespro.com",
 
   // This email address gets Owner rights. Everyone else is an associate.
   ownerEmail: "info@jtproconstruction.com",

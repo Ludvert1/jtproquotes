@@ -11,7 +11,7 @@
    Environment:
      VAPID_PRIVATE_KEY   the private half of the key pair (secret)
      VAPID_PUBLIC_KEY    optional — defaults to the one in config.js
-     VAPID_SUBJECT       optional — defaults to mailto:info@jtproconstruction.com
+     VAPID_SUBJECT       optional — defaults to mailto:support@s-i-quotespro.com
 ============================================================ */
 
 const crypto = require("crypto");
@@ -37,7 +37,7 @@ function vapidHeader(endpoint, keys) {
   const header = b64u(JSON.stringify({ typ: "JWT", alg: "ES256" }));
   const claims = b64u(JSON.stringify({
     aud, exp: Math.floor(Date.now() / 1000) + 12 * 3600,
-    sub: process.env.VAPID_SUBJECT || "mailto:info@jtproconstruction.com",
+    sub: process.env.VAPID_SUBJECT || "mailto:support@s-i-quotespro.com",
   }));
   const x = keys.pub.subarray(1, 33), y = keys.pub.subarray(33, 65);
   const key = crypto.createPrivateKey({
