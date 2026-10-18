@@ -64,19 +64,41 @@ function setup() {
   return msg;
 }
 
+/* Google's own services (Gmail, UrlFetch) now and then answer "We're sorry, a
+   server error occurred. Please wait a bit and try again." That is Google
+   being busy, not a bug here. Try a few times, then give up quietly: the next
+   run picks the same emails up, because nothing is labelled until a lead has
+   really been filed. */
+function withRetry(fn, fallback) {
+  var wait = 1500;
+  for (var i = 0; i < 4; i++) {
+    try { return fn(); }
+    catch (e) {
+      if (i === 3) { Logger.log("Gave up after 4 tries: " + e.message); return fallback; }
+      Utilities.sleep(wait);
+      wait *= 2;
+    }
+  }
+  return fallback;
+}
+
 /* The timer calls this. */
 function checkForLeads() {
-  var done = labelNamed(LABEL_DONE), failed = labelNamed(LABEL_FAILED);
+  var done = withRetry(function () { return labelNamed(LABEL_DONE); });
+  var failed = withRetry(function () { return labelNamed(LABEL_FAILED); });
+  if (!done || !failed) { Logger.log("Gmail wasn't available this time — will try again next run."); return "Gmail busy."; }
   var handled = 0, report = [], started = Date.now();
   for (var s = 0; s < SEARCHES.length; s++) {
-    var threads = GmailApp.search(SEARCHES[s], 0, MAX_PER_RUN);
+    var q = SEARCHES[s];
+    var threads = withRetry(function () { return GmailApp.search(q, 0, MAX_PER_RUN); }, []);
     for (var t = 0; t < threads.length && handled < MAX_PER_RUN && Date.now() - started < TIME_BUDGET_MS; t++) {
-      var msgs = threads[t].getMessages();
-      var msg = msgs[msgs.length - 1];
+      var th = threads[t];
+      var msg = withRetry(function () { var m = th.getMessages(); return m[m.length - 1]; });
+      if (!msg) continue; // Gmail hiccup: leave it unlabelled, next run retries
       handled++;
       var outcome = fileOneLead(msg);
       report.push(outcome.line);
-      threads[t].addLabel(outcome.ok ? done : failed);
+      withRetry(function () { th.addLabel(outcome.ok ? done : failed); });
     }
   }
   var summary = handled === 0 ? "No new leads." : report.join("\n");
@@ -85,22 +107,28 @@ function checkForLeads() {
 }
 
 function fileOneLead(msg) {
-  var subject = msg.getSubject() || "";
-  var payload = {
-    companyKey: COMPANY_KEY,
-    subject: subject,
-    from: msg.getFrom() || "",
-    text: (msg.getPlainBody() || "").slice(0, 18000),
-    messageId: msg.getId(),
-    receivedAt: msg.getDate().toISOString(),
-    leadUrl: leadLinkFrom(msg),
-    images: photosFrom(msg)
-  };
+  var subject = "", payload;
   try {
-    var res = UrlFetchApp.fetch(ENDPOINT, {
+    subject = msg.getSubject() || "";
+    payload = {
+      companyKey: COMPANY_KEY,
+      subject: subject,
+      from: msg.getFrom() || "",
+      text: (msg.getPlainBody() || "").slice(0, 18000),
+      messageId: msg.getId(),
+      receivedAt: msg.getDate().toISOString(),
+      leadUrl: leadLinkFrom(msg),
+      images: photosFrom(msg)
+    };
+  } catch (e) {
+    return { ok: false, line: "FAILED (reading the email) " + subject.slice(0, 60) + " — " + e.message };
+  }
+  try {
+    var res = withRetry(function () { return UrlFetchApp.fetch(ENDPOINT, {
       method: "post", contentType: "application/json",
       payload: JSON.stringify(payload), muteHttpExceptions: true
-    });
+    }); });
+    if (!res) return { ok: false, line: "FAILED (network) " + subject.slice(0, 60) };
     var code = res.getResponseCode(), text = res.getContentText();
     if (code !== 200) return { ok: false, line: "FAILED (" + code + ") " + subject.slice(0, 60) + " — " + text.slice(0, 160) };
     var out = {};
