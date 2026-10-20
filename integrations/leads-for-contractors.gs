@@ -82,8 +82,23 @@ function withRetry(fn, fallback) {
   return fallback;
 }
 
-/* The timer calls this. */
+/* The trigger calls this. Google's own "server error" is a busy moment on
+   their side, not a fault here: it is logged and the next run picks up the
+   same emails. Any other error still fails loudly so you hear about it. */
 function checkForLeads() {
+  try {
+    return checkForLeadsRun();
+  } catch (e) {
+    var m = String((e && e.message) || e);
+    if (/server error|try again|temporarily|Service invoked too many times|timed out/i.test(m)) {
+      Logger.log("Google was busy (" + m + ") — will try again next run.");
+      return "Google busy.";
+    }
+    throw e;
+  }
+}
+
+function checkForLeadsRun() {
   var done = withRetry(function () { return labelNamed(LABEL_DONE); });
   var failed = withRetry(function () { return labelNamed(LABEL_FAILED); });
   if (!done || !failed) { Logger.log("Gmail wasn't available this time — will try again next run."); return "Gmail busy."; }
