@@ -216,6 +216,23 @@ footer a { color: var(--band-ink); text-decoration: none }
 footer .cols { display: flex; gap: 40px; flex-wrap: wrap }
 footer .cols div { display: grid; gap: 6px; align-content: start }
 footer small { font: 600 12px/1 var(--mono); letter-spacing: .1em; color: var(--gold-hi); margin-bottom: 4px }
+
+/* ai crew */
+.crew { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; margin-top: 40px }
+.emp { background: var(--surface); border: 1.5px solid var(--line); border-radius: var(--r); padding: 26px; display: flex; flex-direction: column; gap: 12px }
+.emp .role { font: 600 12px/1 var(--mono); letter-spacing: .08em; color: var(--gold) }
+.emp h3 { font-size: 34px }
+.emp ul { margin: 0; padding-left: 18px; color: var(--muted); display: grid; gap: 6px }
+.emp .st { margin-top: auto; font: 600 11px/1 var(--mono); letter-spacing: .08em; padding: 7px 9px; border-radius: 6px; align-self: flex-start; background: var(--navy); color: #fff }
+.emp .st.soon { background: transparent; color: var(--muted); border: 1px solid var(--line) }
+.what { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-top: 30px }
+.what div { border-top: 3px solid var(--gold); padding-top: 12px }
+.what b { display: block; font: 700 20px/1.1 var(--display); text-transform: uppercase; margin-bottom: 6px }
+.what p { color: var(--muted); font-size: 15.5px }
+.trades { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 22px }
+.trades span { border: 1px solid var(--line); border-radius: 99px; padding: 8px 14px; font-weight: 600; font-size: 15px }
+@media (max-width: 900px) { .crew { grid-template-columns: 1fr } .what { grid-template-columns: 1fr 1fr } }
+@media (max-width: 560px) { .what { grid-template-columns: 1fr } }
 </style>
 </head>
 <body>
@@ -225,6 +242,7 @@ footer small { font: 600 12px/1 var(--mono); letter-spacing: .1em; color: var(--
   <div class="wrap">
     <a class="logo" href="#top" aria-label="S-I-Quotespro home"><b>SI</b><span>S-I-QUOTESPRO</span></a>
     <nav aria-label="Main">
+      <a class="hide-sm" href="#crew">Your AI crew</a>
       <a class="hide-sm" href="#how">How it works</a>
       <a class="hide-sm" href="#pricing">Pricing</a>
       <a class="hide-xs" href="#help">Help</a>
@@ -267,6 +285,41 @@ footer small { font: 600 12px/1 var(--mono); letter-spacing: .1em; color: var(--
       <div class="total"><small>TOTAL · VALID 30 DAYS</small><strong>$1,240</strong></div>
       <span class="send">Review &amp; send reply</span>
     </div>
+  </div>
+</section>
+
+<section id="crew">
+  <div class="wrap">
+    <p class="eyebrow">Your AI crew</p>
+    <h2 style="margin-top:12px">Win more jobs. Get paid faster.</h2>
+    <p class="lead" style="margin-top:14px">S-I-Quotespro is more than a quote tool. It is a small crew of AI employees that quote, follow up and keep your jobs and payments in order, so you can stay on the tools.</p>
+    <div class="what">
+      <div><b>Talk or text</b><p>Describe a job or send photos. The work gets done, no forms.</p></div>
+      <div><b>Your prices</b><p>Every number uses your own labor rate, overhead and margin.</p></div>
+      <div><b>It keeps chasing</b><p>Replies and reminders go out until the job is signed and paid.</p></div>
+      <div><b>You stay in charge</b><p>Nothing reaches a customer unless you turned that on.</p></div>
+    </div>
+    <div class="crew">
+      <div class="emp">
+        <span class="role">QUOTES &amp; LEADS</span><h3>Quill</h3>
+        <p>Reads every lead and job photo, writes the scope, lists materials, prices the job with your rates and drafts the reply.</p>
+        <ul><li>Quotes from photos, text or lead emails</li><li>Branded PDFs with your logo</li><li>Price-to-win market check</li><li>Property lookup before you go</li></ul>
+        <span class="st">LIVE NOW</span>
+      </div>
+      <div class="emp">
+        <span class="role">FOLLOW-UPS &amp; WINS</span><h3>Scout</h3>
+        <p>Keeps every open quote moving, then tracks what you won, lost and why.</p>
+        <ul><li>Phone alerts for new leads and approvals</li><li>Won / Lost tracking with reasons</li><li>Auto-reply to new leads (if you turn it on)</li><li>Automatic reminder texts and emails to unanswered quotes</li></ul>
+        <span class="st">TRACKING LIVE · AUTO REMINDERS SOON</span>
+      </div>
+      <div class="emp">
+        <span class="role">JOBS &amp; PAYMENTS</span><h3>Ledger</h3>
+        <p>Turns a won quote into a job and keeps the money side clean.</p>
+        <ul><li>Numbered payment receipts (deposit, progress, final)</li><li>CSV export for your accountant</li><li>Invoices with card or bank payment</li><li>Scheduling and change orders</li></ul>
+        <span class="st soon">RECEIPTS LIVE · INVOICES &amp; SCHEDULING SOON</span>
+      </div>
+    </div>
+    <div class="trades" aria-label="Trades we serve"><span>Roofers</span><span>Painters</span><span>Remodelers</span><span>Plumbers</span><span>Electricians</span><span>HVAC</span><span>Flooring</span><span>Landscapers</span><span>Carpenters</span><span>Handymen</span></div>
   </div>
 </section>
 
@@ -362,6 +415,8 @@ footer small { font: 600 12px/1 var(--mono); letter-spacing: .1em; color: var(--
           <div class="video"><video controls playsinline preload="none" poster="/site/img/tutorial-poster.jpg"><source src="/site/media/tutorial.mp4" type="video/mp4"></video></div><p style="font-size:14px;color:var(--muted);margin-top:8px">1-minute video: signing up and connecting Thumbtack.</p>
         </div>
         <div class="faq">
+          <details><summary>What is an AI employee?</summary><p>A specialist inside S-I-Quotespro that does a job for you instead of just answering questions. Quill writes and prices quotes, Scout tracks leads and wins, and Ledger handles payments. They use your rates and your branding, and you approve what goes out.</p></details>
+          <details><summary>Which features are live and which are coming?</summary><p>Quotes, lead inbox, phone alerts, property lookup, team approvals, Won/Lost tracking and payment receipts are live today. Automatic follow-up reminders, invoicing with online payment, scheduling and change orders are in development.</p></details>
           <details><summary>Do I have to download an app?</summary><p>No. Open s-i-quotespro.com on your phone and use "Add to Home Screen". It works like an app, with phone alerts, and updates on its own.</p></details>
           <details><summary>Does it send quotes to customers without me?</summary><p>Only if you turn on auto-reply and the lead includes the customer's email. Otherwise every quote waits for you to check it and send it.</p></details>
           <details><summary>Where do the prices come from?</summary><p>From your own labor rate, overhead and profit margin, which you set in Settings. The AI estimates the work and materials; the price is calculated with your numbers, and it shows a market estimate next to it for comparison.</p></details>
