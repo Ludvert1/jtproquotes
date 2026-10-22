@@ -4342,6 +4342,51 @@ function ReceiptModal({ quote: liveQuote, settings, me, onSave: saveQuote, onClo
   const pays = paymentsOf(quote);
   const shown = pays.find((p) => p.id === showId);
 
+  /* ---- INVOICES (Ledger) ----
+     An invoice asks for part or all of what is still owed. It is paid when the
+     payments recorded on this job add up to everything invoiced so far. */
+  const [mode, setMode] = useState("pay");
+  const invs = Array.isArray(quote.invoices) ? quote.invoices : [];
+  const [invId, setInvId] = useState(invs.length ? invs[invs.length - 1].id : "");
+  const lsGet = (k, d) => { try { return window.localStorage.getItem(k) || d; } catch (e) { return d; } };
+  const [iAmt, setIAmt] = useState(String(balance || ""));
+  const [iTerms, setITerms] = useState("7");
+  const [iLink, setILink] = useState(lsGet("siq:payLink", ""));
+  const [iHow, setIHow] = useState(lsGet("siq:payHow", "Zelle, check, cash or card. Call us if you need another way to pay."));
+  const [iNote, setINote] = useState("");
+  const addDays = (iso, n) => { const d = new Date(iso + "T12:00:00"); d.setDate(d.getDate() + n); return d.toISOString().slice(0, 10); };
+  const invShown = invs.find((v) => v.id === invId);
+  const invStatus = (v) => {
+    const upto = invs.slice(0, invs.findIndex((x) => x.id === v.id) + 1).reduce((n, x) => n + (Number(x.amount) || 0), 0);
+    if (paid + 0.009 >= upto) return "paid";
+    return v.due && v.due < todayISO() ? "overdue" : "open";
+  };
+  const createInvoice = async () => {
+    const amt = Math.round((parseFloat(String(iAmt).replace(/[^0-9.]/g, "")) || 0) * 100) / 100;
+    if (!(amt > 0)) return setErr("Enter the amount to invoice.");
+    if (iLink.trim() && !/^https?:\/\//i.test(iLink.trim())) return setErr("The payment link should start with https://");
+    setErr(""); setBusy("inv");
+    const n = invs.length + 1, issued = todayISO(), days = parseInt(iTerms, 10) || 0;
+    const v = { id: uid(), no: "INV-" + quote.quoteNo + (n > 1 ? "-" + n : ""), amount: amt, issued, due: addDays(issued, days), terms: days, payLink: iLink.trim(), how: iHow.trim(), note: iNote.trim(), by: me ? me.name : "", at: new Date().toISOString() };
+    const next = Object.assign({}, quote, { invoices: invs.concat([v]), updatedAt: v.at, history: (quote.history || []).concat([{ at: v.at, by: v.by, action: "Invoice " + v.no + " created for " + money(amt) }]) });
+    try { await onSave(next); try { window.localStorage.setItem("siq:payLink", v.payLink); window.localStorage.setItem("siq:payHow", v.how); } catch (e) {} setInvId(v.id); notify("Invoice " + v.no + " created"); }
+    catch (e) { setErr("Couldn't save the invoice. Try again."); }
+    setBusy("");
+  };
+  const removeInv = async (v) => {
+    if (!window.confirm("Delete invoice " + v.no + "? Only do this if it was made by mistake.")) return;
+    const next = Object.assign({}, quote, { updatedAt: new Date().toISOString(), invoices: invs.filter((x) => x.id !== v.id), history: (quote.history || []).concat([{ at: new Date().toISOString(), by: me ? me.name : "", action: "Deleted invoice " + v.no }]) });
+    await onSave(next); if (invId === v.id) setInvId("");
+  };
+  const invText = (v) => {
+    const first = (quote.clientName || "").split(" ")[0];
+    return "Hi" + (first ? " " + first : "") + ", here is invoice " + v.no + " from " + COMPANY.name + " for " + money(v.amount) + ", due " + fmtDay2(v.due) + "." + (v.payLink ? " You can pay online here: " + v.payLink : "") + " Thank you, " + (COMPANY.signer || COMPANY.name);
+  };
+  const logInvSent = async (v, how) => {
+    const at = new Date().toISOString();
+    try { await onSave(Object.assign({}, quote, { updatedAt: at, history: (quote.history || []).concat([{ at, by: me ? me.name : "", action: "Invoice " + v.no + " sent by " + how }]) })); } catch (e) {}
+  };
+
   const record = async () => {
     const amt = Math.round((parseFloat(String(amount).replace(/[^0-9.]/g, "")) || 0) * 100) / 100;
     if (!(amt > 0)) return setErr("Enter the amount the client paid.");
@@ -4362,10 +4407,12 @@ function ReceiptModal({ quote: liveQuote, settings, me, onSave: saveQuote, onClo
     await onSave(next); if (showId === p.id) setShowId("");
   };
 
-  const fileName = shown ? (shown.receiptNo + " " + (quote.clientName || "Client") + " - " + COMPANY.name + " Receipt").replace(/[^\w .\-]+/g, "").trim() + ".pdf" : "";
+  const fileName = mode === "inv"
+    ? (invShown ? (invShown.no + " " + (quote.clientName || "Client") + " - " + COMPANY.name + " Invoice").replace(/[^\w .\-]+/g, "").trim() + ".pdf" : "")
+    : (shown ? (shown.receiptNo + " " + (quote.clientName || "Client") + " - " + COMPANY.name + " Receipt").replace(/[^\w .\-]+/g, "").trim() + ".pdf" : "");
   const makePdf = async () => {
     const lib = await loadHtml2pdf();
-    const el = document.getElementById("receipt-doc");
+    const el = document.getElementById(mode === "inv" ? "invoice-doc" : "receipt-doc");
     const sx = window.scrollX, sy = window.scrollY; window.scrollTo(0, 0);
     try {
       return await lib().set({ margin: [8, 8, 8, 8], filename: fileName, image: { type: "jpeg", quality: 0.95 }, html2canvas: { scale: 2, useCORS: true, backgroundColor: "#ffffff", scrollX: 0, scrollY: 0 }, jsPDF: { unit: "mm", format: "letter", orientation: "portrait" } }).from(el).outputPdf("blob");
@@ -4384,7 +4431,8 @@ function ReceiptModal({ quote: liveQuote, settings, me, onSave: saveQuote, onClo
       const file = new File([await makePdf()], fileName, { type: "application/pdf" });
       if (!navigator.canShare({ files: [file] })) throw new Error("This device can't share files — use Download PDF.");
       const first = (quote.clientName || "").split(" ")[0];
-      await navigator.share({ files: [file], title: fileName, text: "Hi" + (first ? " " + first : "") + ", thank you for your payment. Here is your receipt from " + COMPANY.name + " (" + shown.receiptNo + "). — " + (COMPANY.signer || COMPANY.name) });
+      await navigator.share({ files: [file], title: fileName, text: mode === "inv" ? invText(invShown) : "Hi" + (first ? " " + first : "") + ", thank you for your payment. Here is your receipt from " + COMPANY.name + " (" + shown.receiptNo + "). — " + (COMPANY.signer || COMPANY.name) });
+      if (mode === "inv") logInvSent(invShown, "share");
     } catch (e) { if (e && e.name !== "AbortError") setErr(e.message || "Couldn't share."); }
     setBusy("");
   };
@@ -4398,8 +4446,12 @@ function ReceiptModal({ quote: liveQuote, settings, me, onSave: saveQuote, onClo
             <div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontSize: 22, fontWeight: 700, color: BRAND.navy }}>PAYMENTS · {quote.quoteNo} · {quote.clientName}</div>
             <Btn small kind="ghost" onClick={onClose}>Close</Btn>
           </div>
+          <div className="flex gap-2 mb-2">
+            <Btn small kind={mode === "pay" ? "gold" : "ghost"} onClick={() => { setMode("pay"); setErr(""); }}>Payments &amp; receipts</Btn>
+            <Btn small kind={mode === "inv" ? "gold" : "ghost"} onClick={() => { setMode("inv"); setErr(""); }}>Invoices{invs.length ? " (" + invs.length + ")" : ""}</Btn>
+          </div>
           <div style={{ fontSize: 14, margin: "6px 0 10px" }}>Job total <b>{money(contract)}</b> · paid <b style={{ color: BRAND.green }}>{money(paid)}</b> · balance <b style={{ color: balance > 0 ? BRAND.amber : BRAND.green }}>{money(balance)}</b></div>
-          {pays.length > 0 && <div style={{ marginBottom: 12 }}>
+          {mode === "pay" && pays.length > 0 && <div style={{ marginBottom: 12 }}>
             {pays.map((p) => (
               <div key={p.id} className="flex justify-between items-center gap-2 flex-wrap" style={{ borderTop: `1px solid ${BRAND.line}`, padding: "7px 0", fontSize: 13.5 }}>
                 <span><b>{p.receiptNo}</b> · {fmtDay2(p.date)} · {p.method}{p.ref ? " #" + p.ref : ""} · <b>{money(p.amount)}</b></span>
@@ -4407,7 +4459,7 @@ function ReceiptModal({ quote: liveQuote, settings, me, onSave: saveQuote, onClo
               </div>
             ))}
           </div>}
-          {balance > 0 && <>
+          {mode === "pay" && balance > 0 && <>
             <div style={{ fontSize: 12, fontWeight: 700, color: BRAND.sub, letterSpacing: "0.06em", margin: "6px 0" }}>{pays.length ? "RECORD ANOTHER PAYMENT" : "RECORD THE PAYMENT"}</div>
             <div className="grid gap-x-3" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))" }}>
               <Field label="Amount received"><input style={inputStyle} inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} /></Field>
@@ -4418,11 +4470,80 @@ function ReceiptModal({ quote: liveQuote, settings, me, onSave: saveQuote, onClo
             <Field label="Note on receipt (optional)"><input style={inputStyle} value={note} onChange={(e) => setNote(e.target.value)} placeholder="e.g. 50% deposit, balance due on completion" /></Field>
             <Btn kind="gold" disabled={!!busy} onClick={record}>{busy === "save" ? "Saving…" : "Save payment & create receipt"}</Btn>
           </>}
-          {balance <= 0 && pays.length > 0 && <div style={{ color: BRAND.green, fontWeight: 700, fontSize: 14 }}>Paid in full.</div>}
+          {mode === "pay" && balance <= 0 && pays.length > 0 && <div style={{ color: BRAND.green, fontWeight: 700, fontSize: 14 }}>Paid in full.</div>}
+          {mode === "inv" && <>
+            {invs.length > 0 && <div style={{ marginBottom: 12 }}>
+              {invs.map((v) => { const st = invStatus(v); return (
+                <div key={v.id} className="flex justify-between items-center gap-2 flex-wrap" style={{ borderTop: `1px solid ${BRAND.line}`, padding: "7px 0", fontSize: 13.5 }}>
+                  <span><b>{v.no}</b> · {money(v.amount)} · due {fmtDay2(v.due)} · <b style={{ color: st === "paid" ? BRAND.green : st === "overdue" ? BRAND.red : BRAND.amber }}>{st === "paid" ? "PAID" : st === "overdue" ? "OVERDUE" : "OPEN"}</b></span>
+                  <span className="flex gap-2"><Btn small kind={invId === v.id ? "gold" : "ghost"} onClick={() => setInvId(v.id)}>View invoice</Btn><Btn small kind="danger" onClick={() => removeInv(v)}>Delete</Btn></span>
+                </div>); })}
+            </div>}
+            {balance > 0 ? <>
+              <div style={{ fontSize: 12, fontWeight: 700, color: BRAND.sub, letterSpacing: "0.06em", margin: "6px 0" }}>{invs.length ? "CREATE ANOTHER INVOICE" : "CREATE AN INVOICE"}</div>
+              <div className="grid gap-x-3" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))" }}>
+                <Field label="Amount to invoice"><input style={inputStyle} inputMode="decimal" value={iAmt} onChange={(e) => setIAmt(e.target.value)} /></Field>
+                <Field label="Due"><select style={inputStyle} value={iTerms} onChange={(e) => setITerms(e.target.value)}><option value="0">On receipt</option><option value="3">In 3 days</option><option value="7">In 7 days</option><option value="14">In 14 days</option><option value="30">In 30 days</option></select></Field>
+              </div>
+              <Field label="Online payment link (optional)"><input style={inputStyle} value={iLink} onChange={(e) => setILink(e.target.value)} placeholder="https:// your Stripe, Square, PayPal or Venmo payment link" /></Field>
+              <Field label="How the client can pay"><input style={inputStyle} value={iHow} onChange={(e) => setIHow(e.target.value)} /></Field>
+              <Field label="Note on invoice (optional)"><input style={inputStyle} value={iNote} onChange={(e) => setINote(e.target.value)} placeholder="e.g. 50% deposit to reserve your dates" /></Field>
+              <Btn kind="gold" disabled={!!busy} onClick={createInvoice}>{busy === "inv" ? "Saving…" : "Create invoice"}</Btn>
+              <div style={{ fontSize: 12, color: BRAND.sub, marginTop: 6 }}>Create a payment link in your own Stripe, Square or PayPal account and paste it here. The client pays you directly. Record the payment under Payments &amp; receipts when it arrives, and the invoice turns PAID.</div>
+            </> : <div style={{ color: BRAND.green, fontWeight: 700, fontSize: 14 }}>Nothing left to invoice. Paid in full.</div>}
+          </>}
           {err && <div style={{ color: BRAND.red, fontSize: 13, marginTop: 8 }}>{err}</div>}
         </div>
 
-        {shown && <>
+        {mode === "inv" && invShown && (() => { const v = invShown; const st = invStatus(v); const first = ""; return <>
+          <div className="flex justify-end gap-2 mb-2 flex-wrap">
+            {quote.clientPhone && <a href={"sms:" + String(quote.clientPhone).replace(/[^\d+]/g, "") + "?&body=" + encodeURIComponent(invText(v))} onClick={() => logInvSent(v, "text")} style={{ textDecoration: "none" }}><Btn small kind="gold">Text link</Btn></a>}
+            {quote.clientEmail && <a href={"mailto:" + quote.clientEmail + "?subject=" + encodeURIComponent("Invoice " + v.no + " from " + COMPANY.name) + "&body=" + encodeURIComponent(invText(v))} onClick={() => logInvSent(v, "email")} style={{ textDecoration: "none" }}><Btn small kind="gold">Email</Btn></a>}
+            {canShare && <Btn small kind="gold" disabled={!!busy} onClick={share}>{busy === "share" ? "Making PDF…" : "Send PDF"}</Btn>}
+            <Btn small kind="primary" disabled={!!busy} onClick={download}>{busy === "pdf" ? "Making PDF…" : "Download PDF"}</Btn>
+            <button onClick={() => window.print()} style={{ background: "transparent", color: "#fff", border: "1.5px solid rgba(255,255,255,0.5)", padding: "6px 14px", borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: "pointer" }}>Print</button>
+          </div>
+          <div id="invoice-doc" style={{ background: "#fff", padding: "42px 46px", color: BRAND.ink }}>
+            <div className="flex justify-between items-start gap-4" style={{ borderBottom: `3px solid ${BRAND.gold}`, paddingBottom: 14 }}>
+              <div className="flex items-center gap-3">
+                {COMPANY.logo ? <img src={COMPANY.logo} alt="" style={{ width: 54, height: 54, objectFit: "contain" }} /> : <div style={{ width: 54, height: 54, background: BRAND.navy, color: BRAND.gold, borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 24 }}>{COMPANY.initials}</div>}
+                <div>
+                  <div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontSize: 24, fontWeight: 700, color: BRAND.navy, lineHeight: 1 }}>{COMPANY.name}</div>
+                  <div style={{ fontSize: 12, color: BRAND.sub, marginTop: 3 }}>{[COMPANY.phone, COMPANY.email, COMPANY.site].filter(Boolean).join(" · ")}</div>
+                  {COMPANY.area && <div style={{ fontSize: 12, color: BRAND.sub }}>{COMPANY.area}</div>}
+                </div>
+              </div>
+              <div style={{ textAlign: "right" }}>
+                <div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontSize: 30, fontWeight: 700, color: BRAND.navy, letterSpacing: "0.06em" }}>INVOICE</div>
+                <div style={{ fontSize: 13 }}><b>{v.no}</b></div>
+                <div style={{ fontSize: 13, color: BRAND.sub }}>Issued {fmtDay2(v.issued)}</div>
+              </div>
+            </div>
+            <div className="grid gap-4" style={{ gridTemplateColumns: "1fr 1fr", marginTop: 18 }}>
+              <div><div style={lbl}>BILL TO</div><div style={{ fontWeight: 700, marginTop: 3 }}>{quote.clientName || "—"}</div>{quote.clientAddress && <div style={{ fontSize: 13, color: BRAND.sub }}>{quote.clientAddress}</div>}{quote.clientPhone && <div style={{ fontSize: 13, color: BRAND.sub }}>{quote.clientPhone}</div>}{quote.clientEmail && <div style={{ fontSize: 13, color: BRAND.sub }}>{quote.clientEmail}</div>}</div>
+              <div><div style={lbl}>FOR</div><div style={{ fontWeight: 700, marginTop: 3 }}>{quote.jobTitle || "Project"}</div><div style={{ fontSize: 13, color: BRAND.sub }}>Quote {quote.quoteNo}</div><div style={{ fontSize: 13, marginTop: 6 }}><b>Due {fmtDay2(v.due)}</b></div></div>
+            </div>
+            <table style={{ width: "100%", borderCollapse: "collapse", marginTop: 22, fontSize: 14 }}>
+              <tbody>
+                <tr style={{ background: BRAND.navy, color: "#fff" }}><td style={{ padding: "9px 12px", fontWeight: 700 }}>Description</td><td style={{ padding: "9px 12px", textAlign: "right", fontWeight: 700 }}>Amount</td></tr>
+                <tr style={{ borderBottom: `1px solid ${BRAND.line}` }}><td style={{ padding: "10px 12px" }}>{v.note || (invs.length > 1 ? "Payment request" : "Payment for " + (quote.jobTitle || "the project"))}</td><td style={{ padding: "10px 12px", textAlign: "right", fontWeight: 700 }}>{money(v.amount)}</td></tr>
+              </tbody>
+            </table>
+            <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 12 }}>
+              <div style={{ minWidth: 280, fontSize: 14 }}>
+                <div className="flex justify-between" style={{ padding: "4px 0" }}><span>Job total</span><span>{money(contract)}</span></div>
+                <div className="flex justify-between" style={{ padding: "4px 0" }}><span>Paid to date</span><span>{money(paid)}</span></div>
+                <div className="flex justify-between" style={{ padding: "8px 0", borderTop: `2px solid ${BRAND.navy}`, fontWeight: 700, fontSize: 16 }}><span>{st === "paid" ? "Amount paid" : "Amount due"}</span><span>{money(v.amount)}</span></div>
+              </div>
+            </div>
+            <div style={{ marginTop: 22, background: BRAND.paper, borderRadius: 8, padding: "12px 14px", fontSize: 14 }}>
+              {st === "paid" ? <b style={{ color: BRAND.green }}>PAID — thank you!</b> : <><b>How to pay:</b> {v.how || "Contact us to arrange payment."}{v.payLink ? <div style={{ marginTop: 6 }}><b>Pay online:</b> <span style={{ wordBreak: "break-all" }}>{v.payLink}</span></div> : null}</>}
+            </div>
+            <div style={{ marginTop: 22, fontSize: 13, color: BRAND.sub }}>Thank you for your business. — {v.by || COMPANY.signer || COMPANY.name}, {COMPANY.name}</div>
+          </div>
+        </>; })()}
+
+        {mode === "pay" && shown && <>
           <div className="flex justify-end gap-2 mb-2 flex-wrap">
             {canShare && <Btn small kind="gold" disabled={!!busy} onClick={share}>{busy === "share" ? "Making PDF…" : "Send to client"}</Btn>}
             <Btn small kind={canShare ? "primary" : "gold"} disabled={!!busy} onClick={download}>{busy === "pdf" ? "Making PDF…" : "Download PDF"}</Btn>
