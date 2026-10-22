@@ -47,6 +47,7 @@ function build(lang, prev) {
   src = src.replace(/\{\{IMG:([\w-]+)\}\}/g, (_, n) => prev
     ? "data:image/jpeg;base64," + fs.readFileSync(path.join(dir, "img", n + ".jpg")).toString("base64")
     : "/site/img/" + n + ".jpg");
+  src = src.split("{{L}}").join(lang);
   src = src.replace("{{LANGS}}", LANGS.map(([c, label, href]) => `<a href="${prev ? LIVE + href : href}" hreflang="${c}" lang="${c}"${c === lang ? ' class="on" aria-current="true"' : ""}>${label}</a>`).join(""));
   const poster = prev ? "data:image/jpeg;base64," + fs.readFileSync(path.join(dir, "img/tutorial-poster.jpg")).toString("base64") : "/site/img/tutorial-poster.jpg";
   const tvid = `/site/media/training-${lang}.mp4`;

@@ -265,6 +265,22 @@ J = {
  "rv_stars": (" out of 5 stars", " de 5 estrellas", " sur 5 étoiles"),
 }
 t("Banner photos from Unsplash: Annie Gray, 2H Media, Marie Dehayes, Josh Olalde, Jeriden Villegas, Scott Blake, immo RENOVATION and Milivoj Kuhar.","Fotos del banner de Unsplash: Annie Gray, 2H Media, Marie Dehayes, Josh Olalde, Jeriden Villegas, Scott Blake, immo RENOVATION y Milivoj Kuhar.","Photos de la bannière provenant d'Unsplash : Annie Gray, 2H Media, Marie Dehayes, Josh Olalde, Jeriden Villegas, Scott Blake, immo RENOVATION et Milivoj Kuhar.")
+t('Inside the app','Dentro de la app',"Dans l'appli")
+t('From lead to paid, on one screen','De cliente potencial a cobrado, en una sola pantalla','De la demande au paiement, sur un seul écran')
+t('Track every quote, see what you have won and keep the money side clean.','Sigue cada cotización, ve lo que has ganado y mantén limpio el lado del dinero.','Suivez chaque devis, voyez ce que vous avez gagné et gardez les finances en ordre.')
+t('Your pipeline at a glance','Tu pipeline de un vistazo',"Votre pipeline en un coup d'œil")
+t('Quotes created, estimated pipeline, sent to clients and booked revenue.','Cotizaciones creadas, pipeline estimado, enviadas a clientes e ingresos confirmados.','Devis créés, pipeline estimé, envoyés aux clients et revenus confirmés.')
+t('Mark it won in one tap','Márcala como ganada con un toque',"Marquez-le gagné d'un seul toucher")
+t('Enter the final agreed amount and it counts as booked revenue.','Escribe el monto final acordado y cuenta como ingreso confirmado.','Entrez le montant final convenu et il compte comme revenu confirmé.')
+t('A quote on your letterhead','Una cotización en tu papel membretado','Un devis sur votre papier à en-tête')
+t('Your logo, a clear scope and your price. Review, then send.','Tu logo, un alcance claro y tu precio. Revisa y envía.','Votre logo, une étendue claire et votre prix. Vérifiez, puis envoyez.')
+t('Receipts your clients keep','Recibos que tus clientes conservan','Des reçus que vos clients conservent')
+t('Numbered receipts with the balance still due, ready to text or print.','Recibos numerados con el saldo pendiente, listos para enviar por texto o imprimir.','Des reçus numérotés avec le solde à payer, prêts à envoyer par texto ou à imprimer.')
+t('Scout follows up for you','Scout da seguimiento por ti','Scout relance pour vous')
+t('Gentle reminders with the message already written.','Recordatorios amables con el mensaje ya escrito.','Des rappels polis avec le message déjà rédigé.')
+t('Schedule the job','Programa el trabajo','Planifiez le chantier')
+t('Start dates, crew and notes. Upcoming jobs show on your dashboard.','Fechas de inicio, equipo y notas. Los próximos trabajos aparecen en tu panel.','Dates de début, équipe et notes. Les prochains chantiers apparaissent sur votre tableau de bord.')
+t('Example screens with sample data. Names and numbers are made up.','Pantallas de ejemplo con datos de muestra. Los nombres y las cifras son inventados.',"Écrans d'exemple avec des données fictives. Les noms et les chiffres sont inventés.")
 KEEP = ["S-I-Quotespro","SI","S-I-QUOTESPRO","THUMBTACK","ANGI","HOMEADVISOR","YELP","BARK","Quill","Scout","Ledger","HVAC","Pro","{{VIDEO}}","Settings → Lead inbox","Copy my lead script","script.google.com","New project","Save","setup","Run","Advanced","Go to project","Allow","✅ CONNECTED","stopConnector","support@s-i-quotespro.com","(713) 835-8245"]
 json.dump({"keep":KEEP,"js":{k:{"en":v[0],"es":v[1],"fr":v[2]} for k,v in J.items()}},open("meta.json","w"),ensure_ascii=False,indent=1)
 json.dump({k:v[0] for k,v in T.items()},open("es.json","w"),ensure_ascii=False,indent=1)

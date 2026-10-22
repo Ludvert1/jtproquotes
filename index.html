@@ -139,6 +139,15 @@ section { padding-block: clamp(64px, 9vw, 112px) }
 @media (max-width: 560px) { .features { grid-template-columns: 1fr } }
 
 /* photo band */
+.appshots { background: var(--paper, #F7F5F0) }
+.shot-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; margin-top: 30px }
+.shot { margin: 0; background: #fff; border: 1px solid #D9D4C8; border-radius: 14px; overflow: hidden; box-shadow: 0 8px 24px rgba(11,31,58,.08) }
+.shot img { display: block; width: 100%; height: auto; border-bottom: 1px solid #E6E1D5 }
+.shot figcaption { padding: 14px 16px 16px; font-weight: 700; color: #0B1F3A }
+.shot figcaption span { display: block; font-weight: 400; color: #5B6B7C; font-size: 15px; margin-top: 4px }
+.shot-note { margin-top: 16px; font-size: 13px; color: #8896A6 }
+@media (max-width: 900px) { .shot-grid { grid-template-columns: 1fr 1fr } }
+@media (max-width: 560px) { .shot-grid { grid-template-columns: 1fr } }
 .photos { background: var(--band); color: var(--band-ink) }
 .photo-grid { display: grid; grid-template-columns: 1.3fr 1fr 1fr; gap: 14px; margin-top: 36px }
 .photo { position: relative; border-radius: var(--r); overflow: hidden; min-height: 340px; background: #1a2b44 }
@@ -308,6 +317,16 @@ footer small { font: 600 12px/1 var(--mono); letter-spacing: .1em; color: var(--
       <div class="total"><small>TOTAL · VALID 30 DAYS</small><strong>$1,240</strong></div>
       <span class="send">Review &amp; send reply</span>
     </div>
+  </div>
+</section>
+
+<section class="appshots" id="inapp">
+  <div class="wrap">
+    <p class="eyebrow">Inside the app</p>
+    <h2 style="margin-top:12px">From lead to paid, on one screen</h2>
+    <p class="lead" style="margin-top:14px">Track every quote, see what you have won and keep the money side clean.</p>
+    <div class="shot-grid"><figure class="shot"><img src="/site/media/app/dash-en.jpg" alt="Your pipeline at a glance" loading="lazy" width="960" height="480"><figcaption>Your pipeline at a glance<span>Quotes created, estimated pipeline, sent to clients and booked revenue.</span></figcaption></figure><figure class="shot"><img src="/site/media/app/won-en.jpg" alt="Mark it won in one tap" loading="lazy" width="960" height="480"><figcaption>Mark it won in one tap<span>Enter the final agreed amount and it counts as booked revenue.</span></figcaption></figure><figure class="shot"><img src="/site/media/app/review-en.jpg" alt="A quote on your letterhead" loading="lazy" width="960" height="480"><figcaption>A quote on your letterhead<span>Your logo, a clear scope and your price. Review, then send.</span></figcaption></figure><figure class="shot"><img src="/site/media/app/receipt-en.jpg" alt="Receipts your clients keep" loading="lazy" width="960" height="480"><figcaption>Receipts your clients keep<span>Numbered receipts with the balance still due, ready to text or print.</span></figcaption></figure><figure class="shot"><img src="/site/media/app/followup-en.jpg" alt="Scout follows up for you" loading="lazy" width="960" height="480"><figcaption>Scout follows up for you<span>Gentle reminders with the message already written.</span></figcaption></figure><figure class="shot"><img src="/site/media/app/schedule-en.jpg" alt="Schedule the job" loading="lazy" width="960" height="480"><figcaption>Schedule the job<span>Start dates, crew and notes. Upcoming jobs show on your dashboard.</span></figcaption></figure></div>
+    <p class="shot-note">Example screens with sample data. Names and numbers are made up.</p>
   </div>
 </section>
 
