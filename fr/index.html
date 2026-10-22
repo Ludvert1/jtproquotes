@@ -1,0 +1,563 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0B1F3A">
+<link rel="icon" href="/icons/icon-192.png">
+<link rel="canonical" href="https://www.s-i-quotespro.com/fr/">
+<link rel="alternate" hreflang="en" href="https://www.s-i-quotespro.com/">
+<link rel="alternate" hreflang="es" href="https://www.s-i-quotespro.com/es/">
+<link rel="alternate" hreflang="fr" href="https://www.s-i-quotespro.com/fr/">
+<link rel="alternate" hreflang="x-default" href="https://www.s-i-quotespro.com/">
+<meta property="og:title" content="S-I-Quotespro · Des devis rapides, des clients gagnés">
+<meta property="og:description" content="L'IA transforme vos clients de Thumbtack, d'Angi et du courriel, ainsi que vos photos de chantier, en devis à vos couleurs en quelques minutes. Essai gratuit avec 7 devis offerts.">
+<meta property="og:image" content="https://www.s-i-quotespro.com/site/img/manphone.jpg">
+<meta property="og:url" content="https://www.s-i-quotespro.com/fr/">
+<meta property="og:locale" content="fr_CA">
+<title>S-I-Quotespro</title>
+<meta name="description" content="Devis par IA pour entrepreneurs. Les clients de Thumbtack, d'Angi et du courriel, ainsi que les photos de chantier, deviennent en quelques minutes des devis à vos couleurs prêts à envoyer. Essai gratuit avec 7 devis offerts.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700;800&family=Barlow:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500;600&display=swap">
+<style>
+/* Layout: a contractor's quote sheet. Navy job-site bands carry the big claims; paper-colored bands carry the detail. One gold accent, used for money and actions. */
+:root {
+  --navy: #0B1F3A; --navy-2: #13294B; --gold: #C9A227; --gold-hi: #E3B93C;
+  --bg: #F6F4EE; --surface: #FFFFFF; --ink: #17222E; --muted: #57677A; --line: #DCD6C8;
+  --band: #0B1F3A; --band-ink: #F3F5F8; --band-muted: #B7C2D2; --green: #1E7F4F; --ok-bg: #E2F2E9;
+  --display: "Barlow Condensed", "Arial Narrow", "Roboto Condensed", sans-serif;
+  --body: "Barlow", "Segoe UI", system-ui, sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+  --r: 12px;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #0A1626; --surface: #112238; --ink: #EAF0F7; --muted: #9FB0C4; --line: #24395A;
+  --band: #06101E; --band-ink: #F3F5F8; --band-muted: #A9B6C8; --green: #4CC38A; --ok-bg: #12372A; color-scheme: dark } }
+:root[data-theme="dark"] {
+  --bg: #0A1626; --surface: #112238; --ink: #EAF0F7; --muted: #9FB0C4; --line: #24395A;
+  --band: #06101E; --band-ink: #F3F5F8; --band-muted: #A9B6C8; --green: #4CC38A; --ok-bg: #12372A; color-scheme: dark }
+
+* { box-sizing: border-box }
+html { scroll-behavior: smooth }
+@media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto } * { animation: none !important; transition: none !important } }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 400 17px/1.6 var(--body) }
+a { color: inherit }
+img { max-width: 100%; display: block }
+.wrap { max-width: 1160px; margin: 0 auto; padding-inline: 20px }
+h1, h2, h3 { font-family: var(--display); font-weight: 800; line-height: .98; letter-spacing: .005em; text-wrap: balance; margin: 0; text-transform: uppercase }
+h2 { font-size: clamp(36px, 5vw, 56px) }
+h3 { font-size: 24px; line-height: 1.05 }
+p { margin: 0 }
+.eyebrow { font: 600 13px/1 var(--mono); letter-spacing: .12em; text-transform: uppercase; color: var(--gold) }
+.lead { font-size: 19px; color: var(--muted); max-width: 60ch }
+.btn { display: inline-flex; align-items: center; gap: 8px; font: 700 17px/1 var(--body); text-decoration: none; padding: 15px 24px; border-radius: 10px; border: 2px solid transparent; cursor: pointer; transition: transform .15s ease, background .15s }
+.btn:hover { transform: translateY(-1px) }
+.btn:focus-visible, a:focus-visible, button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-visible, summary:focus-visible { outline: 3px solid var(--gold-hi); outline-offset: 2px }
+.btn-gold { background: var(--gold); color: var(--navy) }
+.btn-gold:hover { background: var(--gold-hi) }
+.btn-line { border-color: currentColor; color: inherit; background: transparent }
+section { padding-block: clamp(64px, 9vw, 112px) }
+
+/* nav */
+.nav { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 20; background: var(--navy); border-bottom: 3px solid var(--gold) }
+.nav .wrap { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding-block: 12px }
+.logo { display: flex; align-items: center; gap: 10px; text-decoration: none; color: #fff }
+.logo b { width: 38px; height: 38px; border-radius: 9px; background: var(--gold); color: var(--navy); display: grid; place-items: center; font: 800 19px/1 var(--display) }
+.logo span { font: 800 22px/1 var(--display); letter-spacing: .05em }
+.nav nav { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; justify-content: flex-end }
+.nav nav a { color: #D5DDE8; text-decoration: none; font-weight: 600; font-size: 15px; padding: 8px 10px; border-radius: 7px }
+.nav nav a:hover { color: #fff; background: rgba(255,255,255,.07) }
+.nav nav a.cta { background: var(--gold); color: var(--navy); padding: 9px 14px }
+.logo span { white-space: nowrap }
+@media (max-width: 760px) { .nav nav a.hide-sm { display: none } }
+@media (max-width: 420px) { .nav nav { flex-wrap: nowrap } .nav nav a.hide-xs { display: none } .logo span { font-size: 18px } .logo b { width: 32px; height: 32px; font-size: 16px } .nav nav a { padding: 8px 7px; font-size: 14px } }
+
+/* hero */
+.hero { background: var(--navy); color: #fff; padding-block: clamp(48px, 7vw, 88px) clamp(56px, 8vw, 96px); position: relative; overflow: hidden }
+.hero::after { content: ""; position: absolute; inset: 0; background-image: linear-gradient(rgba(255,255,255,.035) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,.035) 1px, transparent 1px); background-size: 32px 32px; pointer-events: none }
+.hero .wrap { display: grid; grid-template-columns: 1.05fr .95fr; gap: clamp(32px, 5vw, 64px); align-items: center; position: relative; z-index: 1 }
+.hero h1 { font-size: clamp(54px, 8.4vw, 104px) }
+.hero h1 em { font-style: normal; color: var(--gold-hi); display: block }
+.hero .lead { color: #C3CEDC; margin-top: 22px }
+.hero .ctas { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 30px }
+.hero .fine { margin-top: 16px; font-size: 14px; color: #9EADC2 }
+.sources { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 28px }
+.sources span { font: 600 12.5px/1 var(--mono); letter-spacing: .06em; color: #C9D3E0; border: 1px solid rgba(255,255,255,.18); padding: 7px 10px; border-radius: 99px }
+@media (max-width: 900px) { .hero .wrap { grid-template-columns: 1fr } }
+
+/* the quote sheet (hero visual) */
+.sheet { background: #FFFDF8; color: #17222E; border-radius: 14px; box-shadow: 0 30px 80px rgba(0,0,0,.45); overflow: hidden; transform: rotate(1.2deg) }
+.sheet .bar { display: flex; justify-content: space-between; align-items: center; padding: 14px 18px; background: #F1EDE3; border-bottom: 1px solid #E2DBCB; font: 600 12px/1 var(--mono); letter-spacing: .08em; color: #6B5A33 }
+.sheet .bar i { font-style: normal; display: inline-flex; align-items: center; gap: 6px }
+.sheet .bar i::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: #1E7F4F; box-shadow: 0 0 0 3px rgba(30,127,79,.2) }
+.timeline { padding: 18px 18px 6px; display: grid; gap: 12px }
+.tl { display: grid; grid-template-columns: 74px 1fr; gap: 12px; align-items: start }
+.tl time { font: 600 13px/1.3 var(--mono); color: #8A7442; padding-top: 2px }
+.tl .msg { font-size: 14.5px; line-height: 1.4 }
+.tl .msg b { display: block; font-weight: 700 }
+.tl .msg span { color: #5B6B7C }
+.items { margin: 6px 18px 0; border-top: 2px solid #C9A227; padding-top: 10px }
+.row { display: flex; justify-content: space-between; gap: 12px; font-size: 14.5px; padding: 6px 0; border-bottom: 1px dashed #E3DDCF; font-variant-numeric: tabular-nums }
+.total { display: flex; justify-content: space-between; align-items: baseline; padding: 12px 18px 18px }
+.total small { font: 600 12px/1 var(--mono); letter-spacing: .08em; color: #5B6B7C }
+.total strong { font: 800 38px/1 var(--display); color: #0B1F3A; font-variant-numeric: tabular-nums }
+.sheet .send { margin: 0 18px 18px; display: block; text-align: center; background: #C9A227; color: #0B1F3A; font-weight: 700; border-radius: 9px; padding: 12px }
+@media (prefers-reduced-motion: no-preference) {
+  .tl { animation: rise .5s ease both }
+  .tl:nth-child(2) { animation-delay: .25s } .tl:nth-child(3) { animation-delay: .5s }
+  @keyframes rise { from { opacity: .001; transform: translateY(6px) } to { opacity: 1; transform: none } }
+}
+
+/* steps */
+.steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; margin-top: 44px; counter-reset: s }
+.step { border-top: 3px solid var(--ink); padding-top: 18px }
+.step .n { font: 600 13px/1 var(--mono); color: var(--muted); letter-spacing: .1em }
+.step h3 { margin: 10px 0 10px }
+.step p { color: var(--muted) }
+@media (max-width: 820px) { .steps { grid-template-columns: 1fr } }
+
+/* features */
+.feat-head { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; align-items: end }
+@media (max-width: 820px) { .feat-head { grid-template-columns: 1fr } }
+.features { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px; background: var(--line); border: 1px solid var(--line); border-radius: var(--r); overflow: hidden; margin-top: 40px }
+.f { background: var(--surface); padding: 26px 24px; display: grid; gap: 8px; align-content: start; min-width: 0 }
+.f .tag { font: 600 12px/1 var(--mono); letter-spacing: .08em; color: var(--gold) }
+.f p { color: var(--muted); font-size: 16px }
+@media (max-width: 900px) { .features { grid-template-columns: 1fr 1fr } }
+@media (max-width: 560px) { .features { grid-template-columns: 1fr } }
+
+/* photo band */
+.photos { background: var(--band); color: var(--band-ink) }
+.photo-grid { display: grid; grid-template-columns: 1.3fr 1fr 1fr; gap: 14px; margin-top: 36px }
+.photo { position: relative; border-radius: var(--r); overflow: hidden; min-height: 340px; background: #1a2b44 }
+.photo img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover }
+.photo::after { content: ""; position: absolute; inset: 0; background: linear-gradient(180deg, rgba(6,16,30,0) 40%, rgba(6,16,30,.88)) }
+.photo p { position: absolute; left: 18px; right: 18px; bottom: 16px; z-index: 1; font: 700 24px/1.05 var(--display); text-transform: uppercase; color: #fff }
+.photo p span { display: block; font: 500 15px/1.4 var(--body); text-transform: none; color: #C8D2DF; margin-top: 6px }
+.photos .lead { color: var(--band-muted) }
+@media (max-width: 860px) { .photo-grid { grid-template-columns: 1fr } .photo { min-height: 260px } }
+
+/* pricing */
+.plans { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; margin-top: 40px; align-items: stretch }
+.plan { background: var(--surface); border: 1.5px solid var(--line); border-radius: var(--r); padding: 26px; display: flex; flex-direction: column; gap: 14px }
+.plan.pop { border: 2px solid var(--gold); box-shadow: 0 14px 40px rgba(11,31,58,.12) }
+.plan .pname { display: flex; justify-content: space-between; align-items: center; gap: 8px }
+.plan .pname h3 { font-size: 30px }
+.plan .badge { font: 600 11px/1 var(--mono); letter-spacing: .08em; background: var(--gold); color: var(--navy); padding: 6px 8px; border-radius: 6px }
+.price { font: 800 54px/1 var(--display); font-variant-numeric: tabular-nums }
+.price small { font: 500 16px/1 var(--body); color: var(--muted) }
+.plan ul { list-style: none; padding: 0; margin: 0; display: grid; gap: 8px; flex: 1 }
+.plan li { padding-left: 24px; position: relative; font-size: 16px }
+.plan li::before { content: ""; position: absolute; left: 2px; top: 8px; width: 12px; height: 7px; border-left: 2.5px solid var(--green); border-bottom: 2.5px solid var(--green); transform: rotate(-45deg) }
+.plan .btn { justify-content: center }
+.plan .btn-line { color: var(--ink) }
+.trialnote { margin-top: 22px; display: grid; grid-template-columns: auto 1fr; gap: 14px; align-items: start; background: var(--surface); border: 1px dashed var(--line); border-radius: var(--r); padding: 16px 18px; color: var(--muted); font-size: 15.5px }
+.trialnote b { color: var(--ink) }
+.trialnote .chip { font: 600 12px/1 var(--mono); background: var(--ok-bg); color: var(--green); padding: 7px 9px; border-radius: 6px; white-space: nowrap }
+@media (max-width: 900px) { .plans { grid-template-columns: 1fr } }
+
+/* help */
+.help-grid { display: grid; grid-template-columns: 1.1fr .9fr; gap: 28px; margin-top: 40px; align-items: start }
+@media (max-width: 900px) { .help-grid { grid-template-columns: 1fr } }
+.guide { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); padding: 24px }
+.guide ol { margin: 14px 0 0; padding-left: 22px; display: grid; gap: 10px }
+.guide code { font: 500 14px/1 var(--mono); background: var(--bg); padding: 2px 6px; border-radius: 5px }
+.video { margin-top: 18px; border-radius: 10px; overflow: hidden; background: #000; max-width: 360px }
+.video video, .video img { width: 100%; display: block }
+.faq { display: grid; gap: 10px; margin-top: 28px }
+details { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 0 18px }
+summary { cursor: pointer; list-style: none; padding: 16px 0; font-weight: 700; display: flex; justify-content: space-between; gap: 12px }
+summary::-webkit-details-marker { display: none }
+summary::after { content: "+"; font: 600 20px/1 var(--mono); color: var(--gold) }
+details[open] summary::after { content: "–" }
+details p { padding-bottom: 16px; color: var(--muted) }
+.contact { background: var(--navy); color: #fff; border-radius: var(--r); padding: 26px; display: grid; gap: 16px }
+.contact h3 { font-size: 30px }
+.contact .line { display: grid; gap: 4px }
+.contact .line small { font: 600 12px/1 var(--mono); letter-spacing: .1em; color: var(--gold-hi) }
+.contact .line a, .contact .line span { font: 700 22px/1.2 var(--body); color: #fff; text-decoration: none; word-break: break-word }
+.contact form { display: grid; gap: 10px; margin-top: 6px }
+.contact label { display: grid; gap: 6px; font-size: 14px; color: #C3CEDC }
+.contact input, .contact textarea, .contact select { font: 16px/1.4 var(--body); padding: 11px 12px; border-radius: 8px; border: 1.5px solid #2A4268; background: #0F2747; color: #fff; width: 100% }
+.contact textarea { min-height: 110px; resize: vertical }
+.contact .two { display: grid; grid-template-columns: 1fr 1fr; gap: 10px }
+@media (max-width: 520px) { .contact .two { grid-template-columns: 1fr } }
+.hp { position: absolute; left: -9999px; width: 1px; height: 1px; overflow: hidden }
+.status { font-size: 15px; min-height: 1.4em }
+.status.ok { color: #7EE0AE } .status.err { color: #FFB4A8 }
+
+/* about */
+.about { display: grid; grid-template-columns: .8fr 1.2fr; gap: clamp(28px, 5vw, 64px); align-items: center }
+.jt { background: var(--navy); color: #fff; border-radius: var(--r); padding: 28px; display: grid; gap: 12px; border-top: 6px solid var(--gold) }
+.jt h3 { font-size: 34px }
+.jt > p:not(.eyebrow) { color: #C3CEDC; font-size: 15.5px }
+.jt ul { list-style: none; padding: 0; margin: 6px 0 0; display: grid; grid-template-columns: 1fr 1fr; gap: 8px 16px }
+.jt li { font: 600 13.5px/1.3 var(--mono); letter-spacing: .03em; color: #E6ECF3; padding-left: 14px; position: relative }
+.jt li::before { content: ""; position: absolute; left: 0; top: 6px; width: 6px; height: 6px; background: var(--gold) }
+.jt a { color: var(--gold-hi); font-weight: 700; text-decoration: none; margin-top: 6px }
+.about p + p { margin-top: 14px }
+.about .facts { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 22px }
+.about .facts span { font: 600 13px/1 var(--mono); border: 1px solid var(--line); padding: 8px 10px; border-radius: 7px; color: var(--muted) }
+@media (max-width: 820px) { .about { grid-template-columns: 1fr } }
+
+
+/* reviews */
+.rv-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px; margin-top: 28px }
+.rv { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); padding: 22px; display: grid; gap: 10px; align-content: start; min-width: 0 }
+.rv .stars { color: var(--gold); font-size: 20px; letter-spacing: 2px }
+.rv .stars span { color: var(--line) }
+.rv blockquote { margin: 0; font-size: 16.5px; line-height: 1.55; overflow-wrap: anywhere }
+.rv cite { font-style: normal; font-size: 14px; color: var(--muted) }
+.rv cite b { color: var(--ink) }
+
+/* final cta + footer */
+.final { background: var(--gold); color: var(--navy); padding-block: 56px }
+.final .wrap { display: flex; justify-content: space-between; align-items: center; gap: 24px; flex-wrap: wrap }
+.final h2 { font-size: clamp(34px, 5vw, 54px) }
+.final .btn { background: var(--navy); color: #fff }
+footer { background: var(--band); color: var(--band-muted); padding-block: 40px; font-size: 15px }
+footer .wrap { display: flex; justify-content: space-between; gap: 24px; flex-wrap: wrap }
+footer a { color: var(--band-ink); text-decoration: none }
+footer .cols { display: flex; gap: 40px; flex-wrap: wrap }
+footer .cols div { display: grid; gap: 6px; align-content: start }
+footer small { font: 600 12px/1 var(--mono); letter-spacing: .1em; color: var(--gold-hi); margin-bottom: 4px }
+
+.langs { display: inline-flex; gap: 2px; font: 600 12px/1 var(--mono); letter-spacing: .06em; margin: 0 4px }
+.langs a { padding: 6px 7px; border-radius: 6px; color: var(--band-muted); text-decoration: none }
+.langs a.on { background: var(--gold); color: var(--navy) }
+/* ai crew */
+.crew { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; margin-top: 40px }
+.emp { background: var(--surface); border: 1.5px solid var(--line); border-radius: var(--r); padding: 26px; display: flex; flex-direction: column; gap: 12px }
+.emp .role { font: 600 12px/1 var(--mono); letter-spacing: .08em; color: var(--gold) }
+.emp h3 { font-size: 34px }
+.emp ul { margin: 0; padding-left: 18px; color: var(--muted); display: grid; gap: 6px }
+.emp .st { margin-top: auto; font: 600 11px/1 var(--mono); letter-spacing: .08em; padding: 7px 9px; border-radius: 6px; align-self: flex-start; background: var(--navy); color: #fff }
+.emp .st.soon { background: transparent; color: var(--muted); border: 1px solid var(--line) }
+.what { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-top: 30px }
+.what div { border-top: 3px solid var(--gold); padding-top: 12px }
+.what b { display: block; font: 700 20px/1.1 var(--display); text-transform: uppercase; margin-bottom: 6px }
+.what p { color: var(--muted); font-size: 15.5px }
+.trades { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 22px }
+.trades span { border: 1px solid var(--line); border-radius: 99px; padding: 8px 14px; font-weight: 600; font-size: 15px }
+@media (max-width: 900px) { .crew { grid-template-columns: 1fr } .what { grid-template-columns: 1fr 1fr } }
+@media (max-width: 560px) { .what { grid-template-columns: 1fr } }
+</style>
+</head>
+<body>
+
+
+<header class="nav">
+  <div class="wrap">
+    <a class="logo" href="#top" aria-label="Accueil S-I-Quotespro"><b>SI</b><span>S-I-QUOTESPRO</span></a>
+    <nav aria-label="Principal">
+      <a class="hide-sm" href="#crew">Votre équipe d'IA</a>
+      <a class="hide-sm" href="#how">Comment ça marche</a>
+      <a class="hide-sm" href="#pricing">Tarifs</a>
+      <a class="hide-xs" href="#help">Aide</a>
+      <a class="hide-sm" href="#about">À propos</a>
+      <span class="langs" aria-label="Langue"><a href="/" hreflang="en" lang="en">EN</a><a href="/es/" hreflang="es" lang="es">ES</a><a href="/fr/" hreflang="fr" lang="fr" class="on" aria-current="true">FR</a></span>
+      <a href="/app">Se connecter</a>
+      <a class="cta" href="/?start">Essai gratuit</a>
+    </nav>
+  </div>
+</header>
+
+<main id="top">
+<section class="hero">
+  <div class="wrap">
+    <div>
+      <p class="eyebrow">Devis par IA pour entrepreneurs</p>
+      <h1 style="margin-top:16px">Des devis rapides. <em>Des clients gagnés.</em></h1>
+      <p class="lead">Un client potentiel arrive de Thumbtack, d'Angi ou de votre courriel. S-I-Quotespro rédige l'étendue des travaux, liste les matériaux, établit le prix et prépare votre réponse. Vous vérifiez et envoyez un devis soigné avec votre logo pendant que le client compare encore les pros.</p>
+      <div class="ctas">
+        <a class="btn btn-gold" href="/?start">Essai gratuit →</a>
+        <a class="btn btn-line" href="#how">Voir comment ça marche</a>
+      </div>
+      <p class="fine">Fonctionne sur votre téléphone. Sans boutique d'applis, sans installation. Annulez à tout moment.</p>
+      <div class="sources" aria-label="Sources de clients">
+        <span>THUMBTACK</span><span>ANGI</span><span>HOMEADVISOR</span><span>YELP</span><span>BARK</span><span>PHOTOS DU CHANTIER</span>
+      </div>
+    </div>
+    <div class="sheet" aria-label="Exemple : un client potentiel devenu devis">
+      <div class="bar"><span>DEVIS LS-1042 · EXEMPLE</span><i>PRÊT</i></div>
+      <div class="timeline">
+        <div class="tl"><time>2 h 14</time><div class="msg"><b>Nouveau client Thumbtack · Maria G., Katy, TX</b><span>Tache d'eau au plafond du couloir, à réparer et à peindre. 3 photos.</span></div></div>
+        <div class="tl"><time>2 h 16</time><div class="msg"><b>Devis et réponse préparés</b><span>Étendue, équipe, matériaux et prix selon vos propres tarifs.</span></div></div>
+        <div class="tl"><time>6 h 52</time><div class="msg"><b>Vous vérifiez et touchez envoyer</b><span>Le PDF à vos couleurs part chez le client.</span></div></div>
+      </div>
+      <div class="items">
+        <div class="row"><span>Découper et remplacer la cloison sèche abîmée</span><span>$420</span></div>
+        <div class="row"><span>Bande, composé et textures du plafond assorties</span><span>$360</span></div>
+        <div class="row"><span>Apprêt anti-taches et 2 couches</span><span>$310</span></div>
+        <div class="row"><span>Matériaux (plaque, composé, apprêt, peinture)</span><span>$150</span></div>
+      </div>
+      <div class="total"><small>TOTAL · VALIDE 30 JOURS</small><strong>$1,240</strong></div>
+      <span class="send">Vérifier et envoyer la réponse</span>
+    </div>
+  </div>
+</section>
+
+<section id="crew">
+  <div class="wrap">
+    <p class="eyebrow">Votre équipe d'IA</p>
+    <h2 style="margin-top:12px">Gagnez plus de contrats. Soyez payé plus vite.</h2>
+    <p class="lead" style="margin-top:14px">S-I-Quotespro est plus qu'un outil de devis. C'est une petite équipe d'employés IA qui établit les devis, relance et garde vos chantiers et vos paiements en ordre, pour que vous restiez sur le terrain.</p>
+    <div class="what">
+      <div><b>Parlez ou écrivez</b><p>Décrivez un chantier ou envoyez des photos. Le travail se fait, sans formulaires.</p></div>
+      <div><b>Vos prix</b><p>Chaque chiffre utilise votre taux horaire, vos frais généraux et votre marge.</p></div>
+      <div><b>Il relance sans cesse</b><p>Réponses et rappels partent jusqu'à ce que le contrat soit signé et payé.</p></div>
+      <div><b>Vous gardez le contrôle</b><p>Rien n'est envoyé à un client sans votre accord.</p></div>
+    </div>
+    <div class="crew">
+      <div class="emp">
+        <span class="role">DEVIS ET CLIENTS</span><h3>Quill</h3>
+        <p>Lit chaque client potentiel et chaque photo, rédige l'étendue des travaux, liste les matériaux, établit le prix selon vos tarifs et prépare la réponse.</p>
+        <ul><li>Devis à partir de photos, de texte ou de courriels de clients</li><li>PDF à vos couleurs avec votre logo</li><li>Comparaison au marché avec prix gagnant</li><li>Fiche de la propriété avant de vous déplacer</li></ul>
+        <span class="st">DISPONIBLE</span>
+      </div>
+      <div class="emp">
+        <span class="role">RELANCES ET CONTRATS GAGNÉS</span><h3>Scout</h3>
+        <p>Fait avancer chaque devis ouvert, puis suit ce que vous avez gagné, perdu et pourquoi.</p>
+        <ul><li>Alertes sur téléphone pour les nouveaux clients et les approbations</li><li>Suivi gagné / perdu avec les raisons</li><li>Réponse automatique aux nouveaux clients (si vous l'activez)</li><li>Rappels pour les devis sans réponse (2, 5 et 10 jours), avec un texto ou un courriel déjà rédigé, prêt à envoyer d'un geste</li></ul>
+        <span class="st">DISPONIBLE</span>
+      </div>
+      <div class="emp">
+        <span class="role">CHANTIERS ET PAIEMENTS</span><h3>Ledger</h3>
+        <p>Transforme un devis gagné en chantier et garde les finances en ordre.</p>
+        <ul><li>Reçus de paiement numérotés (acompte, progression, final)</li><li>Exportation CSV pour votre comptable</li><li>Factures à vos couleurs avec votre propre lien de paiement en ligne, marquées payées automatiquement lorsque vous enregistrez le paiement</li><li>Planification des chantiers avec exportation au calendrier et un texto au client avec la date de début</li><li>Avenants approuvés par le client, ajoutés au total du chantier</li></ul>
+        <span class="st">DISPONIBLE</span>
+      </div>
+    </div>
+    <div class="trades" aria-label="Corps de métier que nous servons"><span>Couvreurs</span><span>Peintres</span><span>Rénovateurs</span><span>Plombiers</span><span>Électriciens</span><span>HVAC</span><span>Planchers</span><span>Paysagistes</span><span>Menuisiers</span><span>Hommes à tout faire</span></div>
+  </div>
+</section>
+
+<section id="learn" style="padding-top:0">
+  <div class="wrap">
+    <p class="eyebrow">Apprenez</p>
+    <h2 style="margin-top:12px">Regardez la visite guidée complète</h2>
+    <p class="lead" style="margin-top:14px">De l'inscription à votre premier reçu, avec les relances, la planification et les avenants. Environ 6 minutes, avec sous-titres.</p>
+    <div class="video" style="max-width:960px"><video controls playsinline preload="none"><source src="/site/media/training-fr.mp4" type="video/mp4"></video></div>
+    <p style="font-size:14px;color:var(--muted);margin-top:8px">Tous les noms et chiffres de la vidéo sont des données d'exemple. L'appli elle-même est pour l'instant en anglais.</p>
+  </div>
+</section>
+
+<section id="how">
+  <div class="wrap">
+    <p class="eyebrow">Comment ça marche</p>
+    <h2 style="margin-top:12px">Du client potentiel au devis en trois étapes</h2>
+    <div class="steps">
+      <div class="step"><span class="n">ÉTAPE 1 · 5 MINUTES, UNE SEULE FOIS</span><h3>Connectez votre boîte de réception de clients</h3><p>Inscrivez-vous, puis copiez votre script personnel dans Google. Dès lors, chaque courriel de Thumbtack, Angi, HomeAdvisor, Yelp ou Bark qui arrive dans votre Gmail est récupéré en 5 minutes environ.</p></div>
+      <div class="step"><span class="n">ÉTAPE 2 · AUTOMATIQUE</span><h3>L'IA rédige le devis</h3><p>Elle lit la demande et les photos, rédige l'étendue des travaux, dimensionne l'équipe, liste les matériaux et établit le prix avec votre taux horaire, vos frais généraux et votre marge. Elle prépare aussi la réponse au client.</p></div>
+      <div class="step"><span class="n">ÉTAPE 3 · C'EST VOUS QUI DÉCIDEZ</span><h3>Vous vérifiez et envoyez</h3><p>Ajustez ce que vous voulez, puis envoyez un PDF à vos couleurs. Vous préférez ne rien faire ? Activez la réponse automatique et les clients reçoivent votre réponse par courriel dès l'arrivée de la demande.</p></div>
+    </div>
+  </div>
+</section>
+
+<section style="padding-top:0">
+  <div class="wrap">
+    <div class="feat-head">
+      <div><p class="eyebrow">Ce que vous trouvez à l'intérieur</p><h2 style="margin-top:12px">Conçu pour la façon dont un entrepreneur établit vraiment ses devis</h2></div>
+      <p class="lead">Chaque chiffre vient de vos propres tarifs. L'IA fait la saisie et les mesures; c'est vous qui décidez du prix.</p>
+    </div>
+    <div class="features">
+      <div class="f"><span class="tag">PHOTOS → DEVIS</span><h3>Un devis depuis le chantier</h3><p>Prenez quelques photos, ajoutez une phrase et obtenez un brouillon complet avec étendue des travaux, taille de l'équipe et heures avant de quitter l'entrée.</p></div>
+      <div class="f"><span class="tag">BOÎTE DE CLIENTS</span><h3>Chaque client, déjà rédigé</h3><p>Les clients de Thumbtack, Angi, HomeAdvisor, Yelp et Bark apparaissent sous forme de devis prêts à vérifier, avec une alerte sur votre téléphone pour chacun.</p></div>
+      <div class="f"><span class="tag">PRIX GAGNANT</span><h3>Compétitif, jamais bradé</h3><p>Voyez l'estimation du marché de l'IA à côté de votre prix. Elle suggère un prix gagnant, mais ne descend jamais sous la marge minimale que vous avez fixée.</p></div>
+      <div class="f"><span class="tag">MATÉRIAUX</span><h3>Liste complète des matériaux</h3><p>Passez un devis en main-d'œuvre plus matériaux et il liste tout ce dont le chantier a besoin, avec quantités et coûts. Il repère aussi ce que vous auriez oublié.</p></div>
+      <div class="f"><span class="tag">FICHE DE LA PROPRIÉTÉ</span><h3>Connaissez la maison avant d'y aller</h3><p>Saisissez l'adresse pour voir le temps de trajet depuis votre position, la taille et la pente du toit, les vues rue et satellite, et la zone inondable.</p></div>
+      <div class="f"><span class="tag">VOTRE IMAGE DE MARQUE</span><h3>Des PDF avec votre logo</h3><p>Chaque devis part sur votre papier à en-tête, signé par vous, avec une étendue claire et un total que le client peut accepter.</p></div>
+      <div class="f"><span class="tag">ÉQUIPE</span><h3>Votre équipe établit, le patron approuve</h3><p>Vos employés rédigent les devis sur le terrain et vous les approuvez depuis votre téléphone. Rien n'arrive chez un client sans votre accord.</p></div>
+      <div class="f"><span class="tag">ALERTES</span><h3>Des alertes qui fonctionnent</h3><p>Soyez averti des nouveaux clients, des devis en attente d'approbation et des chantiers approuvés, avec un badge sur l'icône de l'appli.</p></div>
+      <div class="f"><span class="tag">VOS DONNÉES</span><h3>Séparées et privées</h3><p>Chaque entreprise a son propre espace. Vos prix, vos clients et vos devis ne sont jamais partagés avec un autre entrepreneur.</p></div>
+    </div>
+  </div>
+</section>
+
+<section class="photos">
+  <div class="wrap">
+    <p class="eyebrow">Fait pour le terrain</p>
+    <h2 style="margin-top:12px">Un devis d'où que vous soyez</h2>
+    <p class="lead" style="margin-top:14px">Sur un toit, à la pause du dîner ou endormi à 2 h du matin. Le devis est préparé dès l'arrivée du client; il vous attend quand vous êtes prêt.</p>
+    <div class="photo-grid">
+      <figure class="photo" style="margin:0"><img src="/site/img/manphone.jpg" alt="Un entrepreneur souriant dans son atelier qui consulte son téléphone" loading="lazy"><p>Client reçu, devis envoyé<span>Répondez pendant que le client compare encore.</span></p></figure>
+      <figure class="photo" style="margin:0"><img src="/site/img/roof.jpg" alt="Un couvreur au travail sur un toit résidentiel" loading="lazy"><p>Encore sur le toit ?<span>Votre prochain devis est déjà prêt.</span></p></figure>
+      <figure class="photo" style="margin:0"><img src="/site/img/w_smile.jpg" alt="Une propriétaire souriante devant un devis sur son téléphone" loading="lazy"><p>Votre client voit un vrai devis<span>Étendue claire, votre logo, un total qu'il peut accepter.</span></p></figure>
+    </div>
+  </div>
+</section>
+
+<section id="pricing">
+  <div class="wrap">
+    <p class="eyebrow">Forfaits</p>
+    <h2 style="margin-top:12px">Des tarifs mensuels simples</h2>
+    <p class="lead" style="margin-top:14px">Chaque forfait commence par un essai gratuit : 14 jours ou 7 devis. Changez de forfait ou annulez à tout moment dans vos paramètres.</p>
+    <div class="plans">
+      <div class="plan">
+        <div class="pname"><h3>Départ</h3></div>
+        <div class="price">$49<small> /mois</small></div>
+        <ul><li>1 utilisateur</li><li>Devis par IA à partir de photos et de clients</li><li>Devis PDF à vos couleurs</li><li>Connexion de la boîte de clients</li></ul>
+        <a class="btn btn-line" href="/?start">Essai gratuit</a>
+      </div>
+      <div class="plan pop">
+        <div class="pname"><h3>Pro</h3><span class="badge">LE PLUS POPULAIRE</span></div>
+        <div class="price">$99<small> /mois</small></div>
+        <ul><li>Jusqu'à 3 utilisateurs</li><li>Tout ce qui est dans Départ</li><li>Alertes sur téléphone pour chaque client</li><li>Fiche de la propriété</li></ul>
+        <a class="btn btn-gold" href="/?start">Essai gratuit</a>
+      </div>
+      <div class="plan">
+        <div class="pname"><h3>Équipe</h3></div>
+        <div class="price">$199<small> /mois</small></div>
+        <ul><li>Jusqu'à 10 utilisateurs</li><li>Tout ce qui est dans Pro</li><li>Approbations du patron</li><li>Journal d'activité</li></ul>
+        <a class="btn btn-line" href="/?start">Essai gratuit</a>
+      </div>
+    </div>
+    <div class="trialnote"><span class="chip">7 DEVIS GRATUITS</span><p><b>Comment fonctionne l'essai gratuit :</b> Commencez gratuitement, sans carte : 14 jours ou 7 devis, selon ce qui arrive en premier. Au 6e devis, nous vous prévenons, et après le 7e vous choisissez un forfait pour continuer. Si vous ajoutez une carte plus tôt, nous effectuons une retenue de 1 $ pour la confirmer et la libérons aussitôt.</p></div>
+  </div>
+</section>
+
+<section id="help" style="padding-top:0">
+  <div class="wrap">
+    <p class="eyebrow">Centre d'aide</p>
+    <h2 style="margin-top:12px">Besoin d'un coup de main ? On répond.</h2>
+    <div class="help-grid">
+      <div>
+        <div class="guide">
+          <h3>Connectez Thumbtack en 5 étapes</h3>
+          <ol>
+            <li>Dans S-I-Quotespro, ouvrez <b>Settings → Lead inbox</b> et touchez <b>Copy my lead script</b>.</li>
+            <li>Allez sur <code>script.google.com</code> et choisissez <b>New project</b>.</li>
+            <li>Effacez le contenu de l'éditeur, collez votre script et cliquez sur <b>Save</b>.</li>
+            <li>Choisissez <code>setup</code> à côté de Debug et cliquez sur <b>Run</b>.</li>
+            <li>Autorisez l'accès : choisissez votre compte → <b>Advanced</b> → <b>Go to project</b> → <b>Allow</b>. Le journal affiche <b>✅ CONNECTED</b> en quelques secondes.</li>
+          </ol>
+          <div class="video"><video controls playsinline preload="none" poster="/site/img/tutorial-poster.jpg"><source src="/site/media/tutorial.mp4" type="video/mp4"></video></div>
+        </div>
+        <div class="faq">
+          <details><summary>Qu'est-ce qu'un employé IA ?</summary><p>Un spécialiste au sein de S-I-Quotespro qui fait un travail à votre place au lieu de simplement répondre à des questions. Quill rédige et chiffre les devis, Scout suit les clients et les contrats gagnés, et Ledger gère les paiements. Ils utilisent vos tarifs et votre image de marque, et vous approuvez tout ce qui part.</p></details>
+          <details><summary>Quelles fonctions sont disponibles et lesquelles arrivent ?</summary><p>Les devis, la boîte de clients, les alertes sur téléphone, la fiche de propriété, les approbations d'équipe, le suivi gagné/perdu, les rappels de relance et les reçus de paiement sont disponibles aujourd'hui. La planification des chantiers, les avenants, les factures à vos couleurs et les reçus le sont aussi. Les paiements par carte intégrés à l'appli sont encore en développement.</p></details>
+          <details><summary>Dois-je télécharger une appli ?</summary><p>Non. Ouvrez s-i-quotespro.com sur votre téléphone et utilisez « Ajouter à l'écran d'accueil ». Cela fonctionne comme une appli, avec des alertes sur téléphone, et se met à jour toute seule.</p></details>
+          <details><summary>Envoie-t-il des devis aux clients sans moi ?</summary><p>Seulement si vous activez la réponse automatique et que la demande contient le courriel du client. Sinon, chaque devis attend que vous le vérifiiez et l'envoyiez.</p></details>
+          <details><summary>D'où viennent les prix ?</summary><p>De votre propre taux horaire, de vos frais généraux et de votre marge, que vous réglez dans les paramètres (Settings). L'IA estime le travail et les matériaux; le prix est calculé avec vos chiffres et une estimation du marché s'affiche à côté pour comparer.</p></details>
+          <details><summary>Pourquoi Google dit-il que le script n'est pas vérifié ?</summary><p>Le script s'exécute dans votre propre compte Google, c'est pourquoi Google affiche un avertissement pour tout script que vous ajoutez vous-même. Choisissez Advanced, puis Go to project. Il lit seulement les courriels de clients et les envoie à votre espace S-I-Quotespro. Vous pouvez l'arrêter à tout moment en exécutant <b>stopConnector</b>.</p></details>
+          <details><summary>Mon équipe peut-elle l'utiliser ?</summary><p>Oui. Donnez-leur votre code d'équipe. Ils s'inscrivent comme « New team member », vous les approuvez, et vous pouvez exiger votre approbation avant l'envoi de leurs devis.</p></details>
+          <details><summary>Comment annuler ou changer mon forfait ?</summary><p>Ouvrez Settings → Plan &amp; billing → Manage billing. Vous pouvez changer de carte, changer de forfait, voir les factures ou annuler. Annuler pendant l'essai signifie que vous n'êtes jamais facturé.</p></details>
+          <details><summary>Qu'est-ce que mon identifiant d'assistance ?</summary><p>Un code de 6 caractères sous le bouton Help de l'appli. Donnez-le-nous quand vous appelez et nous retrouverons votre compte tout de suite.</p></details>
+        </div>
+      </div>
+      <div class="contact" id="contact">
+        <h3>Parlez à une vraie personne</h3>
+        <div class="line"><small>APPELEZ OU ÉCRIVEZ</small><a href="tel:+17138358245">(713) 835-8245</a></div>
+        <div class="line"><small>COURRIEL</small><a href="mailto:support@s-i-quotespro.com">support@s-i-quotespro.com</a></div>
+        <p style="color:#C3CEDC;font-size:15px">Déjà inscrit ? Utilisez le bouton <b>Aide</b> dans l'appli. Il nous envoie votre identifiant d'assistance avec votre message.</p>
+        <form id="contact-form" novalidate>
+          <div class="two">
+            <label for="c-name">Votre nom<input id="c-name" name="name" autocomplete="name" required></label>
+            <label for="c-company">Entreprise<input id="c-company" name="company" autocomplete="organization"></label>
+          </div>
+          <div class="two">
+            <label for="c-email">Courriel<input id="c-email" name="email" type="email" autocomplete="email" required></label>
+            <label for="c-phone">Téléphone<input id="c-phone" name="phone" type="tel" autocomplete="tel"></label>
+          </div>
+          <label for="c-topic">De quoi avez-vous besoin ?<select id="c-topic" name="topic"><option>Aide pour la configuration</option><option>Question sur les forfaits ou la facturation</option><option>Quelque chose ne fonctionne pas</option><option>Une démonstration pour mon équipe</option><option>Autre chose</option></select></label>
+          <label for="c-msg">Message<textarea id="c-msg" name="message" required placeholder="Dites-nous ce qui se passe"></textarea></label>
+          <div class="hp" aria-hidden="true"><label for="c-site">Laissez ce champ vide<input id="c-site" name="website" tabindex="-1" autocomplete="off"></label></div>
+          <button class="btn btn-gold" type="submit" style="justify-content:center">Envoyer le message</button>
+          <p class="status" id="c-status" role="status"></p>
+        </form>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="reviews" hidden style="padding-top:0">
+  <div class="wrap">
+    <p class="eyebrow">Avis</p>
+    <h2 style="margin-top:12px">Ce que disent les entrepreneurs</h2>
+    <p class="lead" id="rv-summary" style="margin-top:14px"></p>
+    <div class="rv-grid" id="rv-list"></div>
+    <p style="font-size:14px;color:var(--muted);margin-top:18px">Les avis viennent d'entrepreneurs ayant un compte S-I-Quotespro et sont affichés tels qu'ils ont été écrits.</p>
+  </div>
+</section>
+
+<section id="about" style="padding-top:0">
+  <div class="wrap about">
+    <div class="jt">
+      <p class="eyebrow">CONÇU POUR LES MÉTIERS</p>
+      <h3>Tous les types de travaux</h3>
+      <p>Utilisé par des entrepreneurs partout aux États-Unis. Vos prix, votre région, votre marque.</p>
+      <ul><li>Rénovation</li><li>Peinture</li><li>Cloison sèche</li><li>Planchers</li><li>Cuisine et salle de bain</li><li>Toiture</li><li>Béton</li><li>Clôtures et terrasses</li><li>Homme à tout faire</li><li>Éclairage des Fêtes</li><li>Nettoyage</li><li>Déménagement</li></ul>
+      <a href="/?start">Essai gratuit →</a>
+    </div>
+    <div>
+      <p class="eyebrow">À propos de nous</p>
+      <h2 style="margin-top:12px">Conçu par des entrepreneurs, pour des entrepreneurs</h2>
+      <p class="lead" style="margin-top:18px">S-I-Quotespro a été conçu par des gens qui dirigent des équipes et gagnent des contrats chaque jour, avec des experts en logiciel. Chaque écran suit la façon dont se chiffrent vraiment les chantiers : lire la demande, évaluer le travail, fixer le bon prix et répondre avant tout le monde.</p>
+      <p class="lead">Cela fonctionne pareil que vous soyez au Texas, en Floride, dans l'Ohio ou en Californie. Votre taux horaire, vos marges, votre zone de service et votre logo sont intégrés, si bien que chaque devis vous ressemble.</p>
+      <div class="facts"><span>PARTOUT AUX ÉTATS-UNIS</span><span>CRÉÉ AVEC DES ENTREPRENEURS EN ACTIVITÉ</span><span>UNE VRAIE PERSONNE AU SOUTIEN</span></div>
+    </div>
+  </div>
+</section>
+
+<section class="final">
+  <div class="wrap">
+    <h2>Répondez en premier au prochain client.</h2>
+    <a class="btn" href="/?start">Essai gratuit →</a>
+  </div>
+</section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <div style="display:grid;gap:10px;max-width:340px">
+      <a class="logo" href="#top"><b>SI</b><span>S-I-QUOTESPRO</span></a>
+      <p>Des devis rapides et des clients gagnés. Devis par IA pour rénovateurs, peintres, couvreurs, hommes à tout faire et entrepreneurs généraux.</p>
+    </div>
+    <div class="cols">
+      <div><small>PRODUIT</small><a href="#how">Comment ça marche</a><a href="#pricing">Tarifs</a><a href="/?start">Commencer l'essai gratuit</a><a href="/app">Se connecter</a></div>
+      <div><small>ASSISTANCE</small><a href="#help">Centre d'aide</a><a href="#contact">Nous joindre</a><span>(713) 835-8245</span><a href="mailto:support@s-i-quotespro.com">support@s-i-quotespro.com</a></div>
+      <div><small>ENTREPRISE</small><a href="#about">À propos</a><a href="#reviews">Avis</a></div>
+    </div>
+  </div>
+  <div class="wrap" style="margin-top:28px;font-size:13px">© 2026 S-I-Quotespro · Au service des entrepreneurs partout aux États-Unis</div>
+</footer>
+
+<script>
+(function () {
+  var form = document.getElementById("contact-form");
+  var status = document.getElementById("c-status");
+  form.addEventListener("submit", function (e) {
+    e.preventDefault();
+    var data = {};
+    new FormData(form).forEach(function (v, k) { data[k] = String(v).trim(); });
+    status.className = "status";
+    if (!data.name || !data.email || !/^\S+@\S+\.\S+$/.test(data.email) || data.message.length < 5) {
+      status.className = "status err"; status.textContent = "Ajoutez votre nom, un courriel valide et un court message."; return;
+    }
+    var btn = form.querySelector("button"); btn.disabled = true; status.textContent = "Envoi en cours…";
+    fetch("/api/contact", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data) })
+      .then(function (r) { return r.json().catch(function () { return {}; }).then(function (j) { if (!r.ok) throw new Error(j.error || "fail"); return j; }); })
+      .then(function () { status.className = "status ok"; status.textContent = "Merci, " + data.name.split(" ")[0] + ". Nous avons reçu votre message et vous répondrons bientôt."; form.reset(); })
+      .catch(function () { status.className = "status err"; status.textContent = "L'envoi a échoué. Appelez ou écrivez au (713) 835-8245, ou envoyez un courriel à support@s-i-quotespro.com."; })
+      .then(function () { btn.disabled = false; });
+  });
+})();
+</script>
+<script>
+(function () {
+  var esc = function (t) { return String(t == null ? "" : t).replace(/[&<>"]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]; }); };
+  fetch("/api/reviews").then(function (r) { return r.ok ? r.json() : null; }).then(function (d) {
+    if (!d || !d.count) return;
+    document.getElementById("rv-summary").textContent = d.average.toFixed(1) + " sur 5 d'après " + d.count + " avis" + (d.count === 1 ? "" : "") + ".";
+    document.getElementById("rv-list").innerHTML = d.reviews.map(function (r) {
+      var n = Math.max(1, Math.min(5, r.rating | 0));
+      return '<figure class="rv" style="margin:0"><div class="stars" aria-label="' + n + " sur 5 étoiles" + '">' + "★".repeat(n) + "<span>" + "★".repeat(5 - n) + "</span></div><blockquote>" + esc(r.text) + "</blockquote><cite><b>" + esc(r.name) + "</b>" + (r.company ? ", " + esc(r.company) : "") + (r.city ? " · " + esc(r.city) : "") + "</cite></figure>";
+    }).join("");
+    document.getElementById("reviews").hidden = false;
+  }).catch(function () {});
+})();
+</script>
+
+</body>
+</html>

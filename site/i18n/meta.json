@@ -1,0 +1,84 @@
+{
+ "keep": [
+  "S-I-Quotespro",
+  "SI",
+  "S-I-QUOTESPRO",
+  "THUMBTACK",
+  "ANGI",
+  "HOMEADVISOR",
+  "YELP",
+  "BARK",
+  "Quill",
+  "Scout",
+  "Ledger",
+  "HVAC",
+  "Pro",
+  "{{VIDEO}}",
+  "Settings → Lead inbox",
+  "Copy my lead script",
+  "script.google.com",
+  "New project",
+  "Save",
+  "setup",
+  "Run",
+  "Advanced",
+  "Go to project",
+  "Allow",
+  "✅ CONNECTED",
+  "stopConnector",
+  "support@s-i-quotespro.com",
+  "(713) 835-8245"
+ ],
+ "js": {
+  "err_fields": {
+   "en": "Add your name, a valid email and a short message.",
+   "es": "Agrega tu nombre, un correo válido y un mensaje corto.",
+   "fr": "Ajoutez votre nom, un courriel valide et un court message."
+  },
+  "sending": {
+   "en": "Sending…",
+   "es": "Enviando…",
+   "fr": "Envoi en cours…"
+  },
+  "thanks_a": {
+   "en": "Thanks, ",
+   "es": "Gracias, ",
+   "fr": "Merci, "
+  },
+  "thanks_b": {
+   "en": ". We got your message and will get back to you soon.",
+   "es": ". Recibimos tu mensaje y te responderemos pronto.",
+   "fr": ". Nous avons reçu votre message et vous répondrons bientôt."
+  },
+  "failed": {
+   "en": "That didn't send. Call or text (713) 835-8245, or email support@s-i-quotespro.com.",
+   "es": "No se pudo enviar. Llama o escribe al (713) 835-8245, o envía un correo a support@s-i-quotespro.com.",
+   "fr": "L'envoi a échoué. Appelez ou écrivez au (713) 835-8245, ou envoyez un courriel à support@s-i-quotespro.com."
+  },
+  "rv_a": {
+   "en": "",
+   "es": "",
+   "fr": ""
+  },
+  "rv_out_of": {
+   "en": " out of 5 from ",
+   "es": " de 5 según ",
+   "fr": " sur 5 d'après "
+  },
+  "rv_review": {
+   "en": " review",
+   "es": " reseña",
+   "fr": " avis"
+  },
+  "rv_plural": {
+   "en": "s",
+   "es": "s",
+   "fr": ""
+  },
+  "rv_stars": {
+   "en": " out of 5 stars",
+   "es": " de 5 estrellas",
+   "fr": " sur 5 étoiles"
+  }
+ }
+}

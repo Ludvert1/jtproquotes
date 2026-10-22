@@ -206,6 +206,9 @@ footer .cols { display: flex; gap: 40px; flex-wrap: wrap }
 footer .cols div { display: grid; gap: 6px; align-content: start }
 footer small { font: 600 12px/1 var(--mono); letter-spacing: .1em; color: var(--gold-hi); margin-bottom: 4px }
 
+.langs { display: inline-flex; gap: 2px; font: 600 12px/1 var(--mono); letter-spacing: .06em; margin: 0 4px }
+.langs a { padding: 6px 7px; border-radius: 6px; color: var(--band-muted); text-decoration: none }
+.langs a.on { background: var(--gold); color: var(--navy) }
 /* ai crew */
 .crew { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; margin-top: 40px }
 .emp { background: var(--surface); border: 1.5px solid var(--line); border-radius: var(--r); padding: 26px; display: flex; flex-direction: column; gap: 12px }
@@ -233,6 +236,7 @@ footer small { font: 600 12px/1 var(--mono); letter-spacing: .1em; color: var(--
       <a class="hide-sm" href="#pricing">Pricing</a>
       <a class="hide-xs" href="#help">Help</a>
       <a class="hide-sm" href="#about">About</a>
+      <span class="langs" aria-label="Language">{{LANGS}}</span>
       <a href="{{APP}}/app">Sign in</a>
       <a class="cta" href="{{APP}}/?start">Start free</a>
     </nav>
@@ -306,6 +310,16 @@ footer small { font: 600 12px/1 var(--mono); letter-spacing: .1em; color: var(--
       </div>
     </div>
     <div class="trades" aria-label="Trades we serve"><span>Roofers</span><span>Painters</span><span>Remodelers</span><span>Plumbers</span><span>Electricians</span><span>HVAC</span><span>Flooring</span><span>Landscapers</span><span>Carpenters</span><span>Handymen</span></div>
+  </div>
+</section>
+
+<section id="learn" style="padding-top:0">
+  <div class="wrap">
+    <p class="eyebrow">Learn</p>
+    <h2 style="margin-top:12px">Watch the full walkthrough</h2>
+    <p class="lead" style="margin-top:14px">From sign up to your first receipt, plus follow-ups, scheduling and change orders. About 6 minutes, with captions.</p>
+    {{TRAINING}}
+    <p style="font-size:14px;color:var(--muted);margin-top:8px">All names and numbers in the video are sample data. The app itself is currently in English.</p>
   </div>
 </section>
 
@@ -499,13 +513,13 @@ footer small { font: 600 12px/1 var(--mono); letter-spacing: .1em; color: var(--
     new FormData(form).forEach(function (v, k) { data[k] = String(v).trim(); });
     status.className = "status";
     if (!data.name || !data.email || !/^\S+@\S+\.\S+$/.test(data.email) || data.message.length < 5) {
-      status.className = "status err"; status.textContent = "Add your name, a valid email and a short message."; return;
+      status.className = "status err"; status.textContent = {{J:err_fields}}; return;
     }
-    var btn = form.querySelector("button"); btn.disabled = true; status.textContent = "Sending…";
+    var btn = form.querySelector("button"); btn.disabled = true; status.textContent = {{J:sending}};
     fetch("{{API}}/api/contact", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data) })
       .then(function (r) { return r.json().catch(function () { return {}; }).then(function (j) { if (!r.ok) throw new Error(j.error || "fail"); return j; }); })
-      .then(function () { status.className = "status ok"; status.textContent = "Thanks, " + data.name.split(" ")[0] + ". We got your message and will get back to you soon."; form.reset(); })
-      .catch(function () { status.className = "status err"; status.textContent = "That didn't send. Call or text (713) 835-8245, or email support@s-i-quotespro.com."; })
+      .then(function () { status.className = "status ok"; status.textContent = {{J:thanks_a}} + data.name.split(" ")[0] + {{J:thanks_b}}; form.reset(); })
+      .catch(function () { status.className = "status err"; status.textContent = {{J:failed}}; })
       .then(function () { btn.disabled = false; });
   });
 })();
@@ -515,10 +529,10 @@ footer small { font: 600 12px/1 var(--mono); letter-spacing: .1em; color: var(--
   var esc = function (t) { return String(t == null ? "" : t).replace(/[&<>"]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]; }); };
   fetch("{{API}}/api/reviews").then(function (r) { return r.ok ? r.json() : null; }).then(function (d) {
     if (!d || !d.count) return;
-    document.getElementById("rv-summary").textContent = d.average.toFixed(1) + " out of 5 from " + d.count + " review" + (d.count === 1 ? "" : "s") + ".";
+    document.getElementById("rv-summary").textContent = d.average.toFixed(1) + {{J:rv_out_of}} + d.count + {{J:rv_review}} + (d.count === 1 ? "" : {{J:rv_plural}}) + ".";
     document.getElementById("rv-list").innerHTML = d.reviews.map(function (r) {
       var n = Math.max(1, Math.min(5, r.rating | 0));
-      return '<figure class="rv" style="margin:0"><div class="stars" aria-label="' + n + ' out of 5 stars">' + "★".repeat(n) + "<span>" + "★".repeat(5 - n) + "</span></div><blockquote>" + esc(r.text) + "</blockquote><cite><b>" + esc(r.name) + "</b>" + (r.company ? ", " + esc(r.company) : "") + (r.city ? " · " + esc(r.city) : "") + "</cite></figure>";
+      return '<figure class="rv" style="margin:0"><div class="stars" aria-label="' + n + {{J:rv_stars}} + '">' + "★".repeat(n) + "<span>" + "★".repeat(5 - n) + "</span></div><blockquote>" + esc(r.text) + "</blockquote><cite><b>" + esc(r.name) + "</b>" + (r.company ? ", " + esc(r.company) : "") + (r.city ? " · " + esc(r.city) : "") + "</cite></figure>";
     }).join("");
     document.getElementById("reviews").hidden = false;
   }).catch(function () {});

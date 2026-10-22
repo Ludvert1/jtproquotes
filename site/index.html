@@ -5,10 +5,16 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#0B1F3A">
 <link rel="icon" href="/icons/icon-192.png">
+<link rel="canonical" href="https://www.s-i-quotespro.com/">
+<link rel="alternate" hreflang="en" href="https://www.s-i-quotespro.com/">
+<link rel="alternate" hreflang="es" href="https://www.s-i-quotespro.com/es/">
+<link rel="alternate" hreflang="fr" href="https://www.s-i-quotespro.com/fr/">
+<link rel="alternate" hreflang="x-default" href="https://www.s-i-quotespro.com/">
 <meta property="og:title" content="S-I-Quotespro · Fast quotes and leads winner">
 <meta property="og:description" content="AI turns your Thumbtack, Angi and email leads and job photos into branded quotes in minutes. Start free with 7 quotes on us.">
 <meta property="og:image" content="https://www.s-i-quotespro.com/site/img/manphone.jpg">
 <meta property="og:url" content="https://www.s-i-quotespro.com/">
+<meta property="og:locale" content="en_US">
 <title>S-I-Quotespro</title>
 <meta name="description" content="AI quoting for contractors. Thumbtack, Angi and email leads and job photos become branded, ready-to-send quotes in minutes. Start free with 7 quotes on us.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -217,6 +223,9 @@ footer .cols { display: flex; gap: 40px; flex-wrap: wrap }
 footer .cols div { display: grid; gap: 6px; align-content: start }
 footer small { font: 600 12px/1 var(--mono); letter-spacing: .1em; color: var(--gold-hi); margin-bottom: 4px }
 
+.langs { display: inline-flex; gap: 2px; font: 600 12px/1 var(--mono); letter-spacing: .06em; margin: 0 4px }
+.langs a { padding: 6px 7px; border-radius: 6px; color: var(--band-muted); text-decoration: none }
+.langs a.on { background: var(--gold); color: var(--navy) }
 /* ai crew */
 .crew { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; margin-top: 40px }
 .emp { background: var(--surface); border: 1.5px solid var(--line); border-radius: var(--r); padding: 26px; display: flex; flex-direction: column; gap: 12px }
@@ -247,6 +256,7 @@ footer small { font: 600 12px/1 var(--mono); letter-spacing: .1em; color: var(--
       <a class="hide-sm" href="#pricing">Pricing</a>
       <a class="hide-xs" href="#help">Help</a>
       <a class="hide-sm" href="#about">About</a>
+      <span class="langs" aria-label="Language"><a href="/" hreflang="en" lang="en" class="on" aria-current="true">EN</a><a href="/es/" hreflang="es" lang="es">ES</a><a href="/fr/" hreflang="fr" lang="fr">FR</a></span>
       <a href="/app">Sign in</a>
       <a class="cta" href="/?start">Start free</a>
     </nav>
@@ -320,6 +330,16 @@ footer small { font: 600 12px/1 var(--mono); letter-spacing: .1em; color: var(--
       </div>
     </div>
     <div class="trades" aria-label="Trades we serve"><span>Roofers</span><span>Painters</span><span>Remodelers</span><span>Plumbers</span><span>Electricians</span><span>HVAC</span><span>Flooring</span><span>Landscapers</span><span>Carpenters</span><span>Handymen</span></div>
+  </div>
+</section>
+
+<section id="learn" style="padding-top:0">
+  <div class="wrap">
+    <p class="eyebrow">Learn</p>
+    <h2 style="margin-top:12px">Watch the full walkthrough</h2>
+    <p class="lead" style="margin-top:14px">From sign up to your first receipt, plus follow-ups, scheduling and change orders. About 6 minutes, with captions.</p>
+    <div class="video" style="max-width:960px"><video controls playsinline preload="none"><source src="/site/media/training-en.mp4" type="video/mp4"></video></div>
+    <p style="font-size:14px;color:var(--muted);margin-top:8px">All names and numbers in the video are sample data. The app itself is currently in English.</p>
   </div>
 </section>
 
@@ -412,7 +432,7 @@ footer small { font: 600 12px/1 var(--mono); letter-spacing: .1em; color: var(--
             <li>Choose <code>setup</code> next to Debug and click <b>Run</b>.</li>
             <li>Allow access: pick your account → <b>Advanced</b> → <b>Go to project</b> → <b>Allow</b>. The log shows <b>✅ CONNECTED</b> within a few seconds.</li>
           </ol>
-          <div class="video"><video controls playsinline preload="none" poster="/site/img/tutorial-poster.jpg"><source src="/site/media/tutorial.mp4" type="video/mp4"></video></div><p style="font-size:14px;color:var(--muted);margin-top:8px">1-minute video: signing up and connecting Thumbtack.</p>
+          <div class="video"><video controls playsinline preload="none" poster="/site/img/tutorial-poster.jpg"><source src="/site/media/tutorial.mp4" type="video/mp4"></video></div>
         </div>
         <div class="faq">
           <details><summary>What is an AI employee?</summary><p>A specialist inside S-I-Quotespro that does a job for you instead of just answering questions. Quill writes and prices quotes, Scout tracks leads and wins, and Ledger handles payments. They use your rates and your branding, and you approve what goes out.</p></details>
@@ -532,7 +552,7 @@ footer small { font: 600 12px/1 var(--mono); letter-spacing: .1em; color: var(--
     document.getElementById("rv-summary").textContent = d.average.toFixed(1) + " out of 5 from " + d.count + " review" + (d.count === 1 ? "" : "s") + ".";
     document.getElementById("rv-list").innerHTML = d.reviews.map(function (r) {
       var n = Math.max(1, Math.min(5, r.rating | 0));
-      return '<figure class="rv" style="margin:0"><div class="stars" aria-label="' + n + ' out of 5 stars">' + "★".repeat(n) + "<span>" + "★".repeat(5 - n) + "</span></div><blockquote>" + esc(r.text) + "</blockquote><cite><b>" + esc(r.name) + "</b>" + (r.company ? ", " + esc(r.company) : "") + (r.city ? " · " + esc(r.city) : "") + "</cite></figure>";
+      return '<figure class="rv" style="margin:0"><div class="stars" aria-label="' + n + " out of 5 stars" + '">' + "★".repeat(n) + "<span>" + "★".repeat(5 - n) + "</span></div><blockquote>" + esc(r.text) + "</blockquote><cite><b>" + esc(r.name) + "</b>" + (r.company ? ", " + esc(r.company) : "") + (r.city ? " · " + esc(r.city) : "") + "</cite></figure>";
     }).join("");
     document.getElementById("reviews").hidden = false;
   }).catch(function () {});
