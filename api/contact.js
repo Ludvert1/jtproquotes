@@ -4,8 +4,8 @@
    S-I-Quotespro support (WEB3FORMS_KEYS). No sign-in needed, so the
    input is length-limited, and a hidden "website" field catches bots.
 ============================================================ */
-const { bad, parseBody, sendEmail } = require("./_lib");
-const { withMonitor } = require("./_monitor");
+const { bad, parseBody, sendEmail, createDocAsServer } = require("./_lib");
+const { withMonitor, alertOwner } = require("./_monitor");
 
 const seen = new Map(); // ip -> [timestamps] (best effort, per instance)
 
@@ -41,8 +41,16 @@ const handler = async (req, res) => {
   recent.push(now); seen.set(ip, recent);
 
   const text = `From: ${name}${company ? " (" + company + ")" : ""}\nEmail: ${email}\nPhone: ${phone || "-"}\nTopic: ${topic || "-"}\n\n${message}`;
-  const r = await sendEmail({ subject: "[S-I-Quotespro website] " + (topic || "Message") + " — " + name, message: text, replyTo: email });
-  if (!r.sent) return bad(res, 503, "Couldn't send right now.");
+  /* The message is saved first, so it is never lost even if email is down.
+     Then the owner gets a phone alert (and an email when email works). */
+  let saved = false;
+  try {
+    await createDocAsServer("contactMessages", "m" + now.toString(36) + Math.random().toString(36).slice(2, 6), { name, email, phone, company, topic, message, at: new Date(now).toISOString(), ip });
+    saved = true;
+  } catch (e) { console.error("[contact] save:", e.message); }
+  let alerted = 0;
+  try { const a = await alertOwner("Website message from " + name, text, "/app?admin"); alerted = ((a && a.push) || 0) + ((a && a.email) || 0); } catch (e) { console.error("[contact] alert:", e.message); }
+  if (!saved && !alerted) return bad(res, 503, "Couldn't send right now.");
   return res.status(200).json({ ok: true });
 };
 
