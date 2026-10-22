@@ -10,12 +10,13 @@
 <link rel="alternate" hreflang="es" href="https://www.s-i-quotespro.com/es/">
 <link rel="alternate" hreflang="fr" href="https://www.s-i-quotespro.com/fr/">
 <link rel="alternate" hreflang="x-default" href="https://www.s-i-quotespro.com/">
+<title>S-I-Quotespro · Fast quotes and leads winner</title>
 <meta property="og:title" content="S-I-Quotespro · Fast quotes and leads winner">
 <meta property="og:description" content="AI turns your Thumbtack, Angi and email leads and job photos into branded quotes in minutes. Start free with 7 quotes on us.">
 <meta property="og:image" content="https://www.s-i-quotespro.com/site/img/manphone.jpg">
 <meta property="og:url" content="https://www.s-i-quotespro.com/">
 <meta property="og:locale" content="en_US">
-<title>S-I-Quotespro</title>
+
 <meta name="description" content="AI quoting for contractors. Thumbtack, Angi and email leads and job photos become branded, ready-to-send quotes in minutes. Start free with 7 quotes on us.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -40,6 +41,8 @@
 
 * { box-sizing: border-box }
 html { scroll-behavior: smooth }
+main.sub > section:first-child { padding-top: clamp(40px, 6vw, 72px) !important }
+.nav nav > a.on { color: var(--gold-hi); box-shadow: inset 0 -2px 0 var(--gold-hi) }
 @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto } * { animation: none !important; transition: none !important } }
 body { margin: 0; background: var(--bg); color: var(--ink); font: 400 17px/1.6 var(--body) }
 a { color: inherit }
@@ -70,7 +73,7 @@ section { padding-block: clamp(64px, 9vw, 112px) }
 .nav nav a:hover { color: #fff; background: rgba(255,255,255,.07) }
 .nav nav a.cta { background: var(--gold); color: var(--navy); padding: 9px 14px }
 .logo span { white-space: nowrap }
-@media (max-width: 760px) { .nav nav a.hide-sm { display: none } }
+@media (max-width: 760px) { .nav .wrap { flex-wrap: wrap; justify-content: center; gap: 6px; padding-block: 8px } .nav nav { width: 100%; flex-wrap: nowrap !important; overflow-x: auto; justify-content: flex-start; scrollbar-width: none } .nav nav::-webkit-scrollbar { display: none } .nav nav a { white-space: nowrap; flex: none } .nav nav a.hide-sm, .nav nav a.hide-xs { display: inline-block !important } }
 @media (max-width: 420px) { .nav nav { flex-wrap: nowrap } .nav nav a.hide-xs { display: none } .logo span { font-size: 18px } .logo b { width: 32px; height: 32px; font-size: 16px } .nav nav a { padding: 8px 7px; font-size: 14px } }
 
 /* hero */
@@ -269,13 +272,13 @@ footer small { font: 600 12px/1 var(--mono); letter-spacing: .1em; color: var(--
 
 <header class="nav">
   <div class="wrap">
-    <a class="logo" href="#top" aria-label="S-I-Quotespro home"><b>SI</b><span>S-I-QUOTESPRO</span></a>
+    <a class="logo" href="/" aria-label="S-I-Quotespro home"><b>SI</b><span>S-I-QUOTESPRO</span></a>
     <nav aria-label="Main">
-      <a class="hide-sm" href="#crew">Your AI crew</a>
-      <a class="hide-sm" href="#how">How it works</a>
-      <a class="hide-sm" href="#pricing">Pricing</a>
-      <a class="hide-xs" href="#help">Help</a>
-      <a class="hide-sm" href="#about">About</a>
+      <a class="hide-sm" href="/#crew">Your AI crew</a>
+      <a class="hide-sm" href="/how">How it works</a>
+      <a class="hide-sm" href="/pricing">Pricing</a>
+      <a class="hide-xs" href="/help">Help</a>
+      <a class="hide-sm" href="/about">About</a>
       <span class="langs" aria-label="Language"><a href="/" hreflang="en" lang="en" class="on" aria-current="true">EN</a><a href="/es/" hreflang="es" lang="es">ES</a><a href="/fr/" hreflang="fr" lang="fr">FR</a></span>
       <a href="/app">Sign in</a>
       <a class="cta" href="/?start">Start free</a>
@@ -283,7 +286,7 @@ footer small { font: 600 12px/1 var(--mono); letter-spacing: .1em; color: var(--
   </div>
 </header>
 
-<main id="top">
+<main id="top" class="">
 <section class="hero">
   <div class="hero-bg" aria-hidden="true"><img src="/site/media/hero/h1.jpg" alt="" class=on fetchpriority=high width="1600" height="1067"><img src="/site/media/hero/h7.jpg" alt="" loading=lazy width="1600" height="1067"><img src="/site/media/hero/h2.jpg" alt="" loading=lazy width="1600" height="1067"><img src="/site/media/hero/h4.jpg" alt="" loading=lazy width="1600" height="1067"><img src="/site/media/hero/h8.jpg" alt="" loading=lazy width="1600" height="1067"><img src="/site/media/hero/h5.jpg" alt="" loading=lazy width="1600" height="1067"><img src="/site/media/hero/h3.jpg" alt="" loading=lazy width="1600" height="1067"><img src="/site/media/hero/h6.jpg" alt="" loading=lazy width="1600" height="1067"></div>
   <div class="hero-dots" aria-hidden="true"></div>
@@ -294,7 +297,7 @@ footer small { font: 600 12px/1 var(--mono); letter-spacing: .1em; color: var(--
       <p class="lead">A lead comes in from Thumbtack, Angi or your email. S-I-Quotespro writes the scope, lists the materials, prices the job and drafts your reply. You check it and send a clean quote with your logo while the customer is still comparing pros.</p>
       <div class="ctas">
         <a class="btn btn-gold" href="/?start">Start free →</a>
-        <a class="btn btn-line" href="#how">See how it works</a>
+        <a class="btn btn-line" href="/how">See how it works</a>
       </div>
       <p class="fine">Works on your phone. No app store, no install. Cancel any time.</p>
       <div class="sources" aria-label="Lead sources">
@@ -365,47 +368,8 @@ footer small { font: 600 12px/1 var(--mono); letter-spacing: .1em; color: var(--
   </div>
 </section>
 
-<section id="learn" style="padding-top:0">
-  <div class="wrap">
-    <p class="eyebrow">Learn</p>
-    <h2 style="margin-top:12px">Watch the full walkthrough</h2>
-    <p class="lead" style="margin-top:14px">From sign up to your first receipt, plus follow-ups, scheduling and change orders. About 6 minutes, with captions.</p>
-    <div class="video" style="max-width:960px"><video controls playsinline preload="none"><source src="/site/media/training-en.mp4" type="video/mp4"></video></div>
-    <p style="font-size:14px;color:var(--muted);margin-top:8px">All names and numbers in the video are sample data. The app itself is currently in English.</p>
-  </div>
-</section>
 
-<section id="how">
-  <div class="wrap">
-    <p class="eyebrow">How it works</p>
-    <h2 style="margin-top:12px">From lead to quote in three steps</h2>
-    <div class="steps">
-      <div class="step"><span class="n">STEP 1 · 5 MINUTES, ONCE</span><h3>Connect your lead inbox</h3><p>Sign up, then copy your personal lead script into Google. From then on, every Thumbtack, Angi, HomeAdvisor, Yelp or Bark email that lands in your Gmail is picked up within about 5 minutes.</p></div>
-      <div class="step"><span class="n">STEP 2 · AUTOMATIC</span><h3>AI drafts the quote</h3><p>It reads the request and the photos, writes the scope, sizes the crew, lists the materials and prices the job with your labor rate, overhead and margin. It drafts a reply to the customer too.</p></div>
-      <div class="step"><span class="n">STEP 3 · YOUR CALL</span><h3>You check it and send</h3><p>Adjust anything, then send a branded PDF. Prefer hands-off? Turn on auto-reply and customers get your answer by email as soon as the lead arrives.</p></div>
-    </div>
-  </div>
-</section>
 
-<section style="padding-top:0">
-  <div class="wrap">
-    <div class="feat-head">
-      <div><p class="eyebrow">What's inside</p><h2 style="margin-top:12px">Built for the way a contractor actually quotes</h2></div>
-      <p class="lead">Every number comes from your own rates. The AI does the typing and the measuring; you stay the one who decides the price.</p>
-    </div>
-    <div class="features">
-      <div class="f"><span class="tag">PHOTOS → QUOTE</span><h3>Quote from the job site</h3><p>Snap a few photos, add a sentence, and get a full draft with scope, crew size and hours before you leave the driveway.</p></div>
-      <div class="f"><span class="tag">LEAD INBOX</span><h3>Every lead, drafted</h3><p>Leads from Thumbtack, Angi, HomeAdvisor, Yelp and Bark show up as ready-to-review quotes, with a phone alert for each one.</p></div>
-      <div class="f"><span class="tag">PRICE TO WIN</span><h3>Competitive, never cheap</h3><p>See the AI's market estimate next to your price. It suggests a price to win but never goes below the minimum margin you set.</p></div>
-      <div class="f"><span class="tag">MATERIALS</span><h3>Full material list</h3><p>Switch a quote to labor plus materials and it lists everything the job needs, with quantities and cost. It also catches anything you missed.</p></div>
-      <div class="f"><span class="tag">PROPERTY LOOKUP</span><h3>Know the house before you go</h3><p>Type the address to see drive time from where you are, roof size and pitch, street and satellite views, and the flood zone.</p></div>
-      <div class="f"><span class="tag">YOUR BRAND</span><h3>PDFs with your logo</h3><p>Every quote goes out on your letterhead, signed by you, with a clear scope and a total the customer can accept.</p></div>
-      <div class="f"><span class="tag">TEAM</span><h3>Crew quotes, owner approves</h3><p>Associates write quotes in the field and you approve them from your phone. Nothing reaches a customer without your OK.</p></div>
-      <div class="f"><span class="tag">ALERTS</span><h3>Phone alerts that work</h3><p>Get notified for new leads, quotes waiting for approval and approved jobs, with a badge on the app icon.</p></div>
-      <div class="f"><span class="tag">YOUR DATA</span><h3>Separate and private</h3><p>Each company has its own workspace. Your prices, customers and quotes are never shared with another contractor.</p></div>
-    </div>
-  </div>
-</section>
 
 <section class="photos">
   <div class="wrap">
@@ -420,117 +384,9 @@ footer small { font: 600 12px/1 var(--mono); letter-spacing: .1em; color: var(--
   </div>
 </section>
 
-<section id="pricing">
-  <div class="wrap">
-    <p class="eyebrow">Plans</p>
-    <h2 style="margin-top:12px">Simple monthly pricing</h2>
-    <p class="lead" style="margin-top:14px">Every plan starts with a free trial: 14 days or 7 quotes. Switch plans or cancel any time from your settings.</p>
-    <div class="plans">
-      <div class="plan">
-        <div class="pname"><h3>Starter</h3></div>
-        <div class="price">$49<small> /month</small></div>
-        <ul><li>1 user</li><li>AI quotes from photos and leads</li><li>Branded PDF quotes</li><li>Lead inbox connection</li></ul>
-        <a class="btn btn-line" href="/?start">Start free</a>
-      </div>
-      <div class="plan pop">
-        <div class="pname"><h3>Pro</h3><span class="badge">MOST POPULAR</span></div>
-        <div class="price">$99<small> /month</small></div>
-        <ul><li>Up to 3 users</li><li>Everything in Starter</li><li>Phone alerts for every lead</li><li>Property lookup</li></ul>
-        <a class="btn btn-gold" href="/?start">Start free</a>
-      </div>
-      <div class="plan">
-        <div class="pname"><h3>Team</h3></div>
-        <div class="price">$199<small> /month</small></div>
-        <ul><li>Up to 10 users</li><li>Everything in Pro</li><li>Owner approvals</li><li>Activity log</li></ul>
-        <a class="btn btn-line" href="/?start">Start free</a>
-      </div>
-    </div>
-    <div class="trialnote"><span class="chip">7 FREE QUOTES</span><p><b>How the free trial works:</b> Start free, no card needed: 14 days or 7 quotes, whichever comes first. Your 6th quote gets a heads-up, and after the 7th you pick a plan to keep quoting. If you add a card early, we place a $1 hold to confirm it and release it right away.</p></div>
-  </div>
-</section>
 
-<section id="help" style="padding-top:0">
-  <div class="wrap">
-    <p class="eyebrow">Help center</p>
-    <h2 style="margin-top:12px">Need a hand? We pick up.</h2>
-    <div class="help-grid">
-      <div>
-        <div class="guide">
-          <h3>Connect Thumbtack in 5 steps</h3>
-          <ol>
-            <li>In S-I-Quotespro, open <b>Settings → Lead inbox</b> and tap <b>Copy my lead script</b>.</li>
-            <li>Go to <code>script.google.com</code> and choose <b>New project</b>.</li>
-            <li>Delete what's in the editor, paste your script, and click <b>Save</b>.</li>
-            <li>Choose <code>setup</code> next to Debug and click <b>Run</b>.</li>
-            <li>Allow access: pick your account → <b>Advanced</b> → <b>Go to project</b> → <b>Allow</b>. The log shows <b>✅ CONNECTED</b> within a few seconds.</li>
-          </ol>
-          <div class="video"><video controls playsinline preload="none" poster="/site/img/tutorial-poster.jpg"><source src="/site/media/tutorial.mp4" type="video/mp4"></video></div>
-        </div>
-        <div class="faq">
-          <details><summary>What is an AI employee?</summary><p>A specialist inside S-I-Quotespro that does a job for you instead of just answering questions. Quill writes and prices quotes, Scout tracks leads and wins, and Ledger handles payments. They use your rates and your branding, and you approve what goes out.</p></details>
-          <details><summary>Which features are live and which are coming?</summary><p>Quotes, lead inbox, phone alerts, property lookup, team approvals, Won/Lost tracking, follow-up reminders and payment receipts are live today. Job scheduling, change orders, branded invoices and receipts are live too. Built-in card payments inside the app are still in development.</p></details>
-          <details><summary>Do I have to download an app?</summary><p>No. Open s-i-quotespro.com on your phone and use "Add to Home Screen". It works like an app, with phone alerts, and updates on its own.</p></details>
-          <details><summary>Does it send quotes to customers without me?</summary><p>Only if you turn on auto-reply and the lead includes the customer's email. Otherwise every quote waits for you to check it and send it.</p></details>
-          <details><summary>Where do the prices come from?</summary><p>From your own labor rate, overhead and profit margin, which you set in Settings. The AI estimates the work and materials; the price is calculated with your numbers, and it shows a market estimate next to it for comparison.</p></details>
-          <details><summary>Why does Google say the script isn't verified?</summary><p>The lead script runs inside your own Google account, so Google shows a warning for any script you add yourself. Choose Advanced, then Go to project. It only reads lead emails and sends them to your S-I-Quotespro workspace. You can stop it any time by running <b>stopConnector</b>.</p></details>
-          <details><summary>Can my crew use it?</summary><p>Yes. Give them your team code. They sign up as "New team member", you approve them, and you can require your approval before their quotes go out.</p></details>
-          <details><summary>How do I cancel or change my plan?</summary><p>Open Settings → Plan &amp; billing → Manage billing. You can change your card, switch plans, see invoices or cancel. Canceling during the trial means you're never charged.</p></details>
-          <details><summary>What is my Support ID?</summary><p>A 6-character code under the Help button in the app. Read it to us when you call and we'll find your account right away.</p></details>
-        </div>
-      </div>
-      <div class="contact" id="contact">
-        <h3>Talk to a person</h3>
-        <div class="line"><small>CALL OR TEXT</small><a href="tel:+17138358245">(713) 835-8245</a></div>
-        <div class="line"><small>EMAIL</small><a href="mailto:support@s-i-quotespro.com">support@s-i-quotespro.com</a></div>
-        <p style="color:#C3CEDC;font-size:15px">Already signed up? Use the <b>Help</b> button in the app. It sends us your Support ID with your message.</p>
-        <form id="contact-form" novalidate>
-          <div class="two">
-            <label for="c-name">Your name<input id="c-name" name="name" autocomplete="name" required></label>
-            <label for="c-company">Company<input id="c-company" name="company" autocomplete="organization"></label>
-          </div>
-          <div class="two">
-            <label for="c-email">Email<input id="c-email" name="email" type="email" autocomplete="email" required></label>
-            <label for="c-phone">Phone<input id="c-phone" name="phone" type="tel" autocomplete="tel"></label>
-          </div>
-          <label for="c-topic">What do you need?<select id="c-topic" name="topic"><option>Help getting set up</option><option>Question about plans or billing</option><option>Something isn't working</option><option>A demo for my team</option><option>Something else</option></select></label>
-          <label for="c-msg">Message<textarea id="c-msg" name="message" required placeholder="Tell us what's going on"></textarea></label>
-          <div class="hp" aria-hidden="true"><label for="c-site">Leave this empty<input id="c-site" name="website" tabindex="-1" autocomplete="off"></label></div>
-          <button class="btn btn-gold" type="submit" style="justify-content:center">Send message</button>
-          <p class="status" id="c-status" role="status"></p>
-        </form>
-      </div>
-    </div>
-  </div>
-</section>
 
-<section id="reviews" hidden style="padding-top:0">
-  <div class="wrap">
-    <p class="eyebrow">Reviews</p>
-    <h2 style="margin-top:12px">What contractors say</h2>
-    <p class="lead" id="rv-summary" style="margin-top:14px"></p>
-    <div class="rv-grid" id="rv-list"></div>
-    <p style="font-size:14px;color:var(--muted);margin-top:18px">Reviews come from contractors with an S-I-Quotespro account, shown as written.</p>
-  </div>
-</section>
 
-<section id="about" style="padding-top:0">
-  <div class="wrap about">
-    <div class="jt">
-      <p class="eyebrow">BUILT FOR THE TRADES</p>
-      <h3>Every kind of job</h3>
-      <p>Used by contractors anywhere in the U.S. Your prices, your area, your brand.</p>
-      <ul><li>Remodeling</li><li>Painting</li><li>Drywall</li><li>Flooring</li><li>Kitchen &amp; bath</li><li>Roofing</li><li>Concrete</li><li>Fencing &amp; decks</li><li>Handyman</li><li>Holiday lighting</li><li>Cleaning</li><li>Moving</li></ul>
-      <a href="/?start">Start free →</a>
-    </div>
-    <div>
-      <p class="eyebrow">About us</p>
-      <h2 style="margin-top:12px">Built by contractors, for contractors</h2>
-      <p class="lead" style="margin-top:18px">S-I-Quotespro was designed by people who run crews and win jobs every day, together with software experts. Every screen follows the way real jobs get quoted: read the request, size up the work, price it right and answer before anyone else.</p>
-      <p class="lead">It works the same whether you're in Texas, Florida, Ohio or California. Your labor rate, your margins, your service area and your logo are built in, so every quote sounds like you.</p>
-      <div class="facts"><span>NATIONWIDE</span><span>BUILT WITH WORKING CONTRACTORS</span><span>REAL PERSON ON SUPPORT</span></div>
-    </div>
-  </div>
-</section>
 
 <section class="final">
   <div class="wrap">
@@ -543,19 +399,20 @@ footer small { font: 600 12px/1 var(--mono); letter-spacing: .1em; color: var(--
 <footer>
   <div class="wrap">
     <div style="display:grid;gap:10px;max-width:340px">
-      <a class="logo" href="#top"><b>SI</b><span>S-I-QUOTESPRO</span></a>
+      <a class="logo" href="/"><b>SI</b><span>S-I-QUOTESPRO</span></a>
       <p>Fast quotes and leads winner. AI quoting for remodelers, painters, roofers, handymen and general contractors.</p>
     </div>
     <div class="cols">
-      <div><small>PRODUCT</small><a href="#how">How it works</a><a href="#pricing">Pricing</a><a href="/?start">Start free trial</a><a href="/app">Sign in</a></div>
-      <div><small>SUPPORT</small><a href="#help">Help center</a><a href="#contact">Contact us</a><span>(713) 835-8245</span><a href="mailto:support@s-i-quotespro.com">support@s-i-quotespro.com</a></div>
-      <div><small>COMPANY</small><a href="#about">About</a><a href="#reviews">Reviews</a></div>
+      <div><small>PRODUCT</small><a href="/how">How it works</a><a href="/pricing">Pricing</a><a href="/?start">Start free trial</a><a href="/app">Sign in</a></div>
+      <div><small>SUPPORT</small><a href="/help">Help center</a><a href="/help#contact">Contact us</a><span>(713) 835-8245</span><a href="mailto:support@s-i-quotespro.com">support@s-i-quotespro.com</a></div>
+      <div><small>COMPANY</small><a href="/about">About</a><a href="/about#reviews">Reviews</a></div>
     </div>
   </div>
   <div class="wrap" style="margin-top:28px;font-size:13px">© 2026 S-I-Quotespro · Serving contractors nationwide</div>
 <p class="photo-credit" style="text-align:center;font-size:12px;opacity:.6;padding:0 16px 18px">Banner photos from Unsplash: Annie Gray, 2H Media, Marie Dehayes, Josh Olalde, Jeriden Villegas, Scott Blake, immo RENOVATION and Milivoj Kuhar.</p>
 </footer>
 
+<script>(function(){var m={"#how":"/how","#learn":"/how#learn","#pricing":"/pricing","#help":"/help","#contact":"/help#contact","#about":"/about","#reviews":"/about#reviews"};var t=m[location.hash];if(t)location.replace(t)})();</script>
 <script>
 (function(){var imgs=document.querySelectorAll('.hero-bg img'),dots=document.querySelector('.hero-dots');if(!imgs.length)return;var i=0,t;
 imgs.forEach(function(_,k){var b=document.createElement('button');b.type='button';b.onclick=function(){go(k);start()};dots.appendChild(b)});dots.removeAttribute('aria-hidden');dots.setAttribute('role','presentation');
@@ -567,6 +424,7 @@ dots.children[0].classList.add('on');start()})();
 (function () {
   var form = document.getElementById("contact-form");
   var status = document.getElementById("c-status");
+  if (!form) return;
   form.addEventListener("submit", function (e) {
     e.preventDefault();
     var data = {};
@@ -587,6 +445,7 @@ dots.children[0].classList.add('on');start()})();
 <script>
 (function () {
   var esc = function (t) { return String(t == null ? "" : t).replace(/[&<>"]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]; }); };
+  if (!document.getElementById("reviews")) return;
   fetch("/api/reviews").then(function (r) { return r.ok ? r.json() : null; }).then(function (d) {
     if (!d || !d.count) return;
     document.getElementById("rv-summary").textContent = d.average.toFixed(1) + " out of 5 from " + d.count + " review" + (d.count === 1 ? "" : "s") + ".";

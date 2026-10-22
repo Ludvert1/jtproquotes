@@ -10,12 +10,13 @@
 <link rel="alternate" hreflang="es" href="https://www.s-i-quotespro.com/es/">
 <link rel="alternate" hreflang="fr" href="https://www.s-i-quotespro.com/fr/">
 <link rel="alternate" hreflang="x-default" href="https://www.s-i-quotespro.com/">
+<title>S-I-Quotespro · Des devis rapides, des clients gagnés</title>
 <meta property="og:title" content="S-I-Quotespro · Des devis rapides, des clients gagnés">
 <meta property="og:description" content="L'IA transforme vos clients de Thumbtack, d'Angi et du courriel, ainsi que vos photos de chantier, en devis à vos couleurs en quelques minutes. Essai gratuit avec 7 devis offerts.">
 <meta property="og:image" content="https://www.s-i-quotespro.com/site/img/manphone.jpg">
 <meta property="og:url" content="https://www.s-i-quotespro.com/fr/">
 <meta property="og:locale" content="fr_CA">
-<title>S-I-Quotespro</title>
+
 <meta name="description" content="Devis par IA pour entrepreneurs. Les clients de Thumbtack, d'Angi et du courriel, ainsi que les photos de chantier, deviennent en quelques minutes des devis à vos couleurs prêts à envoyer. Essai gratuit avec 7 devis offerts.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -40,6 +41,8 @@
 
 * { box-sizing: border-box }
 html { scroll-behavior: smooth }
+main.sub > section:first-child { padding-top: clamp(40px, 6vw, 72px) !important }
+.nav nav > a.on { color: var(--gold-hi); box-shadow: inset 0 -2px 0 var(--gold-hi) }
 @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto } * { animation: none !important; transition: none !important } }
 body { margin: 0; background: var(--bg); color: var(--ink); font: 400 17px/1.6 var(--body) }
 a { color: inherit }
@@ -70,7 +73,7 @@ section { padding-block: clamp(64px, 9vw, 112px) }
 .nav nav a:hover { color: #fff; background: rgba(255,255,255,.07) }
 .nav nav a.cta { background: var(--gold); color: var(--navy); padding: 9px 14px }
 .logo span { white-space: nowrap }
-@media (max-width: 760px) { .nav nav a.hide-sm { display: none } }
+@media (max-width: 760px) { .nav .wrap { flex-wrap: wrap; justify-content: center; gap: 6px; padding-block: 8px } .nav nav { width: 100%; flex-wrap: nowrap !important; overflow-x: auto; justify-content: flex-start; scrollbar-width: none } .nav nav::-webkit-scrollbar { display: none } .nav nav a { white-space: nowrap; flex: none } .nav nav a.hide-sm, .nav nav a.hide-xs { display: inline-block !important } }
 @media (max-width: 420px) { .nav nav { flex-wrap: nowrap } .nav nav a.hide-xs { display: none } .logo span { font-size: 18px } .logo b { width: 32px; height: 32px; font-size: 16px } .nav nav a { padding: 8px 7px; font-size: 14px } }
 
 /* hero */
@@ -269,13 +272,13 @@ footer small { font: 600 12px/1 var(--mono); letter-spacing: .1em; color: var(--
 
 <header class="nav">
   <div class="wrap">
-    <a class="logo" href="#top" aria-label="Accueil S-I-Quotespro"><b>SI</b><span>S-I-QUOTESPRO</span></a>
+    <a class="logo" href="/fr/" aria-label="Accueil S-I-Quotespro"><b>SI</b><span>S-I-QUOTESPRO</span></a>
     <nav aria-label="Principal">
-      <a class="hide-sm" href="#crew">Votre équipe d'IA</a>
-      <a class="hide-sm" href="#how">Comment ça marche</a>
-      <a class="hide-sm" href="#pricing">Tarifs</a>
-      <a class="hide-xs" href="#help">Aide</a>
-      <a class="hide-sm" href="#about">À propos</a>
+      <a class="hide-sm" href="/fr/#crew">Votre équipe d'IA</a>
+      <a class="hide-sm" href="/fr/how">Comment ça marche</a>
+      <a class="hide-sm" href="/fr/pricing">Tarifs</a>
+      <a class="hide-xs" href="/fr/help">Aide</a>
+      <a class="hide-sm" href="/fr/about">À propos</a>
       <span class="langs" aria-label="Langue"><a href="/" hreflang="en" lang="en">EN</a><a href="/es/" hreflang="es" lang="es">ES</a><a href="/fr/" hreflang="fr" lang="fr" class="on" aria-current="true">FR</a></span>
       <a href="/app">Se connecter</a>
       <a class="cta" href="/?start">Essai gratuit</a>
@@ -283,7 +286,7 @@ footer small { font: 600 12px/1 var(--mono); letter-spacing: .1em; color: var(--
   </div>
 </header>
 
-<main id="top">
+<main id="top" class="">
 <section class="hero">
   <div class="hero-bg" aria-hidden="true"><img src="/site/media/hero/h1.jpg" alt="" class=on fetchpriority=high width="1600" height="1067"><img src="/site/media/hero/h7.jpg" alt="" loading=lazy width="1600" height="1067"><img src="/site/media/hero/h2.jpg" alt="" loading=lazy width="1600" height="1067"><img src="/site/media/hero/h4.jpg" alt="" loading=lazy width="1600" height="1067"><img src="/site/media/hero/h8.jpg" alt="" loading=lazy width="1600" height="1067"><img src="/site/media/hero/h5.jpg" alt="" loading=lazy width="1600" height="1067"><img src="/site/media/hero/h3.jpg" alt="" loading=lazy width="1600" height="1067"><img src="/site/media/hero/h6.jpg" alt="" loading=lazy width="1600" height="1067"></div>
   <div class="hero-dots" aria-hidden="true"></div>
@@ -294,7 +297,7 @@ footer small { font: 600 12px/1 var(--mono); letter-spacing: .1em; color: var(--
       <p class="lead">Un client potentiel arrive de Thumbtack, d'Angi ou de votre courriel. S-I-Quotespro rédige l'étendue des travaux, liste les matériaux, établit le prix et prépare votre réponse. Vous vérifiez et envoyez un devis soigné avec votre logo pendant que le client compare encore les pros.</p>
       <div class="ctas">
         <a class="btn btn-gold" href="/?start">Essai gratuit →</a>
-        <a class="btn btn-line" href="#how">Voir comment ça marche</a>
+        <a class="btn btn-line" href="/fr/how">Voir comment ça marche</a>
       </div>
       <p class="fine">Fonctionne sur votre téléphone. Sans boutique d'applis, sans installation. Annulez à tout moment.</p>
       <div class="sources" aria-label="Sources de clients">
@@ -365,47 +368,8 @@ footer small { font: 600 12px/1 var(--mono); letter-spacing: .1em; color: var(--
   </div>
 </section>
 
-<section id="learn" style="padding-top:0">
-  <div class="wrap">
-    <p class="eyebrow">Apprenez</p>
-    <h2 style="margin-top:12px">Regardez la visite guidée complète</h2>
-    <p class="lead" style="margin-top:14px">De l'inscription à votre premier reçu, avec les relances, la planification et les avenants. Environ 6 minutes, avec sous-titres.</p>
-    <div class="video" style="max-width:960px"><video controls playsinline preload="none"><source src="/site/media/training-fr.mp4" type="video/mp4"></video></div>
-    <p style="font-size:14px;color:var(--muted);margin-top:8px">Tous les noms et chiffres de la vidéo sont des données d'exemple. L'appli elle-même est pour l'instant en anglais.</p>
-  </div>
-</section>
 
-<section id="how">
-  <div class="wrap">
-    <p class="eyebrow">Comment ça marche</p>
-    <h2 style="margin-top:12px">Du client potentiel au devis en trois étapes</h2>
-    <div class="steps">
-      <div class="step"><span class="n">ÉTAPE 1 · 5 MINUTES, UNE SEULE FOIS</span><h3>Connectez votre boîte de réception de clients</h3><p>Inscrivez-vous, puis copiez votre script personnel dans Google. Dès lors, chaque courriel de Thumbtack, Angi, HomeAdvisor, Yelp ou Bark qui arrive dans votre Gmail est récupéré en 5 minutes environ.</p></div>
-      <div class="step"><span class="n">ÉTAPE 2 · AUTOMATIQUE</span><h3>L'IA rédige le devis</h3><p>Elle lit la demande et les photos, rédige l'étendue des travaux, dimensionne l'équipe, liste les matériaux et établit le prix avec votre taux horaire, vos frais généraux et votre marge. Elle prépare aussi la réponse au client.</p></div>
-      <div class="step"><span class="n">ÉTAPE 3 · C'EST VOUS QUI DÉCIDEZ</span><h3>Vous vérifiez et envoyez</h3><p>Ajustez ce que vous voulez, puis envoyez un PDF à vos couleurs. Vous préférez ne rien faire ? Activez la réponse automatique et les clients reçoivent votre réponse par courriel dès l'arrivée de la demande.</p></div>
-    </div>
-  </div>
-</section>
 
-<section style="padding-top:0">
-  <div class="wrap">
-    <div class="feat-head">
-      <div><p class="eyebrow">Ce que vous trouvez à l'intérieur</p><h2 style="margin-top:12px">Conçu pour la façon dont un entrepreneur établit vraiment ses devis</h2></div>
-      <p class="lead">Chaque chiffre vient de vos propres tarifs. L'IA fait la saisie et les mesures; c'est vous qui décidez du prix.</p>
-    </div>
-    <div class="features">
-      <div class="f"><span class="tag">PHOTOS → DEVIS</span><h3>Un devis depuis le chantier</h3><p>Prenez quelques photos, ajoutez une phrase et obtenez un brouillon complet avec étendue des travaux, taille de l'équipe et heures avant de quitter l'entrée.</p></div>
-      <div class="f"><span class="tag">BOÎTE DE CLIENTS</span><h3>Chaque client, déjà rédigé</h3><p>Les clients de Thumbtack, Angi, HomeAdvisor, Yelp et Bark apparaissent sous forme de devis prêts à vérifier, avec une alerte sur votre téléphone pour chacun.</p></div>
-      <div class="f"><span class="tag">PRIX GAGNANT</span><h3>Compétitif, jamais bradé</h3><p>Voyez l'estimation du marché de l'IA à côté de votre prix. Elle suggère un prix gagnant, mais ne descend jamais sous la marge minimale que vous avez fixée.</p></div>
-      <div class="f"><span class="tag">MATÉRIAUX</span><h3>Liste complète des matériaux</h3><p>Passez un devis en main-d'œuvre plus matériaux et il liste tout ce dont le chantier a besoin, avec quantités et coûts. Il repère aussi ce que vous auriez oublié.</p></div>
-      <div class="f"><span class="tag">FICHE DE LA PROPRIÉTÉ</span><h3>Connaissez la maison avant d'y aller</h3><p>Saisissez l'adresse pour voir le temps de trajet depuis votre position, la taille et la pente du toit, les vues rue et satellite, et la zone inondable.</p></div>
-      <div class="f"><span class="tag">VOTRE IMAGE DE MARQUE</span><h3>Des PDF avec votre logo</h3><p>Chaque devis part sur votre papier à en-tête, signé par vous, avec une étendue claire et un total que le client peut accepter.</p></div>
-      <div class="f"><span class="tag">ÉQUIPE</span><h3>Votre équipe établit, le patron approuve</h3><p>Vos employés rédigent les devis sur le terrain et vous les approuvez depuis votre téléphone. Rien n'arrive chez un client sans votre accord.</p></div>
-      <div class="f"><span class="tag">ALERTES</span><h3>Des alertes qui fonctionnent</h3><p>Soyez averti des nouveaux clients, des devis en attente d'approbation et des chantiers approuvés, avec un badge sur l'icône de l'appli.</p></div>
-      <div class="f"><span class="tag">VOS DONNÉES</span><h3>Séparées et privées</h3><p>Chaque entreprise a son propre espace. Vos prix, vos clients et vos devis ne sont jamais partagés avec un autre entrepreneur.</p></div>
-    </div>
-  </div>
-</section>
 
 <section class="photos">
   <div class="wrap">
@@ -420,117 +384,9 @@ footer small { font: 600 12px/1 var(--mono); letter-spacing: .1em; color: var(--
   </div>
 </section>
 
-<section id="pricing">
-  <div class="wrap">
-    <p class="eyebrow">Forfaits</p>
-    <h2 style="margin-top:12px">Des tarifs mensuels simples</h2>
-    <p class="lead" style="margin-top:14px">Chaque forfait commence par un essai gratuit : 14 jours ou 7 devis. Changez de forfait ou annulez à tout moment dans vos paramètres.</p>
-    <div class="plans">
-      <div class="plan">
-        <div class="pname"><h3>Départ</h3></div>
-        <div class="price">$49<small> /mois</small></div>
-        <ul><li>1 utilisateur</li><li>Devis par IA à partir de photos et de clients</li><li>Devis PDF à vos couleurs</li><li>Connexion de la boîte de clients</li></ul>
-        <a class="btn btn-line" href="/?start">Essai gratuit</a>
-      </div>
-      <div class="plan pop">
-        <div class="pname"><h3>Pro</h3><span class="badge">LE PLUS POPULAIRE</span></div>
-        <div class="price">$99<small> /mois</small></div>
-        <ul><li>Jusqu'à 3 utilisateurs</li><li>Tout ce qui est dans Départ</li><li>Alertes sur téléphone pour chaque client</li><li>Fiche de la propriété</li></ul>
-        <a class="btn btn-gold" href="/?start">Essai gratuit</a>
-      </div>
-      <div class="plan">
-        <div class="pname"><h3>Équipe</h3></div>
-        <div class="price">$199<small> /mois</small></div>
-        <ul><li>Jusqu'à 10 utilisateurs</li><li>Tout ce qui est dans Pro</li><li>Approbations du patron</li><li>Journal d'activité</li></ul>
-        <a class="btn btn-line" href="/?start">Essai gratuit</a>
-      </div>
-    </div>
-    <div class="trialnote"><span class="chip">7 DEVIS GRATUITS</span><p><b>Comment fonctionne l'essai gratuit :</b> Commencez gratuitement, sans carte : 14 jours ou 7 devis, selon ce qui arrive en premier. Au 6e devis, nous vous prévenons, et après le 7e vous choisissez un forfait pour continuer. Si vous ajoutez une carte plus tôt, nous effectuons une retenue de 1 $ pour la confirmer et la libérons aussitôt.</p></div>
-  </div>
-</section>
 
-<section id="help" style="padding-top:0">
-  <div class="wrap">
-    <p class="eyebrow">Centre d'aide</p>
-    <h2 style="margin-top:12px">Besoin d'un coup de main ? On répond.</h2>
-    <div class="help-grid">
-      <div>
-        <div class="guide">
-          <h3>Connectez Thumbtack en 5 étapes</h3>
-          <ol>
-            <li>Dans S-I-Quotespro, ouvrez <b>Settings → Lead inbox</b> et touchez <b>Copy my lead script</b>.</li>
-            <li>Allez sur <code>script.google.com</code> et choisissez <b>New project</b>.</li>
-            <li>Effacez le contenu de l'éditeur, collez votre script et cliquez sur <b>Save</b>.</li>
-            <li>Choisissez <code>setup</code> à côté de Debug et cliquez sur <b>Run</b>.</li>
-            <li>Autorisez l'accès : choisissez votre compte → <b>Advanced</b> → <b>Go to project</b> → <b>Allow</b>. Le journal affiche <b>✅ CONNECTED</b> en quelques secondes.</li>
-          </ol>
-          <div class="video"><video controls playsinline preload="none" poster="/site/img/tutorial-poster.jpg"><source src="/site/media/tutorial.mp4" type="video/mp4"></video></div>
-        </div>
-        <div class="faq">
-          <details><summary>Qu'est-ce qu'un employé IA ?</summary><p>Un spécialiste au sein de S-I-Quotespro qui fait un travail à votre place au lieu de simplement répondre à des questions. Quill rédige et chiffre les devis, Scout suit les clients et les contrats gagnés, et Ledger gère les paiements. Ils utilisent vos tarifs et votre image de marque, et vous approuvez tout ce qui part.</p></details>
-          <details><summary>Quelles fonctions sont disponibles et lesquelles arrivent ?</summary><p>Les devis, la boîte de clients, les alertes sur téléphone, la fiche de propriété, les approbations d'équipe, le suivi gagné/perdu, les rappels de relance et les reçus de paiement sont disponibles aujourd'hui. La planification des chantiers, les avenants, les factures à vos couleurs et les reçus le sont aussi. Les paiements par carte intégrés à l'appli sont encore en développement.</p></details>
-          <details><summary>Dois-je télécharger une appli ?</summary><p>Non. Ouvrez s-i-quotespro.com sur votre téléphone et utilisez « Ajouter à l'écran d'accueil ». Cela fonctionne comme une appli, avec des alertes sur téléphone, et se met à jour toute seule.</p></details>
-          <details><summary>Envoie-t-il des devis aux clients sans moi ?</summary><p>Seulement si vous activez la réponse automatique et que la demande contient le courriel du client. Sinon, chaque devis attend que vous le vérifiiez et l'envoyiez.</p></details>
-          <details><summary>D'où viennent les prix ?</summary><p>De votre propre taux horaire, de vos frais généraux et de votre marge, que vous réglez dans les paramètres (Settings). L'IA estime le travail et les matériaux; le prix est calculé avec vos chiffres et une estimation du marché s'affiche à côté pour comparer.</p></details>
-          <details><summary>Pourquoi Google dit-il que le script n'est pas vérifié ?</summary><p>Le script s'exécute dans votre propre compte Google, c'est pourquoi Google affiche un avertissement pour tout script que vous ajoutez vous-même. Choisissez Advanced, puis Go to project. Il lit seulement les courriels de clients et les envoie à votre espace S-I-Quotespro. Vous pouvez l'arrêter à tout moment en exécutant <b>stopConnector</b>.</p></details>
-          <details><summary>Mon équipe peut-elle l'utiliser ?</summary><p>Oui. Donnez-leur votre code d'équipe. Ils s'inscrivent comme « New team member », vous les approuvez, et vous pouvez exiger votre approbation avant l'envoi de leurs devis.</p></details>
-          <details><summary>Comment annuler ou changer mon forfait ?</summary><p>Ouvrez Settings → Plan &amp; billing → Manage billing. Vous pouvez changer de carte, changer de forfait, voir les factures ou annuler. Annuler pendant l'essai signifie que vous n'êtes jamais facturé.</p></details>
-          <details><summary>Qu'est-ce que mon identifiant d'assistance ?</summary><p>Un code de 6 caractères sous le bouton Help de l'appli. Donnez-le-nous quand vous appelez et nous retrouverons votre compte tout de suite.</p></details>
-        </div>
-      </div>
-      <div class="contact" id="contact">
-        <h3>Parlez à une vraie personne</h3>
-        <div class="line"><small>APPELEZ OU ÉCRIVEZ</small><a href="tel:+17138358245">(713) 835-8245</a></div>
-        <div class="line"><small>COURRIEL</small><a href="mailto:support@s-i-quotespro.com">support@s-i-quotespro.com</a></div>
-        <p style="color:#C3CEDC;font-size:15px">Déjà inscrit ? Utilisez le bouton <b>Aide</b> dans l'appli. Il nous envoie votre identifiant d'assistance avec votre message.</p>
-        <form id="contact-form" novalidate>
-          <div class="two">
-            <label for="c-name">Votre nom<input id="c-name" name="name" autocomplete="name" required></label>
-            <label for="c-company">Entreprise<input id="c-company" name="company" autocomplete="organization"></label>
-          </div>
-          <div class="two">
-            <label for="c-email">Courriel<input id="c-email" name="email" type="email" autocomplete="email" required></label>
-            <label for="c-phone">Téléphone<input id="c-phone" name="phone" type="tel" autocomplete="tel"></label>
-          </div>
-          <label for="c-topic">De quoi avez-vous besoin ?<select id="c-topic" name="topic"><option>Aide pour la configuration</option><option>Question sur les forfaits ou la facturation</option><option>Quelque chose ne fonctionne pas</option><option>Une démonstration pour mon équipe</option><option>Autre chose</option></select></label>
-          <label for="c-msg">Message<textarea id="c-msg" name="message" required placeholder="Dites-nous ce qui se passe"></textarea></label>
-          <div class="hp" aria-hidden="true"><label for="c-site">Laissez ce champ vide<input id="c-site" name="website" tabindex="-1" autocomplete="off"></label></div>
-          <button class="btn btn-gold" type="submit" style="justify-content:center">Envoyer le message</button>
-          <p class="status" id="c-status" role="status"></p>
-        </form>
-      </div>
-    </div>
-  </div>
-</section>
 
-<section id="reviews" hidden style="padding-top:0">
-  <div class="wrap">
-    <p class="eyebrow">Avis</p>
-    <h2 style="margin-top:12px">Ce que disent les entrepreneurs</h2>
-    <p class="lead" id="rv-summary" style="margin-top:14px"></p>
-    <div class="rv-grid" id="rv-list"></div>
-    <p style="font-size:14px;color:var(--muted);margin-top:18px">Les avis viennent d'entrepreneurs ayant un compte S-I-Quotespro et sont affichés tels qu'ils ont été écrits.</p>
-  </div>
-</section>
 
-<section id="about" style="padding-top:0">
-  <div class="wrap about">
-    <div class="jt">
-      <p class="eyebrow">CONÇU POUR LES MÉTIERS</p>
-      <h3>Tous les types de travaux</h3>
-      <p>Utilisé par des entrepreneurs partout aux États-Unis. Vos prix, votre région, votre marque.</p>
-      <ul><li>Rénovation</li><li>Peinture</li><li>Cloison sèche</li><li>Planchers</li><li>Cuisine et salle de bain</li><li>Toiture</li><li>Béton</li><li>Clôtures et terrasses</li><li>Homme à tout faire</li><li>Éclairage des Fêtes</li><li>Nettoyage</li><li>Déménagement</li></ul>
-      <a href="/?start">Essai gratuit →</a>
-    </div>
-    <div>
-      <p class="eyebrow">À propos de nous</p>
-      <h2 style="margin-top:12px">Conçu par des entrepreneurs, pour des entrepreneurs</h2>
-      <p class="lead" style="margin-top:18px">S-I-Quotespro a été conçu par des gens qui dirigent des équipes et gagnent des contrats chaque jour, avec des experts en logiciel. Chaque écran suit la façon dont se chiffrent vraiment les chantiers : lire la demande, évaluer le travail, fixer le bon prix et répondre avant tout le monde.</p>
-      <p class="lead">Cela fonctionne pareil que vous soyez au Texas, en Floride, dans l'Ohio ou en Californie. Votre taux horaire, vos marges, votre zone de service et votre logo sont intégrés, si bien que chaque devis vous ressemble.</p>
-      <div class="facts"><span>PARTOUT AUX ÉTATS-UNIS</span><span>CRÉÉ AVEC DES ENTREPRENEURS EN ACTIVITÉ</span><span>UNE VRAIE PERSONNE AU SOUTIEN</span></div>
-    </div>
-  </div>
-</section>
 
 <section class="final">
   <div class="wrap">
@@ -543,19 +399,20 @@ footer small { font: 600 12px/1 var(--mono); letter-spacing: .1em; color: var(--
 <footer>
   <div class="wrap">
     <div style="display:grid;gap:10px;max-width:340px">
-      <a class="logo" href="#top"><b>SI</b><span>S-I-QUOTESPRO</span></a>
+      <a class="logo" href="/fr/"><b>SI</b><span>S-I-QUOTESPRO</span></a>
       <p>Des devis rapides et des clients gagnés. Devis par IA pour rénovateurs, peintres, couvreurs, hommes à tout faire et entrepreneurs généraux.</p>
     </div>
     <div class="cols">
-      <div><small>PRODUIT</small><a href="#how">Comment ça marche</a><a href="#pricing">Tarifs</a><a href="/?start">Commencer l'essai gratuit</a><a href="/app">Se connecter</a></div>
-      <div><small>ASSISTANCE</small><a href="#help">Centre d'aide</a><a href="#contact">Nous joindre</a><span>(713) 835-8245</span><a href="mailto:support@s-i-quotespro.com">support@s-i-quotespro.com</a></div>
-      <div><small>ENTREPRISE</small><a href="#about">À propos</a><a href="#reviews">Avis</a></div>
+      <div><small>PRODUIT</small><a href="/fr/how">Comment ça marche</a><a href="/fr/pricing">Tarifs</a><a href="/?start">Commencer l'essai gratuit</a><a href="/app">Se connecter</a></div>
+      <div><small>ASSISTANCE</small><a href="/fr/help">Centre d'aide</a><a href="/fr/help#contact">Nous joindre</a><span>(713) 835-8245</span><a href="mailto:support@s-i-quotespro.com">support@s-i-quotespro.com</a></div>
+      <div><small>ENTREPRISE</small><a href="/fr/about">À propos</a><a href="/fr/about#reviews">Avis</a></div>
     </div>
   </div>
   <div class="wrap" style="margin-top:28px;font-size:13px">© 2026 S-I-Quotespro · Au service des entrepreneurs partout aux États-Unis</div>
 <p class="photo-credit" style="text-align:center;font-size:12px;opacity:.6;padding:0 16px 18px">Photos de la bannière provenant d'Unsplash : Annie Gray, 2H Media, Marie Dehayes, Josh Olalde, Jeriden Villegas, Scott Blake, immo RENOVATION et Milivoj Kuhar.</p>
 </footer>
 
+<script>(function(){var m={"#how":"/fr/how","#learn":"/fr/how#learn","#pricing":"/fr/pricing","#help":"/fr/help","#contact":"/fr/help#contact","#about":"/fr/about","#reviews":"/fr/about#reviews"};var t=m[location.hash];if(t)location.replace(t)})();</script>
 <script>
 (function(){var imgs=document.querySelectorAll('.hero-bg img'),dots=document.querySelector('.hero-dots');if(!imgs.length)return;var i=0,t;
 imgs.forEach(function(_,k){var b=document.createElement('button');b.type='button';b.onclick=function(){go(k);start()};dots.appendChild(b)});dots.removeAttribute('aria-hidden');dots.setAttribute('role','presentation');
@@ -567,6 +424,7 @@ dots.children[0].classList.add('on');start()})();
 (function () {
   var form = document.getElementById("contact-form");
   var status = document.getElementById("c-status");
+  if (!form) return;
   form.addEventListener("submit", function (e) {
     e.preventDefault();
     var data = {};
@@ -587,6 +445,7 @@ dots.children[0].classList.add('on');start()})();
 <script>
 (function () {
   var esc = function (t) { return String(t == null ? "" : t).replace(/[&<>"]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]; }); };
+  if (!document.getElementById("reviews")) return;
   fetch("/api/reviews").then(function (r) { return r.ok ? r.json() : null; }).then(function (d) {
     if (!d || !d.count) return;
     document.getElementById("rv-summary").textContent = d.average.toFixed(1) + " sur 5 d'après " + d.count + " avis" + (d.count === 1 ? "" : "") + ".";
