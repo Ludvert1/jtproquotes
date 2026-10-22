@@ -120,10 +120,12 @@ const isDecided = (q) => !!q && DECIDED_STATUSES.includes(q.status);
 /* What a won job is actually worth. If the price moved during negotiation and
    the final figure was recorded, that is the real number — the quoted total
    is only what we asked for, not what we agreed to. */
+/* Change orders the client approved add to (or credit) the job total. */
+const coTotal = (q) => (q && Array.isArray(q.changeOrders) ? q.changeOrders : []).filter((c) => c.status === "approved").reduce((n, c) => n + (Number(c.amount) || 0), 0);
 const wonValue = (q, settings) =>
-  typeof q.finalAmount === "number" && isFinite(q.finalAmount) && q.finalAmount >= 0
+  (typeof q.finalAmount === "number" && isFinite(q.finalAmount) && q.finalAmount >= 0
     ? q.finalAmount
-    : computeQuote(q, settings).total;
+    : computeQuote(q, settings).total) + coTotal(q);
 
 /* Booked revenue belongs to the period the client signed, not the period the
    quote was written — a June quote signed in September is September money.
@@ -1362,9 +1364,52 @@ function FollowUps({ quotes, settings, onUpdate, onOpen, who, notify }) {
   );
 }
 
+function UpcomingJobs({ quotes, onReceipt }) {
+  const today = todayISO();
+  const jobs = quotes.filter((q) => q.status === "won" && !isVoid(q) && q.schedule && q.schedule.start && (q.schedule.end || q.schedule.start) >= today)
+    .sort((a, b) => a.schedule.start.localeCompare(b.schedule.start)).slice(0, 8);
+  if (!jobs.length) return null;
+  return (
+    <Card style={{ marginBottom: 20, borderLeft: `4px solid ${BRAND.green}` }}>
+      <div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontSize: 22, fontWeight: 700, color: BRAND.navy, letterSpacing: "0.03em" }}>UPCOMING JOBS</div>
+      {jobs.map((q) => (
+        <div key={q.id} className="flex justify-between items-center gap-2 flex-wrap" style={{ borderTop: `1px solid ${BRAND.line}`, marginTop: 8, paddingTop: 8, fontSize: 14 }}>
+          <span><b>{fmtDay2(q.schedule.start)}</b>{q.schedule.end && q.schedule.end !== q.schedule.start ? " – " + fmtDay2(q.schedule.end) : ""} · {q.clientName || "Client"} · {q.jobTitle || ""}{q.schedule.crew ? " · " + q.schedule.crew : ""}{q.schedule.start === today ? " · TODAY" : ""}</span>
+          {onReceipt && <Btn small kind="ghost" onClick={() => onReceipt(q)}>Job</Btn>}
+        </div>
+      ))}
+    </Card>
+  );
+}
+
 function Dashboard({ me, isOwner, isManager, quotes, users, settings, onOpen, onPreview, onNew, onDelete, onReceipt, onUpdate, notify }) {
   const [period, setPeriod] = useState("month");
   const [filter, setFilter] = useState("all");
+
+  /* Mark an open quote Won or Declined right from the list. Same fields and
+     history entries as the Team & review screen. */
+  const who = me ? me.name : "";
+  const decide = async (q, status, extra, label) => {
+    const at = new Date().toISOString();
+    await onUpdate(Object.assign({}, q, extra, { status, decidedAt: at, decidedBy: who, updatedAt: at, history: (q.history || []).concat([{ at, by: who, action: STATUS[status].label }]) }));
+    logActivity(who, label, q.quoteNo);
+    notify("Quote " + q.quoteNo + ": " + STATUS[status].label);
+  };
+  const quickWon = async (q) => {
+    const quoted = computeQuote(q, settings).total;
+    const raw = window.prompt("Quote " + q.quoteNo + " — " + (q.clientName || "client") + " accepted and signed.\n\nQuoted total: " + money(quoted) + "\n\nEnter the final agreed amount. Leave it as it is if the price didn't change.", String(Math.round(quoted * 100) / 100));
+    if (raw === null) return;
+    const amount = parseFloat(String(raw).replace(/[^0-9.]/g, ""));
+    if (!isFinite(amount) || amount < 0) { notify("That amount doesn't look right."); return; }
+    try { await decide(q, "won", { finalAmount: Math.round(amount * 100) / 100, outcomeNote: "" }, "Marked won" + (amount !== quoted ? " at " + money(amount) : "")); if (onReceipt) onReceipt(q); }
+    catch (e) { notify("Couldn't save that — try again."); }
+  };
+  const quickLost = async (q) => {
+    const reason = window.prompt("Quote " + q.quoteNo + " — " + (q.clientName || "client") + " declined.\n\nWhy? (e.g. price, timing, went with another contractor)");
+    if (reason === null) return;
+    try { await decide(q, "lost", { outcomeNote: reason.trim(), finalAmount: null }, "Marked declined" + (reason.trim() ? " — " + reason.trim() : "")); }
+    catch (e) { notify("Couldn't save that — try again."); }
+  };
 
   // Voided quotes never count toward any figure.
   const totals = useMemo(() => {
@@ -1422,6 +1467,7 @@ function Dashboard({ me, isOwner, isManager, quotes, users, settings, onOpen, on
         ))}
       </div>
 
+      <UpcomingJobs quotes={quotes} onReceipt={isManager ? onReceipt : null} />
       <FollowUps quotes={quotes} settings={settings} onUpdate={onUpdate} onOpen={onOpen} who={me ? me.name : ""} notify={notify} />
 
       <div className="flex gap-2 mb-3 flex-wrap">
@@ -1466,6 +1512,8 @@ function Dashboard({ me, isOwner, isManager, quotes, users, settings, onOpen, on
                     <Badge status={q.status} />
                     <Btn small kind="ghost" onClick={() => onPreview(q)}>Preview</Btn>
                     {q.status === "won" && isManager && onReceipt && <Btn small kind="gold" onClick={() => onReceipt(q)}>{paymentsOf(q).length ? "Receipts" : "Receipt"}</Btn>}
+                    {isManager && onUpdate && ["approved", "sent", "negotiating"].includes(q.status) && <Btn small kind="gold" onClick={() => quickWon(q)}>Won</Btn>}
+                    {isManager && onUpdate && ["approved", "sent", "negotiating"].includes(q.status) && <Btn small kind="ghost" onClick={() => quickLost(q)}>Declined</Btn>}
                     {(q.createdBy === me.id || isManager) && !isVoid(q) && <Btn small kind="ghost" onClick={() => onOpen(q)}>Open</Btn>}
                     {isOwner && onDelete && <Btn small kind="danger" onClick={() => onDelete(q)}>Delete</Btn>}
                   </div>
@@ -3600,6 +3648,38 @@ function ReviewModal({ me, onClose, notify }) {
   );
 }
 
+/* Admin: messages sent through the website contact form. */
+function MessagesAdmin({ notify }) {
+  const [list, setList] = useState(null);
+  const [busy, setBusy] = useState("");
+  const load = async () => { try { setList((await adminCall("messages")).messages); } catch (e) { setList([]); notify(e.message); } };
+  useEffect(() => { load(); }, []);
+  const mark = async (m, done) => { setBusy(m.id); try { await adminCall("resolveMessage", { id: m.id, done }); await load(); } catch (e) { notify(e.message); } setBusy(""); };
+  if (!list) return null;
+  const open = list.filter((m) => !m.done);
+  return (
+    <Card style={{ marginBottom: 16 }}>
+      <div className="flex items-center justify-between flex-wrap gap-2">
+        <div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontSize: 19, fontWeight: 700, color: BRAND.navy }}>WEBSITE MESSAGES {open.length ? <span style={PILL("#FBF3DE", BRAND.amber)}>{open.length} to answer</span> : null}</div>
+        <div style={{ fontSize: 13, color: BRAND.sub }}>From the contact form on s-i-quotespro.com</div>
+      </div>
+      {list.length === 0 && <p style={{ fontSize: 13.5, color: BRAND.sub, marginTop: 8 }}>No messages yet.</p>}
+      {list.map((m) => (
+        <div key={m.id} style={{ borderTop: `1px solid ${BRAND.line}`, padding: "10px 0", opacity: m.done ? 0.55 : 1 }}>
+          <div className="flex justify-between flex-wrap gap-2"><b>{m.name}{m.company ? ", " + m.company : ""}</b><span style={{ fontSize: 12.5, color: BRAND.sub }}>{fmtDay(m.at)}{m.topic ? " · " + m.topic : ""}</span></div>
+          <div style={{ fontSize: 14.5, margin: "4px 0", whiteSpace: "pre-wrap" }}>{m.message}</div>
+          <div style={{ fontSize: 12.5, color: BRAND.sub }}>{m.email}{m.phone ? " · " + m.phone : ""}</div>
+          <div className="flex gap-2 flex-wrap mt-2">
+            <a href={"mailto:" + m.email + "?subject=" + encodeURIComponent("Re: your message to S-I-Quotespro")} style={{ textDecoration: "none" }}><Btn small kind="gold">Reply by email</Btn></a>
+            {m.phone && <a href={"tel:" + String(m.phone).replace(/[^\d+]/g, "")} style={{ textDecoration: "none" }}><Btn small kind="ghost">Call</Btn></a>}
+            <Btn small kind="ghost" disabled={busy === m.id} onClick={() => mark(m, !m.done)}>{m.done ? "Reopen" : "Mark answered"}</Btn>
+          </div>
+        </div>
+      ))}
+    </Card>
+  );
+}
+
 /* Admin: every review that came in, to publish on the website or hide for a stated reason. */
 function ReviewsAdmin({ notify }) {
   const [list, setList] = useState(null);
@@ -3809,6 +3889,7 @@ function AdminView({ notify, openCid }) {
       {err && <Card style={{ borderColor: BRAND.red, color: BRAND.red, marginBottom: 12 }}>{err}</Card>}
       {!data && !err && <p style={{ color: BRAND.sub }}>Loading every company…</p>}
       <SystemHealth notify={notify} />
+      <MessagesAdmin notify={notify} />
       <ReviewsAdmin notify={notify} />
       {data && <>
         <ReferralMaker notify={notify} />
@@ -4438,17 +4519,73 @@ function ReceiptModal({ quote: liveQuote, settings, me, onSave: saveQuote, onClo
   };
   const paidThrough = shown ? pays.slice(0, pays.findIndex((p) => p.id === shown.id) + 1).reduce((n, p) => n + (Number(p.amount) || 0), 0) : 0;
   const lbl = { fontSize: 11, fontWeight: 700, letterSpacing: "0.1em", color: BRAND.gold };
+  const phoneDigits = String(quote.clientPhone || "").replace(/[^\d+]/g, "");
+  const firstName = (quote.clientName || "").trim().split(/\s+/)[0];
+  const saveQ = async (patch, action, okMsg) => {
+    const at = new Date().toISOString();
+    const next = Object.assign({}, quote, patch, { updatedAt: at, history: (quote.history || []).concat(action ? [{ at, by: me ? me.name : "", action }] : []) });
+    try { await onSave(next); if (okMsg) notify(okMsg); return true; } catch (e) { setErr("Couldn't save. Try again."); return false; }
+  };
+
+  /* ---- SCHEDULE ---- */
+  const sch0 = quote.schedule || {};
+  const [sStart, setSStart] = useState(sch0.start || "");
+  const [sEnd, setSEnd] = useState(sch0.end || "");
+  const [sCrew, setSCrew] = useState(sch0.crew || "");
+  const [sNote, setSNote] = useState(sch0.notes || "");
+  const saveSchedule = async () => {
+    if (!sStart) return setErr("Pick the start date.");
+    if (sEnd && sEnd < sStart) return setErr("The end date is before the start date.");
+    setErr(""); setBusy("sch");
+    await saveQ({ schedule: { start: sStart, end: sEnd, crew: sCrew.trim(), notes: sNote.trim(), setBy: me ? me.name : "" } }, "Scheduled start " + fmtDay2(sStart) + (sEnd ? " to " + fmtDay2(sEnd) : ""), "Job scheduled");
+    setBusy("");
+  };
+  const clearSchedule = async () => { if (!window.confirm("Remove this job from the schedule?")) return; setSStart(""); setSEnd(""); setSCrew(""); setSNote(""); await saveQ({ schedule: null }, "Schedule removed", "Removed from schedule"); };
+  const schText = () => "Hi" + (firstName ? " " + firstName : "") + ", this is " + (COMPANY.signer || COMPANY.name) + " with " + COMPANY.name + ". We have you scheduled to start " + fmtDay2(sch0.start) + (sch0.end && sch0.end !== sch0.start ? " and finish around " + fmtDay2(sch0.end) : "") + (quote.jobTitle ? " for " + quote.jobTitle : "") + ". Please let me know if that date doesn't work. Thank you!";
+  const icsFile = () => {
+    const d = (ymd, plus) => { const x = new Date(ymd + "T12:00:00"); x.setDate(x.getDate() + plus); return x.toISOString().slice(0, 10).replace(/-/g, ""); };
+    const esc = (t) => String(t || "").replace(/[\\,;]/g, (m) => "\\" + m).replace(/\n/g, "\\n");
+    const lines = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//S-I-Quotespro//EN", "BEGIN:VEVENT", "UID:" + quote.id + "@s-i-quotespro.com", "DTSTAMP:" + new Date().toISOString().replace(/[-:]/g, "").slice(0, 15) + "Z",
+      "DTSTART;VALUE=DATE:" + d(sch0.start, 0), "DTEND;VALUE=DATE:" + d(sch0.end || sch0.start, 1),
+      "SUMMARY:" + esc((quote.jobTitle || "Job") + " — " + (quote.clientName || "")), "LOCATION:" + esc(quote.clientAddress || ""),
+      "DESCRIPTION:" + esc([sch0.crew ? "Crew: " + sch0.crew : "", sch0.notes || "", quote.clientPhone ? "Client phone: " + quote.clientPhone : ""].filter(Boolean).join("\n")), "END:VEVENT", "END:VCALENDAR"];
+    const blob = new Blob([lines.join("\r\n")], { type: "text/calendar" });
+    const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = "Job " + (quote.quoteNo || "") + ".ics"; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+  };
+
+  /* ---- CHANGE ORDERS ---- */
+  const cos = Array.isArray(quote.changeOrders) ? quote.changeOrders : [];
+  const [cDesc, setCDesc] = useState("");
+  const [cAmt, setCAmt] = useState("");
+  const addCO = async () => {
+    const amt = Math.round((parseFloat(String(cAmt).replace(/[^0-9.\-]/g, "")) || 0) * 100) / 100;
+    if (cDesc.trim().length < 3) return setErr("Describe the change in a few words.");
+    if (!amt) return setErr("Enter the amount (use a minus for a credit).");
+    setErr(""); setBusy("co");
+    const n = cos.length + 1;
+    const c = { id: uid(), no: "CO-" + quote.quoteNo + "-" + n, desc: cDesc.trim(), amount: amt, status: "pending", at: new Date().toISOString(), by: me ? me.name : "" };
+    if (await saveQ({ changeOrders: cos.concat([c]) }, "Change order " + c.no + " created (" + money(amt) + ")", "Change order " + c.no + " created")) { setCDesc(""); setCAmt(""); }
+    setBusy("");
+  };
+  const setCO = async (c, status) => {
+    const at = new Date().toISOString();
+    await saveQ({ changeOrders: cos.map((x) => x.id === c.id ? Object.assign({}, x, { status, decidedAt: at, decidedBy: me ? me.name : "" }) : x) }, "Change order " + c.no + " " + status, status === "approved" ? c.no + " approved — job total updated" : c.no + " " + status);
+  };
+  const delCO = async (c) => { if (!window.confirm("Delete change order " + c.no + "?")) return; await saveQ({ changeOrders: cos.filter((x) => x.id !== c.id) }, "Deleted change order " + c.no); };
+  const coText = (c) => "Hi" + (firstName ? " " + firstName : "") + ", this is " + (COMPANY.signer || COMPANY.name) + " with " + COMPANY.name + ". Change order " + c.no + (quote.jobTitle ? " for " + quote.jobTitle : "") + ": " + c.desc + ". " + (c.amount < 0 ? "Credit of " + money(-c.amount) : "Additional cost of " + money(c.amount)) + ", making your new job total " + money(contract - (c.status === "approved" ? c.amount : 0) + c.amount) + ". Please reply YES to approve. Thank you!";
   return (
     <div style={{ position: "fixed", inset: 0, background: "rgba(11,31,58,0.75)", zIndex: 55, overflowY: "auto", padding: "24px 12px" }} onClick={onClose}>
       <div style={{ maxWidth: 720, margin: "0 auto" }} onClick={(e) => e.stopPropagation()}>
         <div style={{ background: "#fff", borderRadius: 12, padding: 18, marginBottom: 12 }}>
           <div className="flex justify-between items-center flex-wrap gap-2">
-            <div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontSize: 22, fontWeight: 700, color: BRAND.navy }}>PAYMENTS · {quote.quoteNo} · {quote.clientName}</div>
+            <div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontSize: 22, fontWeight: 700, color: BRAND.navy }}>JOB · {quote.quoteNo} · {quote.clientName}</div>
             <Btn small kind="ghost" onClick={onClose}>Close</Btn>
           </div>
           <div className="flex gap-2 mb-2">
             <Btn small kind={mode === "pay" ? "gold" : "ghost"} onClick={() => { setMode("pay"); setErr(""); }}>Payments &amp; receipts</Btn>
             <Btn small kind={mode === "inv" ? "gold" : "ghost"} onClick={() => { setMode("inv"); setErr(""); }}>Invoices{invs.length ? " (" + invs.length + ")" : ""}</Btn>
+            <Btn small kind={mode === "sch" ? "gold" : "ghost"} onClick={() => { setMode("sch"); setErr(""); }}>Schedule</Btn>
+            <Btn small kind={mode === "co" ? "gold" : "ghost"} onClick={() => { setMode("co"); setErr(""); }}>Change orders{cos.length ? " (" + cos.length + ")" : ""}</Btn>
           </div>
           <div style={{ fontSize: 14, margin: "6px 0 10px" }}>Job total <b>{money(contract)}</b> · paid <b style={{ color: BRAND.green }}>{money(paid)}</b> · balance <b style={{ color: balance > 0 ? BRAND.amber : BRAND.green }}>{money(balance)}</b></div>
           {mode === "pay" && pays.length > 0 && <div style={{ marginBottom: 12 }}>
@@ -4471,6 +4608,47 @@ function ReceiptModal({ quote: liveQuote, settings, me, onSave: saveQuote, onClo
             <Btn kind="gold" disabled={!!busy} onClick={record}>{busy === "save" ? "Saving…" : "Save payment & create receipt"}</Btn>
           </>}
           {mode === "pay" && balance <= 0 && pays.length > 0 && <div style={{ color: BRAND.green, fontWeight: 700, fontSize: 14 }}>Paid in full.</div>}
+          {mode === "sch" && <>
+            <div style={{ fontSize: 12, fontWeight: 700, color: BRAND.sub, letterSpacing: "0.06em", margin: "6px 0" }}>{sch0.start ? "JOB SCHEDULE" : "SCHEDULE THIS JOB"}</div>
+            <div className="grid gap-x-3" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))" }}>
+              <Field label="Start date"><input style={inputStyle} type="date" value={sStart} onChange={(e) => setSStart(e.target.value)} /></Field>
+              <Field label="Finish date (optional)"><input style={inputStyle} type="date" value={sEnd} onChange={(e) => setSEnd(e.target.value)} /></Field>
+            </div>
+            <Field label="Crew / who is going"><input style={inputStyle} value={sCrew} onChange={(e) => setSCrew(e.target.value)} placeholder="e.g. Marcus + 2 helpers" /></Field>
+            <Field label="Notes (gate code, materials to bring…)"><input style={inputStyle} value={sNote} onChange={(e) => setSNote(e.target.value)} /></Field>
+            <div className="flex gap-2 flex-wrap">
+              <Btn kind="gold" disabled={!!busy} onClick={saveSchedule}>{busy === "sch" ? "Saving…" : "Save schedule"}</Btn>
+              {sch0.start && <>
+                <Btn kind="ghost" onClick={icsFile}>Add to my calendar</Btn>
+                {phoneDigits && <a href={"sms:" + phoneDigits + "?&body=" + encodeURIComponent(schText())} style={{ textDecoration: "none" }}><Btn kind="ghost">Text the client</Btn></a>}
+                {quote.clientEmail && <a href={"mailto:" + quote.clientEmail + "?subject=" + encodeURIComponent("Your project start date — " + COMPANY.name) + "&body=" + encodeURIComponent(schText())} style={{ textDecoration: "none" }}><Btn kind="ghost">Email the client</Btn></a>}
+                <Btn kind="danger" onClick={clearSchedule}>Remove</Btn>
+              </>}
+            </div>
+            {sch0.start && <div style={{ fontSize: 13, color: BRAND.sub, marginTop: 8 }}>Saved: starts <b>{fmtDay2(sch0.start)}</b>{sch0.end ? " · finishes " + fmtDay2(sch0.end) : ""}. Save any edits above to update it.</div>}
+          </>}
+          {mode === "co" && <>
+            {cos.length > 0 && <div style={{ marginBottom: 12 }}>
+              {cos.map((c) => (
+                <div key={c.id} style={{ borderTop: `1px solid ${BRAND.line}`, padding: "8px 0", fontSize: 13.5 }}>
+                  <div className="flex justify-between gap-2 flex-wrap"><span><b>{c.no}</b> · {c.desc}</span><span><b>{c.amount < 0 ? "−" + money(-c.amount) : "+" + money(c.amount)}</b> · <b style={{ color: c.status === "approved" ? BRAND.green : c.status === "declined" ? BRAND.red : BRAND.amber }}>{c.status.toUpperCase()}</b></span></div>
+                  <div className="flex gap-2 flex-wrap" style={{ marginTop: 6 }}>
+                    {c.status === "pending" && <Btn small kind="gold" onClick={() => setCO(c, "approved")}>Client approved</Btn>}
+                    {c.status === "pending" && <Btn small kind="ghost" onClick={() => setCO(c, "declined")}>Client declined</Btn>}
+                    {c.status !== "pending" && <Btn small kind="ghost" onClick={() => setCO(c, "pending")}>Reopen</Btn>}
+                    {phoneDigits && <a href={"sms:" + phoneDigits + "?&body=" + encodeURIComponent(coText(c))} style={{ textDecoration: "none" }}><Btn small kind="ghost">Text for approval</Btn></a>}
+                    {quote.clientEmail && <a href={"mailto:" + quote.clientEmail + "?subject=" + encodeURIComponent("Change order " + c.no + " — " + COMPANY.name) + "&body=" + encodeURIComponent(coText(c))} style={{ textDecoration: "none" }}><Btn small kind="ghost">Email</Btn></a>}
+                    <Btn small kind="danger" onClick={() => delCO(c)}>Delete</Btn>
+                  </div>
+                </div>
+              ))}
+            </div>}
+            <div style={{ fontSize: 12, fontWeight: 700, color: BRAND.sub, letterSpacing: "0.06em", margin: "6px 0" }}>NEW CHANGE ORDER</div>
+            <Field label="What changed"><input style={inputStyle} value={cDesc} onChange={(e) => setCDesc(e.target.value)} placeholder="e.g. Add second coat in hallway, replace rotted fascia" /></Field>
+            <Field label="Amount (minus for a credit)"><input style={inputStyle} inputMode="decimal" value={cAmt} onChange={(e) => setCAmt(e.target.value)} placeholder="450" /></Field>
+            <Btn kind="gold" disabled={!!busy} onClick={addCO}>{busy === "co" ? "Saving…" : "Create change order"}</Btn>
+            <div style={{ fontSize: 12, color: BRAND.sub, marginTop: 6 }}>Send it to the client for a YES, then tap "Client approved". Approved change orders update the job total, balance, invoices and revenue. Approved total so far: <b>{money(coTotal(quote))}</b>.</div>
+          </>}
           {mode === "inv" && <>
             {invs.length > 0 && <div style={{ marginBottom: 12 }}>
               {invs.map((v) => { const st = invStatus(v); return (

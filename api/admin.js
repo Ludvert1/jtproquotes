@@ -202,6 +202,17 @@ const handler = async (req, res) => {
       list.sort((a, b) => String(b.at).localeCompare(String(a.at)));
       return res.status(200).json({ reviews: list.map((r) => ({ id: r.id, rating: r.rating, text: r.text, name: r.name, company: r.company, city: r.city, email: r.email, at: r.at, status: r.status, hiddenReason: r.hiddenReason || "" })) });
     }
+    if (action === "messages") {
+      const list = await listWithIds("contactMessages", 300).catch(() => []);
+      list.sort((x, y) => String(y.at).localeCompare(String(x.at)));
+      return res.status(200).json({ messages: list.slice(0, 100).map((m) => ({ id: m.id, name: m.name, email: m.email, phone: m.phone, company: m.company, topic: m.topic, message: m.message, at: m.at, done: !!m.done })) });
+    }
+    if (action === "resolveMessage") {
+      const id = String(body.id || "");
+      if (!/^[A-Za-z0-9]{6,40}$/.test(id)) return bad(res, 400, "Pick a message.");
+      await patch("contactMessages/" + id, { done: body.done !== false, doneAt: new Date().toISOString() });
+      return res.status(200).json({ ok: true });
+    }
     if (action === "moderateReview") {
       const id = String(body.id || "");
       if (!/^[A-Za-z0-9]{10,40}$/.test(id)) return bad(res, 400, "Pick a review.");

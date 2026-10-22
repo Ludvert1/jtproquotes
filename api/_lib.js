@@ -408,6 +408,21 @@ async function extractLead({ text, images }) {
    people is a paid feature there, so the free way to reach the assistants is
    one key per person: WEB3FORMS_KEYS holds them comma-separated. */
 async function sendEmail({ subject, message, replyTo }) {
+  /* Resend (a real sending service) is used when RESEND_API_KEY is set in Vercel.
+     Mail comes from support@s-i-quotespro.com and goes to ALERT_EMAILS
+     (comma-separated, default ludvert@gmail.com). Falls back to Web3Forms. */
+  if (process.env.RESEND_API_KEY) {
+    const to = String(process.env.ALERT_EMAILS || "ludvert@gmail.com").split(",").map((x) => x.trim()).filter(Boolean);
+    try {
+      const r = await fetch("https://api.resend.com/emails", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: "Bearer " + process.env.RESEND_API_KEY },
+        body: JSON.stringify({ from: process.env.RESEND_FROM || "S-I-Quotespro <support@s-i-quotespro.com>", to, subject, text: message, reply_to: replyTo || undefined }),
+      });
+      if (r.ok) return { sent: to.length, via: "resend" };
+      console.error("[sendEmail] resend failed:", r.status, (await r.text().catch(() => "")).slice(0, 200));
+    } catch (e) { console.error("[sendEmail] resend network:", e.message); }
+  }
   const keys = String(process.env.WEB3FORMS_KEYS || "").split(",").map((k) => k.trim()).filter(Boolean);
   if (!keys.length) return { sent: 0, skipped: "WEB3FORMS_KEYS is not set" };
 
