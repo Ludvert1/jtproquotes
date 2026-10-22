@@ -210,13 +210,8 @@
       "permanent": false
     },
     {
-      "source": "/help",
-      "destination": "/#help",
-      "permanent": false
-    },
-    {
       "source": "/support",
-      "destination": "/#help",
+      "destination": "/help",
       "permanent": false
     },
     {
