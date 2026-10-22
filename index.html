@@ -98,7 +98,7 @@ section { padding-block: clamp(64px, 9vw, 112px) }
 .hero-dots { position: absolute; left: 50%; bottom: 18px; transform: translateX(-50%); display: flex; gap: 8px; z-index: 2 }
 .hero-dots button { width: 9px; height: 9px; padding: 0; border-radius: 50%; border: 0; background: rgba(255,255,255,.4); cursor: pointer }
 .hero-dots button.on { background: var(--gold-hi) }
-@media (prefers-reduced-motion: reduce) { .hero-bg img.on { animation: none } .hero-bg img { transition: none } }
+@media (prefers-reduced-motion: reduce) { .hero-bg img.on { animation: none } }
 
 /* the quote sheet (hero visual) */
 .sheet { background: #FFFDF8; color: #17222E; border-radius: 14px; box-shadow: 0 30px 80px rgba(0,0,0,.45); overflow: hidden; transform: rotate(1.2deg) }
@@ -288,7 +288,7 @@ footer small { font: 600 12px/1 var(--mono); letter-spacing: .1em; color: var(--
 
 <main id="top" class="">
 <section class="hero">
-  <div class="hero-bg" aria-hidden="true"><img src="/site/media/hero/h1.jpg" alt="" class=on fetchpriority=high width="1600" height="1067"><img src="/site/media/hero/h7.jpg" alt="" loading=lazy width="1600" height="1067"><img src="/site/media/hero/h2.jpg" alt="" loading=lazy width="1600" height="1067"><img src="/site/media/hero/h4.jpg" alt="" loading=lazy width="1600" height="1067"><img src="/site/media/hero/h8.jpg" alt="" loading=lazy width="1600" height="1067"><img src="/site/media/hero/h5.jpg" alt="" loading=lazy width="1600" height="1067"><img src="/site/media/hero/h3.jpg" alt="" loading=lazy width="1600" height="1067"><img src="/site/media/hero/h6.jpg" alt="" loading=lazy width="1600" height="1067"></div>
+  <div class="hero-bg" aria-hidden="true"><img src="/site/media/hero/h1.jpg" alt="" class=on fetchpriority=high width="1600" height="1067"><img src="/site/media/hero/h7.jpg" alt="" width="1600" height="1067"><img src="/site/media/hero/h2.jpg" alt="" width="1600" height="1067"><img src="/site/media/hero/h4.jpg" alt="" width="1600" height="1067"><img src="/site/media/hero/h8.jpg" alt="" width="1600" height="1067"><img src="/site/media/hero/h5.jpg" alt="" width="1600" height="1067"><img src="/site/media/hero/h3.jpg" alt="" width="1600" height="1067"><img src="/site/media/hero/h6.jpg" alt="" width="1600" height="1067"></div>
   <div class="hero-dots" aria-hidden="true"></div>
   <div class="wrap">
     <div>
@@ -417,7 +417,7 @@ footer small { font: 600 12px/1 var(--mono); letter-spacing: .1em; color: var(--
 (function(){var imgs=document.querySelectorAll('.hero-bg img'),dots=document.querySelector('.hero-dots');if(!imgs.length)return;var i=0,t;
 imgs.forEach(function(_,k){var b=document.createElement('button');b.type='button';b.onclick=function(){go(k);start()};dots.appendChild(b)});dots.removeAttribute('aria-hidden');dots.setAttribute('role','presentation');
 function go(n){imgs[i].classList.remove('on');dots.children[i].classList.remove('on');i=n%imgs.length;imgs[i].classList.add('on');dots.children[i].classList.add('on')}
-function start(){clearInterval(t);if(!window.matchMedia('(prefers-reduced-motion: reduce)').matches)t=setInterval(function(){go(i+1)},6000)}
+function start(){clearInterval(t);t=setInterval(function(){go(i+1)},5000)}
 dots.children[0].classList.add('on');start()})();
 </script>
 <script>
