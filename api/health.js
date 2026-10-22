@@ -8,7 +8,8 @@
                             by Vercel cron; "Run check now" in Admin too.
    Results are kept in ops/health (server-only). No secrets are returned.
 ============================================================ */
-const { getDocAsServer, setDocAsServer, adminToken, parseBody } = require("./_lib");
+const { getDocAsServer, setDocAsServer, adminToken, parseBody, fromFields, DOCS } = require("./_lib");
+const { pushEnabled, sendToPeople } = require("./_push");
 const { report, alertOwner } = require("./_monitor");
 const { stripe, stripeOn, testMode } = require("./_stripe");
 
@@ -75,6 +76,68 @@ async function runAndRecord() {
   return state;
 }
 
+
+/* ---- Daily follow-up nudge (Scout) ----
+   Runs with the daily cron. For every company: quotes sent with no answer for
+   2 / 5 / 10 days get one phone alert to the owner, assistants and the person
+   who wrote the quote. Same rules as the Follow-ups panel in the app. It never
+   contacts a customer. */
+const FOLLOW_GAPS = [2, 5, 10];
+const DAY = 86400000;
+async function listIds(collection) {
+  const token = await adminToken();
+  const out = []; let page = "";
+  do {
+    const r = await fetch(`${DOCS}/${collection}?pageSize=300${page ? "&pageToken=" + encodeURIComponent(page) : ""}`, { headers: { Authorization: "Bearer " + token } });
+    if (!r.ok) break;
+    const d = await r.json();
+    (d.documents || []).forEach((doc) => out.push(Object.assign({ id: doc.name.split("/").pop() }, fromFields(doc.fields || {}))));
+    page = d.nextPageToken || "";
+  } while (page && out.length < 1500);
+  return out;
+}
+function dueStage(q, now) {
+  if (!q || !["sent", "negotiating"].includes(q.status) || q.followStop) return 0;
+  const done = Array.isArray(q.followUps) ? q.followUps : [];
+  if (done.length >= FOLLOW_GAPS.length) return 0;
+  const sent = (q.history || []).filter((x) => x && x.action === "Sent to client");
+  const sentAt = (sent.length && sent[sent.length - 1].at) || q.updatedAt || q.createdAt;
+  const last = (done.length && done[done.length - 1].at) || sentAt;
+  const t = new Date(last).getTime();
+  if (!t) return 0;
+  const sn = q.followSnooze ? new Date(q.followSnooze).getTime() : 0;
+  return Math.max(t + FOLLOW_GAPS[done.length] * DAY, sn || 0) <= now ? done.length + 1 : 0;
+}
+async function followUpNudges() {
+  if (!pushEnabled()) return { skipped: "push not configured" };
+  const subs = await listIds("pushSubs");
+  const now = Date.now();
+  const scopes = [{ base: "" }].concat((await listIds("companies")).map((c) => ({ base: "companies/" + c.id + "/" })));
+  let alerts = 0;
+  for (const sc of scopes) {
+    try {
+      const quotes = await listIds(sc.base + "quotes");
+      const due = quotes.filter((q) => dueStage(q, now));
+      if (!due.length) continue;
+      const users = await listIds(sc.base + "users");
+      const active = users.filter((u) => u.active === true);
+      const managers = active.filter((u) => u.role === "owner" || u.role === "assistant").map((u) => u.id);
+      const activeIds = new Set(active.map((u) => u.id));
+      const targets = new Set(managers);
+      due.forEach((q) => { if (q.createdBy && activeIds.has(q.createdBy)) targets.add(q.createdBy); });
+      const n = due.length;
+      const who = due.slice(0, 2).map((q) => q.clientName || "a client").join(", ");
+      const r = await sendToPeople(subs, Array.from(targets), {
+        title: n + " quote" + (n === 1 ? "" : "s") + " need a follow-up",
+        body: who + (n > 2 ? " and " + (n - 2) + " more" : "") + " — open the app to send a quick text.",
+        tag: "jtpq-followups", url: "/",
+      });
+      alerts += (r && r.devices) || 0;
+    } catch (e) { console.error("[health] follow-ups:", e.message); }
+  }
+  return { alerts };
+}
+
 /* ---- POST: a problem reported by the app in someone's browser (also reached as /api/report) ---- */
 const perIp = new Map();
 const NOISE = /ResizeObserver loop|Script error\.?$|chrome-extension:|moz-extension:|safari-extension:|Non-Error promise rejection captured|Load failed$|NetworkError when attempting|The operation was aborted|AbortError/i;
@@ -104,6 +167,7 @@ module.exports = async (req, res) => {
   if (!deep) return res.status(200).json({ ok: true, at: new Date().toISOString() });
   if (lastRun && Date.now() - lastRun.at < 60e3) return res.status(lastRun.state.ok ? 200 : 503).json(publicView(lastRun.state));
   const state = await runAndRecord();
+  if (/vercel-cron/i.test(String(req.headers["user-agent"] || ""))) { try { await followUpNudges(); } catch (e) { console.error("[health] nudges:", e.message); } }
   return res.status(state.ok ? 200 : 503).json(publicView(state));
 };
 function publicView(s) { return { ok: s.ok, at: s.at, checks: s.checks.map((c) => ({ name: c.name, ok: c.ok, ms: c.ms, detail: c.ok ? c.detail : "failing" })) }; }

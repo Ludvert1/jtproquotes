@@ -130,6 +130,39 @@ const wonValue = (q, settings) =>
    Records made before outcome dates existed fall back to the quote date. */
 const decidedDate = (q) => (q && q.decidedAt) || (q && q.createdAt);
 
+/* ---------- follow-up reminders (Scout) ----------
+   A quote that has gone out and not been decided gets a nudge after 2 days,
+   then 5, then 10 more. Nothing is sent to the customer automatically: the
+   contractor taps Text or Email and the drafted message opens ready to send. */
+const FOLLOW_GAPS = [2, 5, 10];
+const DAY_MS = 86400000;
+function sentAtOf(q) {
+  const lab = STATUS.sent.label;
+  const h = (q.history || []).filter((x) => x && x.action === lab);
+  return (h.length && h[h.length - 1].at) || q.updatedAt || q.createdAt;
+}
+function followUpInfo(q, now) {
+  if (!q || !["sent", "negotiating"].includes(q.status) || q.followStop) return null;
+  const done = q.followUps || [];
+  if (done.length >= FOLLOW_GAPS.length) return null;
+  const last = (done.length && done[done.length - 1].at) || sentAtOf(q);
+  const t = new Date(last).getTime();
+  if (!t) return null;
+  const snooze = q.followSnooze ? new Date(q.followSnooze).getTime() : 0;
+  const dueAt = Math.max(t + FOLLOW_GAPS[done.length] * DAY_MS, snooze || 0);
+  if (dueAt > (now || Date.now())) return null;
+  return { stage: done.length + 1, daysSince: Math.floor(((now || Date.now()) - new Date(sentAtOf(q)).getTime()) / DAY_MS) };
+}
+function followUpText(q, stage, total) {
+  const first = String(q.clientName || "").trim().split(/\s+/)[0];
+  const hi = "Hi" + (first ? " " + first : "") + ", ";
+  const job = q.jobTitle ? " for " + q.jobTitle : "";
+  const me = COMPANY.signer || COMPANY.name;
+  if (stage === 1) return hi + "this is " + me + " with " + COMPANY.name + ". I wanted to make sure you received the quote" + job + " (" + money(total) + "). Happy to answer any questions or adjust anything. Would you like to move forward? Thank you, " + me;
+  if (stage === 2) return hi + "just checking in on the quote" + job + ". If the price or scope needs changing, tell me and I will see what I can do. I can also hold a spot on the schedule for you. Thank you, " + me + ", " + COMPANY.name;
+  return hi + "I don't want to keep bothering you, so this is my last check-in on the quote" + job + ". If you still want it done, reply here and I will get it scheduled. If you've gone another way, no hard feelings. Thank you, " + me + ", " + COMPANY.name;
+}
+
 /* ---------- roles ---------- */
 const ROLE_LABEL = { owner: "Owner", assistant: "Assistant", associate: "Associate" };
 const roleOf = (u) => (u && u.role) || "associate";
@@ -909,7 +942,7 @@ function App() {
           <ThumbtackSetup settings={settings} quotes={quotes} compact onPatch={mergeSettings} onDismiss={(done) => { setLeadLater(true); if (done) notify("Lead inbox connected — new leads will show up here."); }} />
         )}
         {view === "dashboard" && <Dashboard me={me} isOwner={isOwner} isManager={isManager} quotes={visibleQuotes} users={users} settings={settings}
-          onOpen={(q) => { setActiveQuote(q); setView("edit"); }} onPreview={setPreviewQuote} onNew={() => setView("new")} onReceipt={(q) => setReceiptId(q.id)}
+          onOpen={(q) => { setActiveQuote(q); setView("edit"); }} onPreview={setPreviewQuote} onNew={() => setView("new")} onReceipt={(q) => setReceiptId(q.id)} onUpdate={upsertQuote} notify={notify}
           onDelete={async (q) => {
             if (!window.confirm("Permanently delete quote " + q.quoteNo + " for " + (q.clientName || "this client") + "?\n\nThis erases it from the database. It cannot be undone and leaves no record of what was quoted.\n\nIf you only want it out of the way, cancel and use Void instead.")) return;
             if (!window.confirm("Last check — delete " + q.quoteNo + " forever?")) return;
@@ -1273,7 +1306,63 @@ function inPeriod(iso, p) {
   return d.getFullYear() === n.getFullYear() && d.getMonth() === n.getMonth();
 }
 
-function Dashboard({ me, isOwner, isManager, quotes, users, settings, onOpen, onPreview, onNew, onDelete, onReceipt }) {
+
+function FollowUps({ quotes, settings, onUpdate, onOpen, who, notify }) {
+  const now = Date.now();
+  const due = quotes.filter((q) => !isVoid(q)).map((q) => ({ q, f: followUpInfo(q, now) })).filter((x) => x.f)
+    .sort((a, b) => b.f.daysSince - a.f.daysSince);
+  const [open, setOpen] = useState(true);
+  if (!due.length) return null;
+  const log = async (q, channel) => {
+    const at = new Date().toISOString();
+    try {
+      await onUpdate(Object.assign({}, q, { followUps: (q.followUps || []).concat([{ at, by: who, channel }]), followSnooze: "", updatedAt: at,
+        history: (q.history || []).concat([{ at, by: who, action: "Follow-up " + ((q.followUps || []).length + 1) + " sent by " + channel }]) }));
+      notify("Follow-up logged for " + (q.clientName || "client"));
+    } catch (e) { notify("Couldn't save that — try again."); }
+  };
+  const snooze = async (q) => {
+    try { await onUpdate(Object.assign({}, q, { followSnooze: new Date(Date.now() + 2 * DAY_MS).toISOString() })); notify("Okay, I'll remind you again in 2 days."); } catch (e) { notify("Couldn't save that."); }
+  };
+  const stop = async (q) => {
+    try { await onUpdate(Object.assign({}, q, { followStop: true })); notify("No more reminders for this quote."); } catch (e) { notify("Couldn't save that."); }
+  };
+  const phoneOf = (q) => String(q.clientPhone || "").replace(/[^\d+]/g, "");
+  return (
+    <Card style={{ marginBottom: 20, borderLeft: `4px solid ${BRAND.gold}` }}>
+      <div className="flex items-center justify-between flex-wrap gap-2" style={{ cursor: "pointer" }} onClick={() => setOpen(!open)}>
+        <div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontSize: 22, fontWeight: 700, color: BRAND.navy, letterSpacing: "0.03em" }}>
+          FOLLOW-UPS DUE ({due.length})
+        </div>
+        <div style={{ fontSize: 12.5, color: BRAND.sub }}>{open ? "Hide" : "Show"} · quotes sent with no answer yet</div>
+      </div>
+      {open && due.map(({ q, f }) => {
+        const total = computeQuote(q, settings).total;
+        const msg = followUpText(q, f.stage, total);
+        const ph = phoneOf(q);
+        const subj = "Your quote from " + COMPANY.name + (q.quoteNo ? " (" + q.quoteNo + ")" : "");
+        return (
+          <div key={q.id} style={{ borderTop: `1px solid ${BRAND.line}`, marginTop: 10, paddingTop: 10 }}>
+            <div style={{ fontSize: 14 }}><b>{q.clientName || "Client"}</b> · {money(total)} · <span style={{ color: BRAND.sub }}>{q.quoteNo} · sent {f.daysSince} day{f.daysSince === 1 ? "" : "s"} ago · reminder {f.stage} of {FOLLOW_GAPS.length}</span></div>
+            <div style={{ fontSize: 13, color: BRAND.sub, margin: "6px 0", fontStyle: "italic" }}>"{msg}"</div>
+            <div className="flex gap-2 flex-wrap">
+              {ph ? <a href={"sms:" + ph + "?&body=" + encodeURIComponent(msg)} onClick={() => log(q, "text")} style={{ textDecoration: "none" }}><Btn small kind="gold">Text</Btn></a> : null}
+              {q.clientEmail ? <a href={"mailto:" + q.clientEmail + "?subject=" + encodeURIComponent(subj) + "&body=" + encodeURIComponent(msg)} onClick={() => log(q, "email")} style={{ textDecoration: "none" }}><Btn small kind="gold">Email</Btn></a> : null}
+              {!ph && !q.clientEmail ? <span style={{ fontSize: 12.5, color: BRAND.amber }}>No phone or email on this quote.</span> : null}
+              <Btn small kind="ghost" onClick={() => { try { navigator.clipboard.writeText(msg); notify("Message copied"); } catch (e) { notify("Couldn't copy."); } }}>Copy</Btn>
+              <Btn small kind="ghost" onClick={() => log(q, "phone call")}>I called</Btn>
+              <Btn small kind="ghost" onClick={() => snooze(q)}>Remind in 2 days</Btn>
+              <Btn small kind="ghost" onClick={() => onOpen(q)}>Open quote</Btn>
+              <Btn small kind="ghost" onClick={() => stop(q)}>Stop</Btn>
+            </div>
+          </div>
+        );
+      })}
+    </Card>
+  );
+}
+
+function Dashboard({ me, isOwner, isManager, quotes, users, settings, onOpen, onPreview, onNew, onDelete, onReceipt, onUpdate, notify }) {
   const [period, setPeriod] = useState("month");
   const [filter, setFilter] = useState("all");
 
@@ -1332,6 +1421,8 @@ function Dashboard({ me, isOwner, isManager, quotes, users, settings, onOpen, on
           </Card>
         ))}
       </div>
+
+      <FollowUps quotes={quotes} settings={settings} onUpdate={onUpdate} onOpen={onOpen} who={me ? me.name : ""} notify={notify} />
 
       <div className="flex gap-2 mb-3 flex-wrap">
         {["all"].concat(Object.keys(STATUS)).map((k) => (
