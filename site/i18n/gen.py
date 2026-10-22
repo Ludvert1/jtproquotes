@@ -264,6 +264,7 @@ J = {
  "rv_plural": ("s", "s", ""),
  "rv_stars": (" out of 5 stars", " de 5 estrellas", " sur 5 étoiles"),
 }
+t("Banner photos from Unsplash: Annie Gray, 2H Media, Marie Dehayes, Josh Olalde, Jeriden Villegas, Scott Blake, immo RENOVATION and Milivoj Kuhar.","Fotos del banner de Unsplash: Annie Gray, 2H Media, Marie Dehayes, Josh Olalde, Jeriden Villegas, Scott Blake, immo RENOVATION y Milivoj Kuhar.","Photos de la bannière provenant d'Unsplash : Annie Gray, 2H Media, Marie Dehayes, Josh Olalde, Jeriden Villegas, Scott Blake, immo RENOVATION et Milivoj Kuhar.")
 KEEP = ["S-I-Quotespro","SI","S-I-QUOTESPRO","THUMBTACK","ANGI","HOMEADVISOR","YELP","BARK","Quill","Scout","Ledger","HVAC","Pro","{{VIDEO}}","Settings → Lead inbox","Copy my lead script","script.google.com","New project","Save","setup","Run","Advanced","Go to project","Allow","✅ CONNECTED","stopConnector","support@s-i-quotespro.com","(713) 835-8245"]
 json.dump({"keep":KEEP,"js":{k:{"en":v[0],"es":v[1],"fr":v[2]} for k,v in J.items()}},open("meta.json","w"),ensure_ascii=False,indent=1)
 json.dump({k:v[0] for k,v in T.items()},open("es.json","w"),ensure_ascii=False,indent=1)
