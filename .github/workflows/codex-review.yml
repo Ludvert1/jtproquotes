@@ -10,42 +10,26 @@ jobs:
   review:
     if: github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.user.login == 'Ludvert1'
     runs-on: ubuntu-latest
-    timeout-minutes: 25
-    outputs:
-      feedback: ${{ steps.codex.outputs.final-message }}
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
         with:
           ref: refs/pull/${{ github.event.pull_request.number }}/merge
           fetch-depth: 0
           persist-credentials: false
-      - name: Review PR
-        id: codex
-        uses: openai/codex-action@v1
+      - uses: actions/setup-node@v4
         with:
-          openai-api-key: ${{ secrets.OPENAI_API_KEY }}
-          permission-profile: ":read-only"
-          prompt: |
-            Review the current pull request against its base branch.
-            Focus on correctness, authentication, Firebase security rules,
-            Vercel API compatibility, Stripe billing, mobile portability,
-            test coverage, and accidental credential disclosure.
-            Do not change files. Report concrete findings with file paths.
-  feedback:
-    needs: review
-    if: needs.review.outputs.feedback != ''
-    runs-on: ubuntu-latest
-    permissions:
-      issues: write
-    steps:
-      - uses: actions/github-script@v7
+          node-version: '22'
+      - name: Install Codex CLI
+        run: npm install --global @openai/codex
+      - name: Review changes without editing files
         env:
-          CODEX_FEEDBACK: ${{ needs.review.outputs.feedback }}
-        with:
-          script: |
-            await github.rest.issues.createComment({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: context.issue.number,
-              body: process.env.CODEX_FEEDBACK.slice(0, 60000)
-            });
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          test -n "$OPENAI_API_KEY" || { echo "OPENAI_API_KEY missing"; exit 1; }
+          git diff --name-status "$BASE_SHA" HEAD
+          codex exec --sandbox read-only --skip-git-repo-check --output-last-message /tmp/codex-review.txt \
+            "Review the diff from $BASE_SHA to HEAD for security, correctness and tests. Do not modify any files. Return concise findings with paths and severity."
+          test -s /tmp/codex-review.txt
+          cat /tmp/codex-review.txt >> "$GITHUB_STEP_SUMMARY"
