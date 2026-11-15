@@ -29,7 +29,7 @@ function vapidKeys() {
   if (!priv) return null;
   return { priv: unb64u(priv), pub: unb64u(pub), pubText: pub };
 }
-const pushEnabled = () => !!process.env.VAPID_PRIVATE_KEY;
+const pushEnabled = () => !!process.env.VAPID_PRIVATE_KEY || !!process.env.FIREBASE_SERVICE_ACCOUNT;
 
 /* VAPID: a short-lived ES256 token proving the push came from us. */
 function vapidHeader(endpoint, keys) {
@@ -69,9 +69,45 @@ function encrypt(payload, sub) {
   return Buffer.concat([salt, rs, Buffer.from([asPublic.length]), asPublic, body]);
 }
 
+
+/* ---- Native phones (Android / iPhone app): Firebase Cloud Messaging v1 ---- */
+let fcmTok = null;
+async function fcmAccess(sa) {
+  if (fcmTok && fcmTok.exp > Date.now() + 60000) return fcmTok.token;
+  const now = Math.floor(Date.now() / 1000);
+  const unsigned = b64u(JSON.stringify({ alg: "RS256", typ: "JWT" })) + "." + b64u(JSON.stringify({
+    iss: sa.client_email, scope: "https://www.googleapis.com/auth/firebase.messaging",
+    aud: "https://oauth2.googleapis.com/token", iat: now, exp: now + 3600 }));
+  const sig = crypto.createSign("RSA-SHA256").update(unsigned).sign(String(sa.private_key).replace(/\\n/g, "\n"));
+  const r = await fetch("https://oauth2.googleapis.com/token", { method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: "grant_type=urn:ietf:params:oauth:grant-type:jwt-bearer&assertion=" + encodeURIComponent(unsigned + "." + b64u(sig)) });
+  if (!r.ok) throw new Error("fcm auth " + r.status);
+  const d = await r.json();
+  fcmTok = { token: d.access_token, exp: Date.now() + (d.expires_in || 3600) * 1000 };
+  return fcmTok.token;
+}
+async function sendNative(sub, message) {
+  try {
+    const sa = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT || "null");
+    if (!sa || !sa.client_email) return { ok: false, skipped: true };
+    const token = await fcmAccess(sa);
+    const r = await fetch("https://fcm.googleapis.com/v1/projects/" + sa.project_id + "/messages:send", {
+      method: "POST", headers: { Authorization: "Bearer " + token, "Content-Type": "application/json" },
+      body: JSON.stringify({ message: { token: sub.fcmToken,
+        notification: { title: message.title || "S-I-Quotespro", body: message.body || "" },
+        data: { url: String(message.url || "/app") },
+        android: { priority: "high" }, apns: { payload: { aps: { sound: "default" } } } } }),
+    });
+    if (r.status === 404 || r.status === 400) return { ok: false, gone: r.status === 404 };
+    return { ok: r.ok };
+  } catch (e) { console.error("[push] fcm:", e.message); return { ok: false }; }
+}
+
 /* Sends to one subscription. Returns { ok, gone } — gone means the phone
    unsubscribed or the app was removed, so the record can be dropped. */
 async function sendOne(sub, message) {
+  if (sub && sub.native && sub.fcmToken) return sendNative(sub, message);
   const keys = vapidKeys();
   if (!keys) return { ok: false, skipped: true };
   if (!sub || !sub.endpoint || !sub.keys || !sub.keys.p256dh || !sub.keys.auth) return { ok: false };
@@ -97,7 +133,7 @@ async function sendOne(sub, message) {
 /* Every device of every listed person. `records` are pushSubs documents:
    { uid, subs: { <id>: { endpoint, keys, ... } } }. */
 async function sendToPeople(records, uids, message) {
-  if (!pushEnabled()) return { sent: 0, skipped: "VAPID_PRIVATE_KEY is not set" };
+  if (!pushEnabled()) return { sent: 0, skipped: "no push keys set" };
   const wanted = new Set(uids);
   const targets = [];
   (records || []).forEach((rec) => {

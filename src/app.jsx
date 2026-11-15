@@ -438,7 +438,8 @@ const VAPID_PUBLIC = (window.JTPQ_CONFIG && window.JTPQ_CONFIG.vapidPublicKey)
 
 const isIOS = () => /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
 const isStandalone = () => (window.matchMedia && window.matchMedia("(display-mode: standalone)").matches) || window.navigator.standalone === true;
-const pushSupported = () => "serviceWorker" in navigator && "PushManager" in window && "Notification" in window;
+const nativePush = () => { try { return window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform() ? window.Capacitor.Plugins.PushNotifications : null; } catch { return null; } };
+const pushSupported = () => !!nativePush() || "serviceWorker" in navigator && "PushManager" in window && "Notification" in window;
 
 let swReg = null;
 async function getSW() {
@@ -460,6 +461,22 @@ const deviceKey = (endpoint) => { let h = 5381; for (let i = 0; i < endpoint.len
    show the permission prompt (must come from a tap). */
 async function enablePush(me, ask) {
   if (!CLOUD || !pushSupported()) return "unsupported";
+  const NP = nativePush();
+  if (NP) {
+    let st = (await NP.checkPermissions()).receive;
+    if (st === "prompt" && ask) st = (await NP.requestPermissions()).receive;
+    if (st !== "granted") return st === "denied" ? "denied" : "default";
+    const tok = await new Promise((res, rej) => {
+      NP.addListener("registration", (t) => res(t.value));
+      NP.addListener("registrationError", (e) => rej(new Error(e.error || "registration failed")));
+      NP.register();
+    });
+    await col("pushSubs").doc(me.id).set({
+      uid: me.id, name: me.name || "", updatedAt: new Date().toISOString(),
+      subs: { ["n" + deviceKey(tok)]: { native: true, fcmToken: tok, ua: (window.Capacitor.getPlatform && window.Capacitor.getPlatform()) || "native", at: new Date().toISOString() } },
+    }, { merge: true });
+    return "on";
+  }
   if (isIOS() && !isStandalone()) return "needs-install";
   let perm = Notification.permission;
   if (perm === "default" && ask) perm = await Notification.requestPermission();

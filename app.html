@@ -957,7 +957,14 @@ const Card = ({
 const VAPID_PUBLIC = window.JTPQ_CONFIG && window.JTPQ_CONFIG.vapidPublicKey || "BHJZrgFysdU8GUtlP0FM04D_brRVTjfNOdYX-VBnEBzWewiM0g7tpksbZkKF0snEyVBHPxPcxAK31Frtap6bMSY";
 const isIOS = () => /iPad|iPhone|iPod/.test(navigator.userAgent) || navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1;
 const isStandalone = () => window.matchMedia && window.matchMedia("(display-mode: standalone)").matches || window.navigator.standalone === true;
-const pushSupported = () => "serviceWorker" in navigator && "PushManager" in window && "Notification" in window;
+const nativePush = () => {
+  try {
+    return window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform() ? window.Capacitor.Plugins.PushNotifications : null;
+  } catch {
+    return null;
+  }
+};
+const pushSupported = () => !!nativePush() || "serviceWorker" in navigator && "PushManager" in window && "Notification" in window;
 let swReg = null;
 async function getSW() {
   if (swReg) return swReg;
@@ -985,6 +992,33 @@ const deviceKey = endpoint => {
 };
 async function enablePush(me, ask) {
   if (!CLOUD || !pushSupported()) return "unsupported";
+  const NP = nativePush();
+  if (NP) {
+    let st = (await NP.checkPermissions()).receive;
+    if (st === "prompt" && ask) st = (await NP.requestPermissions()).receive;
+    if (st !== "granted") return st === "denied" ? "denied" : "default";
+    const tok = await new Promise((res, rej) => {
+      NP.addListener("registration", t => res(t.value));
+      NP.addListener("registrationError", e => rej(new Error(e.error || "registration failed")));
+      NP.register();
+    });
+    await col("pushSubs").doc(me.id).set({
+      uid: me.id,
+      name: me.name || "",
+      updatedAt: new Date().toISOString(),
+      subs: {
+        ["n" + deviceKey(tok)]: {
+          native: true,
+          fcmToken: tok,
+          ua: window.Capacitor.getPlatform && window.Capacitor.getPlatform() || "native",
+          at: new Date().toISOString()
+        }
+      }
+    }, {
+      merge: true
+    });
+    return "on";
+  }
   if (isIOS() && !isStandalone()) return "needs-install";
   let perm = Notification.permission;
   if (perm === "default" && ask) perm = await Notification.requestPermission();
@@ -1167,7 +1201,7 @@ function AlertsBell({
     }
   }, "Phone alerts"), state === "on" && React.createElement("div", {
     style: p
-  }, "This device will ring and vibrate for ", canManage(me) ? "quotes waiting for your approval and new Thumbtack leads" : "quotes that are approved or sent back to you", " \u2014 even with the app closed."), state === "default" && React.createElement("div", {
+  }, "This device will ring and vibrate for ", canManage(me) ? "quotes waiting for your approval and new Thumbtack leads" : "quotes that are approved or sent back to you", " — even with the app closed."), state === "default" && React.createElement("div", {
     style: p
   }, "Get a sound, vibration and a badge on your phone for ", canManage(me) ? "quotes waiting for approval and new leads" : "approved and sent-back quotes", ". Tap below, then choose ", React.createElement("strong", null, "Allow"), "."), state === "needs-install" && React.createElement("div", {
     style: p
@@ -1184,17 +1218,17 @@ function AlertsBell({
     style: {
       listStyle: "decimal"
     }
-  }, "Choose ", React.createElement("strong", null, "Add to Home Screen"), " \u2192 Add"), React.createElement("li", {
+  }, "Choose ", React.createElement("strong", null, "Add to Home Screen"), " → Add"), React.createElement("li", {
     style: {
       listStyle: "decimal"
     }
   }, "Open ", React.createElement("strong", null, PRODUCT), " from the new icon, sign in, and tap ", React.createElement("strong", null, "Turn on alerts")))), state === "denied" && React.createElement("div", {
     style: p
-  }, "Notifications are blocked for this site. Allow them in your phone's settings (Chrome: \u22EE \u2192 Settings \u2192 Site settings \u2192 Notifications; iPhone: Settings \u2192 Notifications \u2192 ", PRODUCT, "), then reload."), state === "unsupported" && React.createElement("div", {
+  }, "Notifications are blocked for this site. Allow them in your phone's settings (Chrome: ⋮ → Settings → Site settings → Notifications; iPhone: Settings → Notifications → ", PRODUCT, "), then reload."), state === "unsupported" && React.createElement("div", {
     style: p
   }, "This browser can't receive alerts. Use Chrome on Android, Safari from the Home Screen on iPhone, or Chrome/Edge on a computer."), state === "checking" && React.createElement("div", {
     style: p
-  }, "Checking\u2026"), msg && React.createElement("div", {
+  }, "Checking…"), msg && React.createElement("div", {
     style: {
       fontSize: 12.5,
       fontWeight: 600,
@@ -1622,7 +1656,7 @@ function App() {
       fontSize: 24,
       letterSpacing: "0.15em"
     }
-  }, "LOADING ", PRODUCT.toUpperCase(), "\u2026"));
+  }, "LOADING ", PRODUCT.toUpperCase(), "…"));
   if (pending) return React.createElement(PendingApproval, {
     profile: pending,
     onSignOut: () => fbAuth.signOut()
@@ -1814,7 +1848,7 @@ function App() {
     style: {
       color: BRAND.ink
     }
-  }, me.name), " \xB7 ", ROLE_LABEL[roleOf(me)]), view === "dashboard" && inTrial && React.createElement(TrialBanner, {
+  }, me.name), " · ", ROLE_LABEL[roleOf(me)]), view === "dashboard" && inTrial && React.createElement(TrialBanner, {
     billing: billing,
     isOwner: isOwner,
     onChoose: () => setPlanOpen(true)
@@ -2067,7 +2101,7 @@ function PendingApproval({
       textAlign: "center",
       marginTop: 14
     }
-  }, COMPANY.name, " \xB7 ", COMPANY.area)));
+  }, COMPANY.name, " · ", COMPANY.area)));
 }
 function CloudAuth({
   gate
@@ -2306,7 +2340,7 @@ function CloudAuth({
       color: BRAND.sub,
       marginBottom: 14
     }
-  }, "Photo-to-quote AI, branded PDF quotes with your name and logo, and a lead inbox \u2014 set up in two minutes. Free for 14 days or 7 quotes, whichever comes first. No card needed to start."), REF_CODE && React.createElement("div", {
+  }, "Photo-to-quote AI, branded PDF quotes with your name and logo, and a lead inbox — set up in two minutes. Free for 14 days or 7 quotes, whichever comes first. No card needed to start."), REF_CODE && React.createElement("div", {
     style: {
       background: "#E2F2E9",
       color: BRAND.green,
@@ -2341,16 +2375,16 @@ function CloudAuth({
     placeholder: "Katy, TX"
   }))), React.createElement(Field, {
     label: "Thumbtack leads",
-    hint: "You'll connect your Thumbtack account in the next step \u2014 it takes about 5 minutes."
+    hint: "You'll connect your Thumbtack account in the next step — it takes about 5 minutes."
   }, React.createElement("select", {
     style: inputStyle,
     value: replyMode,
     onChange: e => setReplyMode(e.target.value)
   }, React.createElement("option", {
     value: "auto"
-  }, "Yes \u2014 auto-reply to new leads (fastest)"), React.createElement("option", {
+  }, "Yes — auto-reply to new leads (fastest)"), React.createElement("option", {
     value: "manual"
-  }, "Yes \u2014 let me review each reply first"), React.createElement("option", {
+  }, "Yes — let me review each reply first"), React.createElement("option", {
     value: "none"
   }, "I don't use Thumbtack")))), (mode === "register" || mode === "company") && React.createElement(Field, {
     label: mode === "company" ? "Your full name" : "Full name"
@@ -2376,7 +2410,7 @@ function CloudAuth({
     type: "password",
     value: pw,
     onChange: e => setPw(e.target.value),
-    placeholder: "\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022"
+    placeholder: "••••••••"
   })), mode === "register" && React.createElement(Field, {
     label: "Team code",
     hint: "Provided by your company's owner."
@@ -2578,7 +2612,7 @@ function Auth({
       fontSize: 13,
       letterSpacing: "0.08em"
     }
-  }, "PROFESSIONAL QUOTES \xB7 JTPROCONSTRUCTION LLC")), React.createElement("div", {
+  }, "PROFESSIONAL QUOTES · JTPROCONSTRUCTION LLC")), React.createElement("div", {
     style: {
       background: "#fff",
       borderRadius: 14,
@@ -2594,7 +2628,7 @@ function Auth({
       fontWeight: 600,
       marginBottom: 16
     }
-  }, "First account setup \u2014 this account becomes the Owner account."), mode === "register" && React.createElement(Field, {
+  }, "First account setup — this account becomes the Owner account."), mode === "register" && React.createElement(Field, {
     label: "Full name"
   }, React.createElement("input", {
     style: inputStyle,
@@ -2611,14 +2645,14 @@ function Auth({
     autoCapitalize: "none"
   })), React.createElement(Field, {
     label: "PIN",
-    hint: "At least 4 digits \u2014 you'll use it to sign in."
+    hint: "At least 4 digits — you'll use it to sign in."
   }, React.createElement("input", {
     style: inputStyle,
     type: "password",
     inputMode: "numeric",
     value: pin,
     onChange: e => setPin(e.target.value),
-    placeholder: "\u2022\u2022\u2022\u2022"
+    placeholder: "••••"
   })), mode === "register" && !firstUser && settings.requireTeamCode && React.createElement(Field, {
     label: "Team code",
     hint: "Provided by the owner. Keeps outsiders from creating accounts."
@@ -2784,7 +2818,7 @@ function FollowUps({
       fontSize: 12.5,
       color: BRAND.sub
     }
-  }, open ? "Hide" : "Show", " \xB7 quotes sent with no answer yet")), open && due.map(({
+  }, open ? "Hide" : "Show", " · quotes sent with no answer yet")), open && due.map(({
     q,
     f
   }) => {
@@ -2803,11 +2837,11 @@ function FollowUps({
       style: {
         fontSize: 14
       }
-    }, React.createElement("b", null, q.clientName || "Client"), " \xB7 ", money(total), " \xB7 ", React.createElement("span", {
+    }, React.createElement("b", null, q.clientName || "Client"), " · ", money(total), " · ", React.createElement("span", {
       style: {
         color: BRAND.sub
       }
-    }, q.quoteNo, " \xB7 sent ", f.daysSince, " day", f.daysSince === 1 ? "" : "s", " ago \xB7 reminder ", f.stage, " of ", FOLLOW_GAPS.length)), React.createElement("div", {
+    }, q.quoteNo, " · sent ", f.daysSince, " day", f.daysSince === 1 ? "" : "s", " ago · reminder ", f.stage, " of ", FOLLOW_GAPS.length)), React.createElement("div", {
       style: {
         fontSize: 13,
         color: BRAND.sub,
@@ -2898,7 +2932,7 @@ function UpcomingJobs({
       paddingTop: 8,
       fontSize: 14
     }
-  }, React.createElement("span", null, React.createElement("b", null, fmtDay2(q.schedule.start)), q.schedule.end && q.schedule.end !== q.schedule.start ? " – " + fmtDay2(q.schedule.end) : "", " \xB7 ", q.clientName || "Client", " \xB7 ", q.jobTitle || "", q.schedule.crew ? " · " + q.schedule.crew : "", q.schedule.start === today ? " · TODAY" : ""), onReceipt && React.createElement(Btn, {
+  }, React.createElement("span", null, React.createElement("b", null, fmtDay2(q.schedule.start)), q.schedule.end && q.schedule.end !== q.schedule.start ? " – " + fmtDay2(q.schedule.end) : "", " · ", q.clientName || "Client", " · ", q.jobTitle || "", q.schedule.crew ? " · " + q.schedule.crew : "", q.schedule.start === today ? " · TODAY" : ""), onReceipt && React.createElement(Btn, {
     small: true,
     kind: "ghost",
     onClick: () => onReceipt(q)
@@ -3076,7 +3110,7 @@ function Dashboard({
       fontSize: 15,
       color: BRAND.sub
     }
-  }, "No quotes here yet. Create your first one \u2014 it takes about two minutes."), React.createElement("div", {
+  }, "No quotes here yet. Create your first one — it takes about two minutes."), React.createElement("div", {
     className: "mt-4"
   }, React.createElement(Btn, {
     kind: "gold",
@@ -3106,12 +3140,12 @@ function Dashboard({
         fontSize: 15,
         textDecoration: isVoid(q) ? "line-through" : "none"
       }
-    }, q.quoteNo, " \xB7 ", q.clientName || "Unnamed client"), React.createElement("div", {
+    }, q.quoteNo, " · ", q.clientName || "Unnamed client"), React.createElement("div", {
       style: {
         fontSize: 13,
         color: BRAND.sub
       }
-    }, q.jobTitle || q.category, " \xB7 ", fmtDate(q.createdAt), isManager && users[q.createdBy] ? ` · by ${users[q.createdBy].name}` : ""), q.fromInbox && React.createElement("div", {
+    }, q.jobTitle || q.category, " · ", fmtDate(q.createdAt), isManager && users[q.createdBy] ? ` · by ${users[q.createdBy].name}` : ""), q.fromInbox && React.createElement("div", {
       style: {
         fontSize: 11.5,
         color: BRAND.gold,
@@ -3119,7 +3153,7 @@ function Dashboard({
         fontWeight: 700,
         letterSpacing: "0.04em"
       }
-    }, "FROM A LEAD EMAIL", q.leadSource ? " · " + String(q.leadSource).toUpperCase() : "", " \u2014 ", q.aiDrafted ? "AI-drafted, review & send reply" : "needs pricing"), !q.fromInbox && q.aiDrafted && q.status === "draft" && React.createElement("div", {
+    }, "FROM A LEAD EMAIL", q.leadSource ? " · " + String(q.leadSource).toUpperCase() : "", " — ", q.aiDrafted ? "AI-drafted, review & send reply" : "needs pricing"), !q.fromInbox && q.aiDrafted && q.status === "draft" && React.createElement("div", {
       style: {
         fontSize: 11.5,
         color: BRAND.gold,
@@ -3140,7 +3174,7 @@ function Dashboard({
         marginTop: 3,
         fontWeight: 600
       }
-    }, "Voided", q.voidedBy ? " by " + q.voidedBy : "", q.voidReason ? " — " + q.voidReason : "", " \xB7 does not count toward any total"), isDecided(q) && !isVoid(q) && React.createElement("div", {
+    }, "Voided", q.voidedBy ? " by " + q.voidedBy : "", q.voidReason ? " — " + q.voidReason : "", " · does not count toward any total"), isDecided(q) && !isVoid(q) && React.createElement("div", {
       style: {
         fontSize: 12,
         color: BRAND.sub,
@@ -3428,7 +3462,7 @@ function StartFrom() {
       color: BRAND.sub,
       marginTop: 6
     }
-  }, "Drive time from ", v ? React.createElement("b", null, v) : "your phone's location", " \xB7 ", React.createElement("a", {
+  }, "Drive time from ", v ? React.createElement("b", null, v) : "your phone's location", " · ", React.createElement("a", {
     href: "#",
     onClick: e => {
       e.preventDefault();
@@ -3494,7 +3528,7 @@ function PropertyPanel({
         color: BRAND.sub,
         marginTop: -4
       }
-    }, "Add the job address to look up the property \u2014 roof size, drive time, flood zone.");
+    }, "Add the job address to look up the property — roof size, drive time, flood zone.");
   }
   const row = (label, value) => value ? React.createElement("div", {
     style: {
@@ -3532,7 +3566,7 @@ function PropertyPanel({
       color: BRAND.sub,
       fontWeight: 700
     }
-  }, "\uD83D\uDCCD Property ", p && !stale ? "· " + (p.precise ? "found" : "approximate") : ""), !locked && React.createElement(Btn, {
+  }, "📍 Property ", p && !stale ? "· " + (p.precise ? "found" : "approximate") : ""), !locked && React.createElement(Btn, {
     small: true,
     kind: "ghost",
     disabled: busy,
@@ -3621,7 +3655,7 @@ function PropertyPanel({
       color: BRAND.sub,
       marginTop: 4
     }
-  }, "The AI uses these when drafting. Satellite measurements are estimates \u2014 confirm on site.")));
+  }, "The AI uses these when drafting. Satellite measurements are estimates — confirm on site.")));
 }
 function AiAssistant({
   me,
@@ -4016,13 +4050,13 @@ function AiAssistant({
       color: BRAND.green,
       fontSize: 15
     }
-  }, "\u2705 Your AI draft is ready"), React.createElement("div", {
+  }, "✅ Your AI draft is ready"), React.createElement("div", {
     style: {
       fontSize: 12.5,
       color: BRAND.sub,
       marginTop: 2
     }
-  }, found.draft.jobTitle || found.draft.category, " \u2014 it finished while you were away.")), React.createElement(Btn, {
+  }, found.draft.jobTitle || found.draft.category, " — it finished while you were away.")), React.createElement(Btn, {
     small: true,
     kind: "gold",
     disabled: disabled,
@@ -4053,7 +4087,7 @@ function AiAssistant({
       color: BRAND.sub,
       marginTop: 2
     }
-  }, "Snap the job site or upload photos, paste the customer's Thumbtack message, and get the work detected, scoped and priced as a draft \u2014 with the questions to ask and a reply ready to send.")), React.createElement(Btn, {
+  }, "Snap the job site or upload photos, paste the customer's Thumbtack message, and get the work detected, scoped and priced as a draft — with the questions to ask and a reply ready to send.")), React.createElement(Btn, {
     small: true,
     kind: "gold",
     onClick: () => setOpen(true),
@@ -4083,7 +4117,7 @@ function AiAssistant({
     }
   }, "Close")), !draft && React.createElement("div", null, React.createElement("div", {
     style: label
-  }, "Job photos \xB7 lead screenshots (", photos.length, "/", MAX_PHOTOS, ")"), React.createElement("div", {
+  }, "Job photos · lead screenshots (", photos.length, "/", MAX_PHOTOS, ")"), React.createElement("div", {
     className: "flex gap-2 flex-wrap items-center mb-2"
   }, photos.map((s, i) => React.createElement("div", {
     key: i,
@@ -4129,14 +4163,14 @@ function AiAssistant({
       cursor: "pointer",
       fontWeight: 700
     }
-  }, "\xD7")))), React.createElement("div", {
+  }, "×")))), React.createElement("div", {
     className: "flex gap-2 flex-wrap mb-2"
   }, React.createElement(Btn, {
     small: true,
     kind: "primary",
     onClick: () => camRef.current && camRef.current.click(),
     disabled: photos.length >= MAX_PHOTOS || !!busy
-  }, "\uD83D\uDCF7 Take photo"), React.createElement(Btn, {
+  }, "📷 Take photo"), React.createElement(Btn, {
     small: true,
     kind: "ghost",
     onClick: () => fileRef.current && fileRef.current.click(),
@@ -4173,7 +4207,7 @@ function AiAssistant({
     }
   }, "Wide shots for context, close-ups of the damage. Something of known size in frame (a door, an outlet, a tape measure) makes sizes far more accurate. You can also paste or drag images here."), React.createElement(Field, {
     label: "Customer's message and your notes",
-    hint: "Paste the Thumbtack request, and add anything you know \u2014 measurements, the finish they want, access, timing."
+    hint: "Paste the Thumbtack request, and add anything you know — measurements, the finish they want, access, timing."
   }, React.createElement("textarea", {
     style: Object.assign({}, inputStyle, {
       minHeight: 100,
@@ -4201,7 +4235,7 @@ function AiAssistant({
     style: {
       color: BRAND.goldBright
     }
-  }, "Still drafting on our server\u2026"), " It keeps going even if your screen turns off or you switch apps. The draft will appear here as soon as it's ready, and you'll get a phone alert if alerts are on.") : busy === "draft" ? React.createElement("div", {
+  }, "Still drafting on our server…"), " It keeps going even if your screen turns off or you switch apps. The draft will appear here as soon as it's ready, and you'll get a phone alert if alerts are on.") : busy === "draft" ? React.createElement("div", {
     style: {
       background: BRAND.navy,
       color: "#fff",
@@ -4213,11 +4247,11 @@ function AiAssistant({
     style: {
       color: BRAND.goldBright
     }
-  }, "Drafting\u2026"), " ", React.createElement("span", {
+  }, "Drafting…"), " ", React.createElement("span", {
     style: {
       opacity: 0.85
     }
-  }, "(safe to lock your phone \u2014 it finishes on our server)"), " ", secs < 8 ? "Looking at the photos" : secs < 20 ? "Identifying the work and sizing it" : secs < 40 ? "Writing the scope and pricing materials" : "Almost there — detailed jobs take up to a minute or two", " \xB7 ", secs, "s") : React.createElement("div", {
+  }, "(safe to lock your phone — it finishes on our server)"), " ", secs < 8 ? "Looking at the photos" : secs < 20 ? "Identifying the work and sizing it" : secs < 40 ? "Writing the scope and pricing materials" : "Almost there — detailed jobs take up to a minute or two", " · ", secs, "s") : React.createElement("div", {
     className: "flex gap-2 flex-wrap items-center"
   }, React.createElement(Btn, {
     kind: "gold",
@@ -4245,7 +4279,7 @@ function AiAssistant({
       fontSize: 12.5,
       color: BRAND.sub
     }
-  }, draft.category, " \xB7 crew of ", draft.labor.crew, " \xB7 ", draft.labor.days, " day", draft.labor.days === 1 ? "" : "s", " \xB7 ", draft.materials.length, " material lines")), React.createElement("div", {
+  }, draft.category, " · crew of ", draft.labor.crew, " · ", draft.labor.days, " day", draft.labor.days === 1 ? "" : "s", " · ", draft.materials.length, " material lines")), React.createElement("div", {
     style: {
       textAlign: "right"
     }
@@ -4262,7 +4296,7 @@ function AiAssistant({
       color: BRAND.green,
       fontWeight: 700
     }
-  }, "Market ", money(mk.low).replace(".00", ""), "\u2013", money(mk.high).replace(".00", ""), win ? " · " + win.marginPct + "% margin" : ""), React.createElement("div", {
+  }, "Market ", money(mk.low).replace(".00", ""), "–", money(mk.high).replace(".00", ""), win ? " · " + win.marginPct + "% margin" : ""), React.createElement("div", {
     style: {
       fontSize: 11.5,
       color: BRAND.sub
@@ -4274,7 +4308,7 @@ function AiAssistant({
       fontWeight: 600,
       color: draft.confidence === "high" ? BRAND.green : draft.confidence === "medium" ? BRAND.amber : BRAND.red
     }
-  }, draft.confidence.toUpperCase(), " CONFIDENCE \u2014 ", draft.confidenceReason, draft.needsSiteVisit ? " · Site visit recommended before a firm price." : ""), draft.projectSummary && React.createElement("div", {
+  }, draft.confidence.toUpperCase(), " CONFIDENCE — ", draft.confidenceReason, draft.needsSiteVisit ? " · Site visit recommended before a firm price." : ""), draft.projectSummary && React.createElement("div", {
     style: {
       fontSize: 13,
       marginTop: 8,
@@ -4332,7 +4366,7 @@ function AiAssistant({
     style: box
   }, React.createElement("div", {
     style: label
-  }, "Scope of work \u2014 ", draft.scope.filter(x => x.on).length, " steps included, ", draft.scope.filter(x => !x.on).length, " standard steps left unticked"), draft.scope.map((x, i) => React.createElement("div", {
+  }, "Scope of work — ", draft.scope.filter(x => x.on).length, " steps included, ", draft.scope.filter(x => !x.on).length, " standard steps left unticked"), draft.scope.map((x, i) => React.createElement("div", {
     key: i,
     className: "flex gap-2 items-start",
     style: {
@@ -4367,7 +4401,7 @@ function AiAssistant({
     style: {
       fontSize: 13
     }
-  }, draft.labor.crew, " \xD7 ", draft.labor.days, " day", draft.labor.days === 1 ? "" : "s", " \xD7 ", draft.labor.hoursPerDay, " hrs \xD7 ", money(q.laborRate), " = ", React.createElement("strong", null, money(preview.labor))), draft.labor.basis && React.createElement("div", {
+  }, draft.labor.crew, " × ", draft.labor.days, " day", draft.labor.days === 1 ? "" : "s", " × ", draft.labor.hoursPerDay, " hrs × ", money(q.laborRate), " = ", React.createElement("strong", null, money(preview.labor))), draft.labor.basis && React.createElement("div", {
     style: {
       fontSize: 12,
       color: BRAND.sub,
@@ -4441,14 +4475,14 @@ function AiAssistant({
       fontWeight: 700,
       color: SOURCE_COLOR[m.source]
     }
-  }, "\xB7 ", m.source))), draft.measurements.some(m => m.source !== "customer stated") && React.createElement("div", {
+  }, "· ", m.source))), draft.measurements.some(m => m.source !== "customer stated") && React.createElement("div", {
     style: {
       fontSize: 11.5,
       color: BRAND.amber,
       marginTop: 5,
       fontWeight: 600
     }
-  }, "Sizes not from the customer are estimates. Fine for a first reply \u2014 verify with a tape before this quote is approved.")), draft.questions.length > 0 && React.createElement("div", {
+  }, "Sizes not from the customer are estimates. Fine for a first reply — verify with a tape before this quote is approved.")), draft.questions.length > 0 && React.createElement("div", {
     style: box
   }, React.createElement("div", {
     style: label
@@ -4467,7 +4501,7 @@ function AiAssistant({
     })
   }, React.createElement("div", {
     style: label
-  }, "Internal \u2014 assumptions & risks"), draft.assumptions.length > 0 && React.createElement("ul", {
+  }, "Internal — assumptions & risks"), draft.assumptions.length > 0 && React.createElement("ul", {
     style: {
       fontSize: 12.5,
       paddingLeft: 18,
@@ -4874,7 +4908,7 @@ function QuoteForm({
       cursor: "pointer",
       color: BRAND.navy
     }
-  }, "\u2212"), React.createElement("div", {
+  }, "−"), React.createElement("div", {
     style: {
       fontFamily: "'Barlow Condensed', sans-serif",
       fontSize: 26,
@@ -5175,7 +5209,7 @@ function QuoteForm({
     className: "md-col-span-2 flex flex-col gap-5"
   }, React.createElement(Card, null, React.createElement("h3", {
     style: h3Style
-  }, "1 \xB7 CLIENT"), React.createElement(AiAssistant, {
+  }, "1 · CLIENT"), React.createElement(AiAssistant, {
     me: me,
     q: q,
     settings: settings,
@@ -5283,7 +5317,7 @@ function QuoteForm({
     onProperty: p => set("property", p)
   })), React.createElement(Card, null, React.createElement("h3", {
     style: h3Style
-  }, "2 \xB7 THE WORK"), React.createElement("div", {
+  }, "2 · THE WORK"), React.createElement("div", {
     className: "grid md-grid-cols-2 gap-x-4"
   }, React.createElement(Field, {
     label: "Category"
@@ -5370,7 +5404,7 @@ function QuoteForm({
       marginBottom: 12,
       gridColumn: "1 / -1"
     }
-  }, "These set the scope and a starting crew and hours \u2014 adjust under Labor. Add the lights, clips and timer as materials.")), React.createElement(Field, {
+  }, "These set the scope and a starting crew and hours — adjust under Labor. Add the lights, clips and timer as materials.")), React.createElement(Field, {
     label: "Extra detail for the client (optional)",
     hint: "Sizes, colors, brands, or anything specific to this job. Appears above the scope list."
   }, React.createElement("textarea", {
@@ -5380,7 +5414,7 @@ function QuoteForm({
     disabled: locked,
     value: q.description,
     onChange: e => set("description", e.target.value),
-    placeholder: "Approx. 120 sq ft of porcelain tile in master bath; client selecting 12x24 in matte finish\u2026"
+    placeholder: "Approx. 120 sq ft of porcelain tile in master bath; client selecting 12x24 in matte finish…"
   }))), (assessment.length > 0 || q.aiDrafted) && React.createElement(Card, null, React.createElement("div", {
     className: "flex items-center justify-between flex-wrap gap-2 mb-2"
   }, React.createElement("h3", {
@@ -5480,13 +5514,13 @@ function QuoteForm({
       fontSize: 18,
       flexShrink: 0
     }
-  }, "\xD7")))), React.createElement(Card, null, React.createElement("div", {
+  }, "×")))), React.createElement(Card, null, React.createElement("div", {
     className: "flex items-center justify-between flex-wrap gap-2 mb-2"
   }, React.createElement("h3", {
     style: Object.assign({}, h3Style, {
       marginBottom: 0
     })
-  }, "3 \xB7 SCOPE OF WORK"), !locked && React.createElement("div", {
+  }, "3 · SCOPE OF WORK"), !locked && React.createElement("div", {
     className: "flex gap-2"
   }, React.createElement(Btn, {
     small: true,
@@ -5527,7 +5561,7 @@ function QuoteForm({
     disabled: locked,
     value: s.text,
     onChange: e => editScope(s.id, e.target.value),
-    placeholder: "Describe this step\u2026"
+    placeholder: "Describe this step…"
   }), !locked && React.createElement("button", {
     onClick: () => rmScope(s.id),
     style: {
@@ -5538,7 +5572,7 @@ function QuoteForm({
       fontSize: 18,
       flexShrink: 0
     }
-  }, "\xD7"))), React.createElement("div", {
+  }, "×"))), React.createElement("div", {
     style: {
       fontSize: 12,
       color: BRAND.sub,
@@ -5546,7 +5580,7 @@ function QuoteForm({
     }
   }, scopeItems.filter(s => s.on).length, " of ", scopeItems.length, " steps will appear on the client's quote.")), React.createElement(Card, null, React.createElement("h3", {
     style: h3Style
-  }, "4 \xB7 NOT INCLUDED"), React.createElement("div", {
+  }, "4 · NOT INCLUDED"), React.createElement("div", {
     style: {
       fontSize: 13,
       color: BRAND.sub,
@@ -5576,7 +5610,7 @@ function QuoteForm({
     }
   }, s.text)))), React.createElement(Card, null, React.createElement("h3", {
     style: h3Style
-  }, "5 \xB7 CREW & LABOR"), React.createElement("div", {
+  }, "5 · CREW & LABOR"), React.createElement("div", {
     className: "grid grid-cols-2 md-grid-cols-3 gap-4 mb-4"
   }, React.createElement(Stepper, {
     label: "Crew members",
@@ -5614,7 +5648,7 @@ function QuoteForm({
       marginBottom: 16,
       fontSize: 14
     }
-  }, "Labor: ", q.crew, " \xD7 ", q.days, " \xD7 ", q.hoursPerDay, " hrs \xD7 ", money(q.laborRate), " = ", React.createElement("strong", {
+  }, "Labor: ", q.crew, " × ", q.days, " × ", q.hoursPerDay, " hrs × ", money(q.laborRate), " = ", React.createElement("strong", {
     style: {
       color: BRAND.navy
     }
@@ -5624,7 +5658,7 @@ function QuoteForm({
     style: Object.assign({}, h3Style, {
       marginBottom: 0
     })
-  }, "6 \xB7 MATERIALS & EXTRAS"), !locked && React.createElement(Btn, {
+  }, "6 · MATERIALS & EXTRAS"), !locked && React.createElement(Btn, {
     small: true,
     kind: "ghost",
     onClick: addItem
@@ -5637,7 +5671,7 @@ function QuoteForm({
     onChange: e => changePricing(e.target.value)
   }, React.createElement("option", {
     value: "labor"
-  }, "Labor only \u2014 client supplies materials"), React.createElement("option", {
+  }, "Labor only — client supplies materials"), React.createElement("option", {
     value: "turnkey"
   }, "Labor + materials"))), !locked && CLOUD && React.createElement("div", {
     className: "flex items-center gap-2 flex-wrap",
@@ -5655,7 +5689,7 @@ function QuoteForm({
       fontSize: 12,
       color: BRAND.sub
     }
-  }, "Reading the scope, sizes and photos \u2014 about 20\u201340 seconds.")), matNote && React.createElement("div", {
+  }, "Reading the scope, sizes and photos — about 20–40 seconds.")), matNote && React.createElement("div", {
     style: {
       background: "#F4F7FB",
       border: `1px solid ${BRAND.line}`,
@@ -5688,7 +5722,7 @@ function QuoteForm({
     }),
     disabled: locked,
     title: it.why || "",
-    placeholder: "Item \u2014 e.g. Porcelain tile 12x24",
+    placeholder: "Item — e.g. Porcelain tile 12x24",
     value: it.desc,
     onChange: e => setItem(it.id, "desc", e.target.value)
   }), React.createElement("input", {
@@ -5733,9 +5767,9 @@ function QuoteForm({
       cursor: "pointer",
       fontSize: 18
     }
-  }, "\xD7")))), React.createElement(Card, null, React.createElement("h3", {
+  }, "×")))), React.createElement(Card, null, React.createElement("h3", {
     style: h3Style
-  }, "7 \xB7 PRICING"), React.createElement("div", {
+  }, "7 · PRICING"), React.createElement("div", {
     className: "grid grid-cols-2 md-grid-cols-3 gap-x-4"
   }, React.createElement(Field, {
     label: "Overhead %",
@@ -5773,14 +5807,14 @@ function QuoteForm({
     disabled: locked,
     value: q.notes,
     onChange: e => set("notes", e.target.value),
-    placeholder: "Client to select tile color before start date\u2026"
+    placeholder: "Client to select tile color before start date…"
   }))), React.createElement(Card, null, React.createElement("div", {
     className: "flex items-center justify-between flex-wrap gap-2 mb-2"
   }, React.createElement("h3", {
     style: Object.assign({}, h3Style, {
       marginBottom: 0
     })
-  }, "8 \xB7 REPLY TO THE CLIENT"), !q.replyTemplate && !locked && React.createElement(Btn, {
+  }, "8 · REPLY TO THE CLIENT"), !q.replyTemplate && !locked && React.createElement(Btn, {
     small: true,
     kind: "ghost",
     onClick: startReply
@@ -5789,7 +5823,7 @@ function QuoteForm({
       fontSize: 13,
       color: BRAND.sub
     }
-  }, "A first message for Thumbtack, text or email \u2014 with the price range and your questions. The AI assistant writes one for you, or start from the standard reply.") : React.createElement("div", null, q.aiDraft && q.aiDraft.questions && q.aiDraft.questions.length > 0 && React.createElement("div", {
+  }, "A first message for Thumbtack, text or email — with the price range and your questions. The AI assistant writes one for you, or start from the standard reply.") : React.createElement("div", null, q.aiDraft && q.aiDraft.questions && q.aiDraft.questions.length > 0 && React.createElement("div", {
     style: {
       background: BRAND.paper,
       borderRadius: 8,
@@ -5865,7 +5899,7 @@ function QuoteForm({
       fontSize: 12.5,
       fontWeight: 700
     }
-  }, "Sending unlocks after owner approval \u2014 the reply carries a price.")))), React.createElement("div", null, React.createElement("div", {
+  }, "Sending unlocks after owner approval — the reply carries a price.")))), React.createElement("div", null, React.createElement("div", {
     style: {
       position: "sticky",
       top: 16
@@ -5904,12 +5938,12 @@ function QuoteForm({
         fontWeight: 700,
         color: BRAND.navy
       }
-    }, "Local market: ", money(m.low).replace(".00", ""), "\u2013", money(m.high).replace(".00", "")), React.createElement("div", {
+    }, "Local market: ", money(m.low).replace(".00", ""), "–", money(m.high).replace(".00", "")), React.createElement("div", {
       style: {
         color: pos === "above" ? BRAND.red : BRAND.green,
         fontWeight: 600
       }
-    }, "Your price is ", pos === "under" ? "under the typical range — competitive" : pos === "within" ? "inside the typical range" : "above the typical range", " \xB7 ", c.realMargin.toFixed(1), "% margin"), q.aiDraft.pricingNote && React.createElement("div", {
+    }, "Your price is ", pos === "under" ? "under the typical range — competitive" : pos === "within" ? "inside the typical range" : "above the typical range", " · ", c.realMargin.toFixed(1), "% margin"), q.aiDraft.pricingNote && React.createElement("div", {
       style: {
         color: BRAND.sub,
         marginTop: 2
@@ -5959,7 +5993,7 @@ function QuoteForm({
       marginBottom: 12,
       color: BRAND.ink
     }
-  }, React.createElement("strong", null, "AI draft \xB7 ", q.aiDraft.confidence, " confidence."), " ", q.aiDraft.needsSiteVisit ? "Site visit recommended. " : "", (q.aiDraft.measurements || []).filter(m => m.source !== "customer stated").length > 0 ? "Verify: " + q.aiDraft.measurements.filter(m => m.source !== "customer stated").map(m => m.what + " " + m.value).join("; ") + "." : "", q.aiDraft.timeline ? React.createElement("div", {
+  }, React.createElement("strong", null, "AI draft · ", q.aiDraft.confidence, " confidence."), " ", q.aiDraft.needsSiteVisit ? "Site visit recommended. " : "", (q.aiDraft.measurements || []).filter(m => m.source !== "customer stated").length > 0 ? "Verify: " + q.aiDraft.measurements.filter(m => m.source !== "customer stated").map(m => m.what + " " + m.value).join("; ") + "." : "", q.aiDraft.timeline ? React.createElement("div", {
     style: {
       marginTop: 4
     }
@@ -5981,7 +6015,7 @@ function QuoteForm({
       letterSpacing: "0.04em",
       marginBottom: 6
     }
-  }, "LABOR ONLY \xB7 CLIENT SUPPLIES MATERIALS"), [["Labor", c.labor], [isLaborOnly(q) ? "Materials (not included)" : "Materials & extras", c.materials], ["Overhead", c.overhead]].map(([l, v]) => React.createElement("div", {
+  }, "LABOR ONLY · CLIENT SUPPLIES MATERIALS"), [["Labor", c.labor], [isLaborOnly(q) ? "Materials (not included)" : "Materials & extras", c.materials], ["Overhead", c.overhead]].map(([l, v]) => React.createElement("div", {
     key: l,
     className: "flex justify-between text-sm mb-1"
   }, React.createElement("span", {
@@ -5993,7 +6027,7 @@ function QuoteForm({
     style: {
       color: BRAND.green
     }
-  }, React.createElement("span", null, "Discount (", q.discountPct, "%)"), React.createElement("span", null, "\u2212", money(c.discount))), React.createElement("div", {
+  }, React.createElement("span", null, "Discount (", q.discountPct, "%)"), React.createElement("span", null, "−", money(c.discount))), React.createElement("div", {
     style: {
       borderTop: `1.5px solid ${BRAND.line}`,
       margin: "10px 0"
@@ -6061,13 +6095,13 @@ function QuoteForm({
       fontWeight: 700,
       color: health.color
     }
-  }, c.realMargin.toFixed(1), "% margin \u2014 ", health.label), React.createElement("div", {
+  }, c.realMargin.toFixed(1), "% margin — ", health.label), React.createElement("div", {
     style: {
       fontSize: 11,
       color: BRAND.sub,
       marginTop: 2
     }
-  }, "Profit numbers are internal only \u2014 they never appear on the client's quote.")), React.createElement("div", {
+  }, "Profit numbers are internal only — they never appear on the client's quote.")), React.createElement("div", {
     className: "flex flex-col gap-2 mt-4"
   }, React.createElement(Btn, {
     kind: "gold",
@@ -6305,17 +6339,17 @@ function TeamView({
       style: {
         fontWeight: 700
       }
-    }, q.quoteNo, " \xB7 ", q.clientName, " \u2014 ", q.jobTitle || q.category), React.createElement("div", {
+    }, q.quoteNo, " · ", q.clientName, " — ", q.jobTitle || q.category), React.createElement("div", {
       style: {
         fontSize: 13,
         color: BRAND.sub
       }
-    }, "By ", users[q.createdBy] ? users[q.createdBy].name : "Unknown", " \xB7 ", fmtDate(q.createdAt), " \xB7 Crew of ", q.crew, ", ", q.days, " day(s)"), React.createElement("div", {
+    }, "By ", users[q.createdBy] ? users[q.createdBy].name : "Unknown", " · ", fmtDate(q.createdAt), " · Crew of ", q.crew, ", ", q.days, " day(s)"), React.createElement("div", {
       style: {
         fontSize: 13,
         marginTop: 4
       }
-    }, "Total ", React.createElement("strong", null, money(c.total)), " \xB7 Cost ", money(c.totalCost), " \xB7 ", React.createElement("span", {
+    }, "Total ", React.createElement("strong", null, money(c.total)), " · Cost ", money(c.totalCost), " · ", React.createElement("span", {
       style: {
         color: health.color,
         fontWeight: 700
@@ -6354,7 +6388,7 @@ function TeamView({
         flex: 1,
         minWidth: 200
       }),
-      placeholder: "What should they change? e.g. Margin too thin \u2014 raise to 22%",
+      placeholder: "What should they change? e.g. Margin too thin — raise to 22%",
       value: note,
       onChange: e => setNote(e.target.value)
     }), React.createElement(Btn, {
@@ -6521,7 +6555,7 @@ function TeamView({
       color: BRAND.gold,
       fontSize: 12
     }
-  }, "\u2605 Owner"), u.role === "assistant" && React.createElement("span", {
+  }, "★ Owner"), u.role === "assistant" && React.createElement("span", {
     style: {
       background: BRAND.navySoft,
       color: "#fff",
@@ -6536,7 +6570,7 @@ function TeamView({
       fontSize: 12,
       color: BRAND.sub
     }
-  }, "@", u.username, " \xB7 joined ", fmtDate(u.createdAt))), u.role !== "owner" && iAmOwner && React.createElement("div", {
+  }, "@", u.username, " · joined ", fmtDate(u.createdAt))), u.role !== "owner" && iAmOwner && React.createElement("div", {
     className: "flex gap-2 flex-wrap justify-end"
   }, React.createElement(Btn, {
     small: true,
@@ -6601,7 +6635,7 @@ function TeamView({
       marginTop: 8,
       fontWeight: 600
     }
-  }, "Account deactivated \u2014 cannot sign in."))))), React.createElement("div", null, React.createElement("h2", {
+  }, "Account deactivated — cannot sign in."))))), React.createElement("div", null, React.createElement("h2", {
     style: h2Style
   }, "AWAITING A DECISION", outcomeQuotes.length > 0 && React.createElement("span", {
     style: {
@@ -6627,7 +6661,7 @@ function TeamView({
       style: {
         fontSize: 14
       }
-    }, React.createElement("div", null, React.createElement("strong", null, q.quoteNo), " \xB7 ", q.clientName, " \xB7 ", money(computeQuote(q, settings).total), " ", React.createElement(Badge, {
+    }, React.createElement("div", null, React.createElement("strong", null, q.quoteNo), " · ", q.clientName, " · ", money(computeQuote(q, settings).total), " ", React.createElement(Badge, {
       status: q.status
     })), React.createElement("div", {
       style: {
@@ -6669,7 +6703,7 @@ function TeamView({
       color: BRAND.sub,
       fontSize: 14
     }
-  }, "Nothing decided yet. Once a job is marked Won it counts as booked revenue in the month the client signed \u2014 not the month the quote was written.")) : React.createElement("div", {
+  }, "Nothing decided yet. Once a job is marked Won it counts as booked revenue in the month the client signed — not the month the quote was written.")) : React.createElement("div", {
     className: "flex flex-col gap-2"
   }, decided.slice(0, 25).map(q => {
     const quoted = computeQuote(q, settings).total;
@@ -6687,7 +6721,7 @@ function TeamView({
       style: {
         fontSize: 14
       }
-    }, React.createElement("div", null, React.createElement("strong", null, q.quoteNo), " \xB7 ", q.clientName, " \xB7 ", money(q.status === "won" ? value : quoted), " ", React.createElement(Badge, {
+    }, React.createElement("div", null, React.createElement("strong", null, q.quoteNo), " · ", q.clientName, " · ", money(q.status === "won" ? value : quoted), " ", React.createElement(Badge, {
       status: q.status
     })), React.createElement("div", {
       style: {
@@ -6740,7 +6774,7 @@ function TeamView({
       fontSize: 14,
       color: BRAND.sub
     }
-  }, "Nothing voided. Voiding is permanent \u2014 a voided quote is frozen for good, drops out of every total, and can't be printed or reopened. The record stays so you can always show what was quoted and why it was pulled.")) : React.createElement("div", {
+  }, "Nothing voided. Voiding is permanent — a voided quote is frozen for good, drops out of every total, and can't be printed or reopened. The record stays so you can always show what was quoted and why it was pulled.")) : React.createElement("div", {
     className: "flex flex-col gap-2"
   }, voided.map(q => React.createElement(Card, {
     key: q.id,
@@ -6759,7 +6793,7 @@ function TeamView({
     style: {
       textDecoration: "line-through"
     }
-  }, q.quoteNo), " \xB7 ", q.clientName, " \xB7 ", money(computeQuote(q, settings).total), " ", React.createElement(Badge, {
+  }, q.quoteNo), " · ", q.clientName, " · ", money(computeQuote(q, settings).total), " ", React.createElement(Badge, {
     status: "void"
   })), React.createElement("div", {
     style: {
@@ -6793,19 +6827,19 @@ function TeamView({
       color: BRAND.sub,
       fontSize: 14
     }
-  }, "Every sign-in, draft, edit, preview, and print will be recorded here \u2014 nothing happens in ", PRODUCT, " without a trace.") : activity.map((a, i) => React.createElement("div", {
+  }, "Every sign-in, draft, edit, preview, and print will be recorded here — nothing happens in ", PRODUCT, " without a trace.") : activity.map((a, i) => React.createElement("div", {
     key: i,
     style: {
       padding: "8px 16px",
       borderBottom: `1px solid ${BRAND.line}`,
       fontSize: 13
     }
-  }, React.createElement("strong", null, a.by), " \u2014 ", a.action, a.quoteNo ? ` (${a.quoteNo})` : "", " ", React.createElement("span", {
+  }, React.createElement("strong", null, a.by), " — ", a.action, a.quoteNo ? ` (${a.quoteNo})` : "", " ", React.createElement("span", {
     style: {
       color: BRAND.sub,
       fontSize: 12
     }
-  }, "\xB7 ", new Date(a.at).toLocaleString()))))));
+  }, "· ", new Date(a.at).toLocaleString()))))));
 }
 function shrinkLogo(file) {
   return new Promise((resolve, reject) => {
@@ -7082,7 +7116,7 @@ function ThumbtackSetup({
       color: BRAND.sub,
       marginBottom: 12
     }
-  }, "Every new Thumbtack lead becomes an AI-drafted quote with a reply written for the customer \u2014 usually within 5 minutes. Takes about 5 minutes to set up. Works for Angi, HomeAdvisor, Yelp and Bark lead emails too."), lastLead && React.createElement("div", {
+  }, "Every new Thumbtack lead becomes an AI-drafted quote with a reply written for the customer — usually within 5 minutes. Takes about 5 minutes to set up. Works for Angi, HomeAdvisor, Yelp and Bark lead emails too."), lastLead && React.createElement("div", {
     style: {
       background: "#E8F4EC",
       color: BRAND.green,
@@ -7092,7 +7126,7 @@ function ThumbtackSetup({
       fontWeight: 700,
       marginBottom: 10
     }
-  }, "\u2705 Connected \u2014 last lead filed ", fmtDate(lastLead.createdAt), " (", lastLead.quoteNo, ")."), React.createElement("div", {
+  }, "✅ Connected — last lead filed ", fmtDate(lastLead.createdAt), " (", lastLead.quoteNo, ")."), React.createElement("div", {
     style: box
   }, head(1, "How do you want to answer new leads?"), React.createElement("div", {
     className: "grid md-grid-cols-2 gap-2"
@@ -7134,7 +7168,7 @@ function ThumbtackSetup({
     }
   }, React.createElement("li", {
     style: li
-  }, "In the Thumbtack Pro app or thumbtack.com, open ", React.createElement("strong", null, "Settings \u2192 Notifications"), "."), React.createElement("li", {
+  }, "In the Thumbtack Pro app or thumbtack.com, open ", React.createElement("strong", null, "Settings → Notifications"), "."), React.createElement("li", {
     style: li
   }, "Turn ", React.createElement("strong", null, "Email"), " on for ", React.createElement("strong", null, "new leads"), " and ", React.createElement("strong", null, "new messages"), "."), React.createElement("li", {
     style: li
@@ -7147,15 +7181,15 @@ function ThumbtackSetup({
     }
   }, React.createElement("li", {
     style: li
-  }, "Tap ", React.createElement("strong", null, "Copy my lead script"), " \u2014 it's already filled in with your company's private key."), React.createElement("li", {
+  }, "Tap ", React.createElement("strong", null, "Copy my lead script"), " — it's already filled in with your company's private key."), React.createElement("li", {
     style: li
   }, "Tap ", React.createElement("strong", null, "Open Google Apps Script"), ", signed in to that same Gmail. A blank project opens."), React.createElement("li", {
     style: li
-  }, "Select everything in the editor, delete it, and ", React.createElement("strong", null, "paste"), ". Click the ", React.createElement("strong", null, "\uD83D\uDCBE Save"), " icon."), React.createElement("li", {
+  }, "Select everything in the editor, delete it, and ", React.createElement("strong", null, "paste"), ". Click the ", React.createElement("strong", null, "💾 Save"), " icon."), React.createElement("li", {
     style: li
-  }, "In the box next to ", React.createElement("strong", null, "Debug"), ", pick ", React.createElement("strong", null, "setup"), ", then click ", React.createElement("strong", null, "\u25B6 Run"), "."), React.createElement("li", {
+  }, "In the box next to ", React.createElement("strong", null, "Debug"), ", pick ", React.createElement("strong", null, "setup"), ", then click ", React.createElement("strong", null, "▶ Run"), "."), React.createElement("li", {
     style: li
-  }, "Google asks for permission: choose your account \u2192 ", React.createElement("strong", null, "Advanced"), " \u2192 ", React.createElement("strong", null, "Go to project (unsafe)"), " \u2192 ", React.createElement("strong", null, "Allow"), ". (It's \"unsafe\" only because it's your own private script, not a published app.)")), React.createElement("div", {
+  }, "Google asks for permission: choose your account → ", React.createElement("strong", null, "Advanced"), " → ", React.createElement("strong", null, "Go to project (unsafe)"), " → ", React.createElement("strong", null, "Allow"), ". (It's \"unsafe\" only because it's your own private script, not a published app.)")), React.createElement("div", {
     className: "flex gap-2 flex-wrap"
   }, React.createElement(Btn, {
     small: true,
@@ -7172,7 +7206,7 @@ function ThumbtackSetup({
   }, React.createElement(Btn, {
     small: true,
     kind: "ghost"
-  }, "Open Google Apps Script \u2197"))), err && React.createElement("div", {
+  }, "Open Google Apps Script ↗"))), err && React.createElement("div", {
     style: {
       color: BRAND.red,
       fontSize: 12.5,
@@ -7184,7 +7218,7 @@ function ThumbtackSetup({
       color: BRAND.sub,
       marginTop: 8
     }
-  }, "Within a few seconds the log says \"\u2705 CONNECTED\" \u2014 then you can close the page; it checks every 5 minutes in the background. Easiest on a computer: Google's script editor is hard to use on a phone. Leads show up on your dashboard with an AI-DRAFTED tag and a phone alert. To stop it later, run ", React.createElement("strong", null, "stopConnector"), " in the same project.")), mode === "auto" && React.createElement("div", {
+  }, "Within a few seconds the log says \"✅ CONNECTED\" — then you can close the page; it checks every 5 minutes in the background. Easiest on a computer: Google's script editor is hard to use on a phone. Leads show up on your dashboard with an AI-DRAFTED tag and a phone alert. To stop it later, run ", React.createElement("strong", null, "stopConnector"), " in the same project.")), mode === "auto" && React.createElement("div", {
     style: box
   }, head(4, "Turn on Thumbtack's instant reply"), React.createElement("div", {
     style: li
@@ -7252,7 +7286,7 @@ function ThumbtackSetup({
       });
       onDismiss(true);
     }
-  }, "I've connected it \u2014 done"))));
+  }, "I've connected it — done"))));
 }
 const JTPRO_DEFAULTS_FOR = s => TENANT ? {} : {
   name: JTPRO_COMPANY.name,
@@ -7385,7 +7419,7 @@ function ReviewModal({
       color: n <= rating ? BRAND.gold : BRAND.line,
       padding: 2
     }
-  }, "\u2605"))), React.createElement(Field, {
+  }, "★"))), React.createElement(Field, {
     label: "Your review"
   }, React.createElement("textarea", {
     style: Object.assign({}, inputStyle, {
@@ -7613,7 +7647,7 @@ function ReviewsAdmin({
       fontSize: 13,
       color: BRAND.sub
     }
-  }, "On the website: ", pub.length, " \xB7 average ", avg, "\u2605")), list.length === 0 && React.createElement("p", {
+  }, "On the website: ", pub.length, " · average ", avg, "★")), list.length === 0 && React.createElement("p", {
     style: {
       fontSize: 13.5,
       color: BRAND.sub,
@@ -7651,7 +7685,7 @@ function ReviewsAdmin({
       fontSize: 12.5,
       color: BRAND.sub
     }
-  }, r.name, r.company ? ", " + r.company : "", r.city ? " · " + r.city : "", " \xB7 ", fmtDay(r.at), " \xB7 ", r.email), React.createElement("div", {
+  }, r.name, r.company ? ", " + r.company : "", r.city ? " · " + r.city : "", " · ", fmtDay(r.at), " · ", r.email), React.createElement("div", {
     className: "flex gap-2 flex-wrap mt-2"
   }, r.status !== "published" && React.createElement(Btn, {
     small: true,
@@ -7669,7 +7703,7 @@ function ReviewsAdmin({
     kind: "ghost",
     disabled: !!busy,
     onClick: () => setHideFor(r.id)
-  }, "Hide\u2026"))))), React.createElement("p", {
+  }, "Hide…"))))), React.createElement("p", {
     style: {
       fontSize: 12,
       color: BRAND.sub,
@@ -7754,12 +7788,12 @@ function HelpModal({
   }, "Email us")), onReview && React.createElement(Btn, {
     kind: "ghost",
     onClick: onReview
-  }, "\u2605 Leave a review")), sent ? React.createElement("p", {
+  }, "★ Leave a review")), sent ? React.createElement("p", {
     style: {
       fontSize: 14,
       color: BRAND.green
     }
-  }, "Got it \u2014 we've been notified and will get back to you shortly.") : React.createElement(React.Fragment, null, React.createElement(Field, {
+  }, "Got it — we've been notified and will get back to you shortly.") : React.createElement(React.Fragment, null, React.createElement(Field, {
     label: "Or send us a message"
   }, React.createElement("textarea", {
     style: Object.assign({}, inputStyle, {
@@ -7819,10 +7853,10 @@ function planPill(c) {
     const st = c.billingStatus;
     if (st === "active") return React.createElement("span", {
       style: PILL("#D7EEDF", BRAND.green)
-    }, "Paying \xB7 ", PLAN_LABEL[c.plan] || c.plan);
+    }, "Paying · ", PLAN_LABEL[c.plan] || c.plan);
     if (st === "trialing") return React.createElement("span", {
       style: PILL("#E4EBF6", BRAND.navySoft)
-    }, "Trial + card \xB7 ", PLAN_LABEL[c.plan] || c.plan);
+    }, "Trial + card · ", PLAN_LABEL[c.plan] || c.plan);
     return React.createElement("span", {
       style: PILL("#F9E5E3", BRAND.red)
     }, BILL_STATUS[st] || st);
@@ -7830,10 +7864,10 @@ function planPill(c) {
   const left = Math.ceil((new Date(c.trialEnds).getTime() - Date.now()) / 864e5);
   if (c.trialQuotesUsed >= 7) return React.createElement("span", {
     style: PILL("#F9E5E3", BRAND.red)
-  }, "7 free quotes used \xB7 needs plan");
+  }, "7 free quotes used · needs plan");
   return left > 0 ? React.createElement("span", {
     style: PILL("#FBF3DE", BRAND.amber)
-  }, "Trial \xB7 ", c.trialQuotesUsed || 0, "/7 quotes \xB7 ", left, "d left") : React.createElement("span", {
+  }, "Trial · ", c.trialQuotesUsed || 0, "/7 quotes · ", left, "d left") : React.createElement("span", {
     style: PILL("#ECEEF1", BRAND.sub)
   }, "Trial ended");
 }
@@ -7894,7 +7928,7 @@ function SystemHealth({
     style: {
       color: BRAND.sub
     }
-  }, "Checking system health\u2026"));
+  }, "Checking system health…"));
   const h = d.health,
     errs = d.errors || [];
   const openErrs = errs.filter(e => !e.resolved);
@@ -7927,7 +7961,7 @@ function SystemHealth({
       fontWeight: 700,
       color: BRAND.navy
     }
-  }, "SYSTEM HEALTH \xB7 ", label.toUpperCase())), React.createElement("div", {
+  }, "SYSTEM HEALTH · ", label.toUpperCase())), React.createElement("div", {
     className: "flex gap-2"
   }, React.createElement(Btn, {
     small: true,
@@ -8023,7 +8057,7 @@ function SystemHealth({
       fontSize: 12,
       color: BRAND.sub
     }
-  }, e.where, " \xB7 ", e.source, " \xB7 ", e.count, "\xD7 \xB7 last ", ago(e.lastSeen), e.lastCompany ? " · company " + e.lastCompany : "")), React.createElement("div", {
+  }, e.where, " · ", e.source, " · ", e.count, "× · last ", ago(e.lastSeen), e.lastCompany ? " · company " + e.lastCompany : "")), React.createElement("div", {
     className: "flex gap-2"
   }, e.stack && React.createElement(Btn, {
     small: true,
@@ -8179,7 +8213,7 @@ function AdminView({
     style: {
       color: BRAND.sub
     }
-  }, "Loading every company\u2026"), React.createElement(SystemHealth, {
+  }, "Loading every company…"), React.createElement(SystemHealth, {
     notify: notify
   }), React.createElement(MessagesAdmin, {
     notify: notify
@@ -8278,11 +8312,11 @@ function AdminView({
       color: BRAND.sub,
       fontSize: 12
     }
-  }, "\xB7 ID ", c.supportId)), React.createElement("div", {
+  }, "· ID ", c.supportId)), React.createElement("div", {
     className: "flex gap-1 flex-wrap"
   }, c.rewardDue && React.createElement("span", {
     style: PILL("#D7EEDF", BRAND.green)
-  }, "$25 reward due \u2192 ", c.referredBy), c.referredBy && !c.rewardDue && React.createElement("span", {
+  }, "$25 reward due → ", c.referredBy), c.referredBy && !c.rewardDue && React.createElement("span", {
     style: PILL("#E4EBF6", BRAND.navySoft)
   }, "Ref: ", c.referredBy, c.refRewardPaid ? " · paid" : ""), c.openHelp > 0 && React.createElement("span", {
     style: PILL("#F9E5E3", BRAND.red)
@@ -8292,13 +8326,13 @@ function AdminView({
       color: BRAND.sub,
       marginTop: 3
     }
-  }, c.ownerName || "Owner", " \xB7 ", c.ownerEmail, c.phone ? " · " + c.phone : ""), React.createElement("div", {
+  }, c.ownerName || "Owner", " · ", c.ownerEmail, c.phone ? " · " + c.phone : ""), React.createElement("div", {
     style: {
       fontSize: 12.5,
       color: BRAND.sub,
       marginTop: 2
     }
-  }, "Signed up ", fmtDay(c.createdAt), " \xB7 ", c.users, " user", c.users === 1 ? "" : "s", c.pendingUsers ? " (" + c.pendingUsers + " waiting)" : "", " \xB7 ", c.quotes == null ? "?" : c.quotes, " quotes \xB7 Leads ", c.leadConnected ? "connected" + (c.leadReplyMode ? " (" + c.leadReplyMode + ")" : "") : React.createElement("b", {
+  }, "Signed up ", fmtDay(c.createdAt), " · ", c.users, " user", c.users === 1 ? "" : "s", c.pendingUsers ? " (" + c.pendingUsers + " waiting)" : "", " · ", c.quotes == null ? "?" : c.quotes, " quotes · Leads ", c.leadConnected ? "connected" + (c.leadReplyMode ? " (" + c.leadReplyMode + ")" : "") : React.createElement("b", {
     style: {
       color: BRAND.amber
     }
@@ -8358,7 +8392,7 @@ function AdminCompany({
     kind: "ghost",
     small: true,
     onClick: onBack
-  }, "\u2190 All companies"), React.createElement(Card, {
+  }, "← All companies"), React.createElement(Card, {
     style: {
       marginTop: 12,
       color: BRAND.red
@@ -8368,12 +8402,12 @@ function AdminCompany({
     kind: "ghost",
     small: true,
     onClick: onBack
-  }, "\u2190 All companies"), React.createElement("p", {
+  }, "← All companies"), React.createElement("p", {
     style: {
       color: BRAND.sub,
       marginTop: 12
     }
-  }, "Loading\u2026"));
+  }, "Loading…"));
   const s = d.summary,
     co = d.company;
   const openHelp = (d.help || []).filter(h => !h.resolved);
@@ -8385,7 +8419,7 @@ function AdminCompany({
     kind: "ghost",
     small: true,
     onClick: onBack
-  }, "\u2190 All companies"), React.createElement(Btn, {
+  }, "← All companies"), React.createElement(Btn, {
     kind: "ghost",
     small: true,
     onClick: load
@@ -8410,17 +8444,17 @@ function AdminCompany({
       color: BRAND.ink,
       letterSpacing: "0.06em"
     }
-  }, s.supportId), " \xB7 signed up ", fmtDay(s.createdAt), " (", ago(s.createdAt), ")"), React.createElement("div", {
+  }, s.supportId), " · signed up ", fmtDay(s.createdAt), " (", ago(s.createdAt), ")"), React.createElement("div", {
     style: {
       fontSize: 14,
       marginTop: 6
     }
-  }, s.ownerName, " \xB7 ", React.createElement("a", {
+  }, s.ownerName, " · ", React.createElement("a", {
     href: "mailto:" + s.ownerEmail,
     style: {
       color: BRAND.navySoft
     }
-  }, s.ownerEmail), s.phone && React.createElement(React.Fragment, null, " \xB7 ", React.createElement("a", {
+  }, s.ownerEmail), s.phone && React.createElement(React.Fragment, null, " · ", React.createElement("a", {
     href: "tel:" + s.phone.replace(/[^\d+]/g, ""),
     style: {
       color: BRAND.navySoft
@@ -8449,7 +8483,7 @@ function AdminCompany({
       fontSize: 13,
       color: BRAND.sub
     }
-  }, h.byName, " (", h.role, ") \xB7 ", ago(h.at), h.phone && React.createElement(React.Fragment, null, " \xB7 call back ", React.createElement("a", {
+  }, h.byName, " (", h.role, ") · ", ago(h.at), h.phone && React.createElement(React.Fragment, null, " · call back ", React.createElement("a", {
     href: "tel:" + h.phone.replace(/[^\d+]/g, ""),
     style: {
       color: BRAND.navySoft,
@@ -8473,7 +8507,7 @@ function AdminCompany({
       fontSize: 14,
       lineHeight: 1.8
     }
-  }, React.createElement("div", null, "Plan: ", React.createElement("b", null, PLAN_LABEL[co.plan] || co.plan || "trial"), " \xB7 ", co.billingStatus ? BILL_STATUS[co.billingStatus] || co.billingStatus : "no card yet"), React.createElement("div", null, "Trial ", new Date(s.trialEnds).getTime() > Date.now() ? "ends" : "ended", ": ", React.createElement("b", null, fmtDay(s.trialEnds)), co.trialOverride ? " (extended)" : ""), co.currentPeriodEnd && co.billingStatus === "active" && React.createElement("div", null, co.cancelAtPeriodEnd ? "Cancels" : "Renews", ": ", fmtDay(co.currentPeriodEnd)), co.cardCheck && React.createElement("div", null, "$1 card check: ", co.cardCheck)), React.createElement("div", {
+  }, React.createElement("div", null, "Plan: ", React.createElement("b", null, PLAN_LABEL[co.plan] || co.plan || "trial"), " · ", co.billingStatus ? BILL_STATUS[co.billingStatus] || co.billingStatus : "no card yet"), React.createElement("div", null, "Trial ", new Date(s.trialEnds).getTime() > Date.now() ? "ends" : "ended", ": ", React.createElement("b", null, fmtDay(s.trialEnds)), co.trialOverride ? " (extended)" : ""), co.currentPeriodEnd && co.billingStatus === "active" && React.createElement("div", null, co.cancelAtPeriodEnd ? "Cancels" : "Renews", ": ", fmtDay(co.currentPeriodEnd)), co.cardCheck && React.createElement("div", null, "$1 card check: ", co.cardCheck)), React.createElement("div", {
     className: "flex gap-2 flex-wrap mt-3"
   }, [7, 14, 30].map(n => React.createElement(Btn, {
     key: n,
@@ -8493,7 +8527,7 @@ function AdminCompany({
   }, React.createElement(Btn, {
     small: true,
     kind: "ghost"
-  }, "Open in Stripe \u2197")), co.suspended ? React.createElement(Btn, {
+  }, "Open in Stripe ↗")), co.suspended ? React.createElement(Btn, {
     small: true,
     kind: "gold",
     disabled: !!busy,
@@ -8528,7 +8562,7 @@ function AdminCompany({
     style: {
       color: BRAND.green
     }
-  }, "due now \u2014 they've paid their first month") : "not due yet (due after their first paid month)")), React.createElement("div", {
+  }, "due now — they've paid their first month") : "not due yet (due after their first paid month)")), React.createElement("div", {
     className: "mt-3"
   }, co.refRewardPaid ? React.createElement(Btn, {
     small: true,
@@ -8589,7 +8623,7 @@ function AdminCompany({
       fontSize: 12.5,
       color: BRAND.sub
     }
-  }, u.email, " \xB7 joined ", fmtDay(u.createdAt))), React.createElement("div", {
+  }, u.email, " · joined ", fmtDay(u.createdAt))), React.createElement("div", {
     className: "flex gap-2 flex-wrap items-center"
   }, React.createElement("select", {
     value: u.role,
@@ -8636,11 +8670,11 @@ function AdminCompany({
       padding: "7px 0"
     },
     className: "flex justify-between gap-2 flex-wrap"
-  }, React.createElement("span", null, React.createElement("b", null, x.quoteNo), " \xB7 ", x.clientName || "—", " \xB7 ", x.jobTitle || "", x.fromInbox ? " · from lead" : ""), React.createElement("span", {
+  }, React.createElement("span", null, React.createElement("b", null, x.quoteNo), " · ", x.clientName || "—", " · ", x.jobTitle || "", x.fromInbox ? " · from lead" : ""), React.createElement("span", {
     style: {
       color: BRAND.sub
     }
-  }, (STATUS[x.status] || {}).label || x.status, " \xB7 ", ago(x.createdAt)))), d.activity.length > 0 && React.createElement(React.Fragment, null, React.createElement("div", {
+  }, (STATUS[x.status] || {}).label || x.status, " · ", ago(x.createdAt)))), d.activity.length > 0 && React.createElement(React.Fragment, null, React.createElement("div", {
     style: {
       fontSize: 12,
       fontWeight: 700,
@@ -8654,7 +8688,7 @@ function AdminCompany({
       fontSize: 12.5,
       color: BRAND.sub
     }
-  }, ago(a.at), " \xB7 ", a.who, " \xB7 ", a.what, " ", a.detail)))), React.createElement(Card, null, React.createElement(H, null, "SUPPORT NOTES ", React.createElement("span", {
+  }, ago(a.at), " · ", a.who, " · ", a.what, " ", a.detail)))), React.createElement(Card, null, React.createElement(H, null, "SUPPORT NOTES ", React.createElement("span", {
     style: {
       fontSize: 12,
       color: BRAND.sub,
@@ -8667,7 +8701,7 @@ function AdminCompany({
     }),
     value: noteText,
     onChange: e => setNoteText(e.target.value),
-    placeholder: "e.g. Called 10/9 \u2014 helped connect Thumbtack, wants Pro plan next month"
+    placeholder: "e.g. Called 10/9 — helped connect Thumbtack, wants Pro plan next month"
   }), React.createElement("div", {
     className: "mt-2"
   }, React.createElement(Btn, {
@@ -8693,7 +8727,7 @@ function AdminCompany({
       color: BRAND.sub,
       fontSize: 12
     }
-  }, fmtDay(n.at), " \xB7 ", n.by, n.kind === "action" ? " · action" : ""), React.createElement("div", {
+  }, fmtDay(n.at), " · ", n.by, n.kind === "action" ? " · action" : ""), React.createElement("div", {
     style: {
       whiteSpace: "pre-wrap",
       color: n.kind === "action" ? BRAND.sub : BRAND.ink
@@ -8836,7 +8870,7 @@ function PlanPicker({
       color: BRAND.amber,
       marginTop: 6
     }
-  }, "TEST MODE \u2014 use card 4242 4242 4242 4242, any future date, any CVC. No real money moves."));
+  }, "TEST MODE — use card 4242 4242 4242 4242, any future date, any CVC. No real money moves."));
 }
 function TrialBanner({
   billing,
@@ -8868,7 +8902,7 @@ function TrialBanner({
       color: BRAND.navy,
       fontSize: 14.5
     }
-  }, "Free trial \xB7 ", used, " of ", max, " quotes used", billing.billingStatus !== "trialing" && billing.trialDaysLeft ? " · " + billing.trialDaysLeft + " day" + (billing.trialDaysLeft === 1 ? "" : "s") + " left" : ""), React.createElement("div", {
+  }, "Free trial · ", used, " of ", max, " quotes used", billing.billingStatus !== "trialing" && billing.trialDaysLeft ? " · " + billing.trialDaysLeft + " day" + (billing.trialDaysLeft === 1 ? "" : "s") + " left" : ""), React.createElement("div", {
     style: {
       height: 8,
       background: BRAND.paper,
@@ -8894,7 +8928,7 @@ function TrialBanner({
       color: BRAND.green,
       fontWeight: 700
     }
-  }, "Card on file \xB7 your ", PLAN_LABEL[billing.plan] || "", " plan starts after quote ", max) : React.createElement(Btn, {
+  }, "Card on file · your ", PLAN_LABEL[billing.plan] || "", " plan starts after quote ", max) : React.createElement(Btn, {
     kind: "gold",
     small: true,
     onClick: onChoose
@@ -9037,18 +9071,18 @@ function BillingGate({
       color: BRAND.navySoft,
       fontWeight: 700
     }
-  }, SUPPORT.email), " \u2014 Support ID ", React.createElement("b", null, supportIdOf(TENANT)), ".") : !isOwner ? React.createElement("p", {
+  }, SUPPORT.email), " — Support ID ", React.createElement("b", null, supportIdOf(TENANT)), ".") : !isOwner ? React.createElement("p", {
     style: {
       fontSize: 14,
       color: BRAND.sub
     }
-  }, limit ? "Your company has used its free quotes. " : "", "Your quotes are safe. Ask your company's owner to sign in and choose a plan \u2014 the app unlocks for everyone as soon as they do.") : limit && billing.hasCard && billing.billingStatus === "trialing" ? React.createElement(React.Fragment, null, React.createElement("p", {
+  }, limit ? "Your company has used its free quotes. " : "", "Your quotes are safe. Ask your company's owner to sign in and choose a plan — the app unlocks for everyone as soon as they do.") : limit && billing.hasCard && billing.billingStatus === "trialing" ? React.createElement(React.Fragment, null, React.createElement("p", {
     style: {
       fontSize: 14,
       color: BRAND.sub,
       marginBottom: 14
     }
-  }, "Nice work \u2014 that's ", billing.quotesUsed, " quotes. Your free trial covers ", billing.quoteLimit || 7, ", so your ", React.createElement("strong", null, PLAN_LABEL[billing.plan] || billing.plan), " plan starts now. Your card on file is charged today and then monthly. Your quotes and settings are all still here."), React.createElement("div", {
+  }, "Nice work — that's ", billing.quotesUsed, " quotes. Your free trial covers ", billing.quoteLimit || 7, ", so your ", React.createElement("strong", null, PLAN_LABEL[billing.plan] || billing.plan), " plan starts now. Your card on file is charged today and then monthly. Your quotes and settings are all still here."), React.createElement("div", {
     className: "flex gap-2 flex-wrap"
   }, React.createElement(Btn, {
     kind: "gold",
@@ -9068,7 +9102,7 @@ function BillingGate({
       color: BRAND.sub,
       marginBottom: 14
     }
-  }, "Nice work \u2014 that's ", billing.quotesUsed, " quotes. Your free trial covers ", billing.quoteLimit || 7, ". Pick a plan to keep quoting; it starts today and you can cancel any time. Your quotes and settings are all still here."), React.createElement(PlanPicker, {
+  }, "Nice work — that's ", billing.quotesUsed, " quotes. Your free trial covers ", billing.quoteLimit || 7, ". Pick a plan to keep quoting; it starts today and you can cancel any time. Your quotes and settings are all still here."), React.createElement(PlanPicker, {
     billing: billing,
     onError: notify
   })) : locked && billing.hasCard ? React.createElement(React.Fragment, null, React.createElement("p", {
@@ -9077,7 +9111,7 @@ function BillingGate({
       color: BRAND.sub,
       marginBottom: 14
     }
-  }, "Status: ", React.createElement("strong", null, BILL_STATUS[billing.billingStatus] || billing.billingStatus || "not active"), ". Your quotes are safe \u2014 update your card or pick a plan again to unlock."), React.createElement("div", {
+  }, "Status: ", React.createElement("strong", null, BILL_STATUS[billing.billingStatus] || billing.billingStatus || "not active"), ". Your quotes are safe — update your card or pick a plan again to unlock."), React.createElement("div", {
     className: "flex gap-2 flex-wrap mb-5"
   }, React.createElement(ManageBillingBtn, {
     notify: notify
@@ -9406,11 +9440,11 @@ function BillingCard({
       fontSize: 14,
       lineHeight: 1.7
     }
-  }, React.createElement("div", null, "Plan: ", React.createElement("strong", null, PLAN_LABEL[billing.plan] || billing.plan), " \xB7 ", BILL_STATUS[billing.billingStatus] || billing.billingStatus), billing.billingStatus === "trialing" && billing.trialEnds && React.createElement("div", null, "Free until ", React.createElement("strong", null, fmtDay(billing.trialEnds)), " or your ", billing.quoteLimit || 7, "th quote (", billing.quotesUsed || 0, " used so far), whichever comes first."), billing.billingStatus === "active" && billing.currentPeriodEnd && React.createElement("div", null, billing.cancelAtPeriodEnd ? "Ends" : "Renews", " on ", React.createElement("strong", null, fmtDay(billing.currentPeriodEnd)), "."), billing.cancelAtPeriodEnd && billing.billingStatus === "trialing" && React.createElement("div", {
+  }, React.createElement("div", null, "Plan: ", React.createElement("strong", null, PLAN_LABEL[billing.plan] || billing.plan), " · ", BILL_STATUS[billing.billingStatus] || billing.billingStatus), billing.billingStatus === "trialing" && billing.trialEnds && React.createElement("div", null, "Free until ", React.createElement("strong", null, fmtDay(billing.trialEnds)), " or your ", billing.quoteLimit || 7, "th quote (", billing.quotesUsed || 0, " used so far), whichever comes first."), billing.billingStatus === "active" && billing.currentPeriodEnd && React.createElement("div", null, billing.cancelAtPeriodEnd ? "Ends" : "Renews", " on ", React.createElement("strong", null, fmtDay(billing.currentPeriodEnd)), "."), billing.cancelAtPeriodEnd && billing.billingStatus === "trialing" && React.createElement("div", {
     style: {
       color: BRAND.amber
     }
-  }, "Set to cancel \u2014 you won't be charged."), billing.cardCheck && React.createElement("div", {
+  }, "Set to cancel — you won't be charged."), billing.cardCheck && React.createElement("div", {
     style: {
       color: billing.cardCheck === "ok" ? BRAND.green : BRAND.red,
       fontSize: 13
@@ -9602,7 +9636,7 @@ function SettingsView({
     }))
   })), React.createElement(Field, {
     label: "Owner recovery key",
-    hint: "Set this now and write it down somewhere safe. If you ever forget your PIN, this is how you get back in without erasing your quotes. Keep it private \u2014 do not give it to associates."
+    hint: "Set this now and write it down somewhere safe. If you ever forget your PIN, this is how you get back in without erasing your quotes. Keep it private — do not give it to associates."
   }, React.createElement("input", {
     style: inputStyle,
     value: s.recoveryKey || "",
@@ -9624,7 +9658,7 @@ function SettingsView({
       fontSize: 13,
       color: BRAND.ink
     }
-  }, React.createElement("strong", null, "Control & security in place:"), " PIN sign-in with a team code required to register \xB7 drafts autosave to your view the moment an associate starts typing \xB7 quotes carry a DRAFT \xB7 NOT APPROVED watermark and cannot be printed or saved as PDF until you approve them \xB7 no one can delete a quote \xB7 every sign-in, draft, edit, preview, and print is recorded in the activity log \xB7 internal cost/profit figures never appear on client documents.")));
+  }, React.createElement("strong", null, "Control & security in place:"), " PIN sign-in with a team code required to register · drafts autosave to your view the moment an associate starts typing · quotes carry a DRAFT · NOT APPROVED watermark and cannot be printed or saved as PDF until you approve them · no one can delete a quote · every sign-in, draft, edit, preview, and print is recorded in the activity log · internal cost/profit figures never appear on client documents.")));
 }
 const PAY_METHODS = ["Cash", "Check", "Zelle", "Card", "Cash App", "Venmo", "Bank transfer", "Other"];
 const paymentsOf = q => q && Array.isArray(q.payments) ? q.payments : [];
@@ -10047,7 +10081,7 @@ function ReceiptModal({
       fontWeight: 700,
       color: BRAND.navy
     }
-  }, "JOB \xB7 ", quote.quoteNo, " \xB7 ", quote.clientName), React.createElement(Btn, {
+  }, "JOB · ", quote.quoteNo, " · ", quote.clientName), React.createElement(Btn, {
     small: true,
     kind: "ghost",
     onClick: onClose
@@ -10086,11 +10120,11 @@ function ReceiptModal({
       fontSize: 14,
       margin: "6px 0 10px"
     }
-  }, "Job total ", React.createElement("b", null, money(contract)), " \xB7 paid ", React.createElement("b", {
+  }, "Job total ", React.createElement("b", null, money(contract)), " · paid ", React.createElement("b", {
     style: {
       color: BRAND.green
     }
-  }, money(paid)), " \xB7 balance ", React.createElement("b", {
+  }, money(paid)), " · balance ", React.createElement("b", {
     style: {
       color: balance > 0 ? BRAND.amber : BRAND.green
     }
@@ -10106,7 +10140,7 @@ function ReceiptModal({
       padding: "7px 0",
       fontSize: 13.5
     }
-  }, React.createElement("span", null, React.createElement("b", null, p.receiptNo), " \xB7 ", fmtDay2(p.date), " \xB7 ", p.method, p.ref ? " #" + p.ref : "", " \xB7 ", React.createElement("b", null, money(p.amount))), React.createElement("span", {
+  }, React.createElement("span", null, React.createElement("b", null, p.receiptNo), " · ", fmtDay2(p.date), " · ", p.method, p.ref ? " #" + p.ref : "", " · ", React.createElement("b", null, money(p.amount))), React.createElement("span", {
     className: "flex gap-2"
   }, React.createElement(Btn, {
     small: true,
@@ -10209,7 +10243,7 @@ function ReceiptModal({
     onChange: e => setSCrew(e.target.value),
     placeholder: "e.g. Marcus + 2 helpers"
   })), React.createElement(Field, {
-    label: "Notes (gate code, materials to bring\u2026)"
+    label: "Notes (gate code, materials to bring…)"
   }, React.createElement("input", {
     style: inputStyle,
     value: sNote,
@@ -10259,7 +10293,7 @@ function ReceiptModal({
     }
   }, React.createElement("div", {
     className: "flex justify-between gap-2 flex-wrap"
-  }, React.createElement("span", null, React.createElement("b", null, c.no), " \xB7 ", c.desc), React.createElement("span", null, React.createElement("b", null, c.amount < 0 ? "−" + money(-c.amount) : "+" + money(c.amount)), " \xB7 ", React.createElement("b", {
+  }, React.createElement("span", null, React.createElement("b", null, c.no), " · ", c.desc), React.createElement("span", null, React.createElement("b", null, c.amount < 0 ? "−" + money(-c.amount) : "+" + money(c.amount)), " · ", React.createElement("b", {
     style: {
       color: c.status === "approved" ? BRAND.green : c.status === "declined" ? BRAND.red : BRAND.amber
     }
@@ -10347,7 +10381,7 @@ function ReceiptModal({
         padding: "7px 0",
         fontSize: 13.5
       }
-    }, React.createElement("span", null, React.createElement("b", null, v.no), " \xB7 ", money(v.amount), " \xB7 due ", fmtDay2(v.due), " \xB7 ", React.createElement("b", {
+    }, React.createElement("span", null, React.createElement("b", null, v.no), " · ", money(v.amount), " · due ", fmtDay2(v.due), " · ", React.createElement("b", {
       style: {
         color: st === "paid" ? BRAND.green : st === "overdue" ? BRAND.red : BRAND.amber
       }
@@ -10686,7 +10720,7 @@ function ReceiptModal({
       style: {
         color: BRAND.green
       }
-    }, "PAID \u2014 thank you!") : React.createElement(React.Fragment, null, React.createElement("b", null, "How to pay:"), " ", v.how || "Contact us to arrange payment.", v.payLink ? React.createElement("div", {
+    }, "PAID — thank you!") : React.createElement(React.Fragment, null, React.createElement("b", null, "How to pay:"), " ", v.how || "Contact us to arrange payment.", v.payLink ? React.createElement("div", {
       style: {
         marginTop: 6
       }
@@ -10700,7 +10734,7 @@ function ReceiptModal({
         fontSize: 13,
         color: BRAND.sub
       }
-    }, "Thank you for your business. \u2014 ", v.by || COMPANY.signer || COMPANY.name, ", ", COMPANY.name)));
+    }, "Thank you for your business. — ", v.by || COMPANY.signer || COMPANY.name, ", ", COMPANY.name)));
   })(), mode === "pay" && shown && React.createElement(React.Fragment, null, React.createElement("div", {
     className: "flex justify-end gap-2 mb-2 flex-wrap"
   }, canShare && React.createElement(Btn, {
@@ -10925,7 +10959,7 @@ function ReceiptModal({
     style: {
       color: BRAND.green
     }
-  }, "PAID \u2014 thank you!"), " ", money(Number(shown.amount)), " received on ", fmtDay2(shown.date), "."), React.createElement("div", {
+  }, "PAID — thank you!"), " ", money(Number(shown.amount)), " received on ", fmtDay2(shown.date), "."), React.createElement("div", {
     style: {
       marginTop: 26,
       fontSize: 13,
@@ -11080,7 +11114,7 @@ function ReceiptsView({
       padding: "8px 0",
       fontSize: 14
     }
-  }, React.createElement("span", null, React.createElement("b", null, q.quoteNo), " \xB7 ", q.clientName, " \xB7 balance ", React.createElement("b", {
+  }, React.createElement("span", null, React.createElement("b", null, q.quoteNo), " · ", q.clientName, " · balance ", React.createElement("b", {
     style: {
       color: BRAND.amber
     }
@@ -11112,7 +11146,7 @@ function ReceiptsView({
       padding: "8px 0",
       fontSize: 14
     }
-  }, React.createElement("span", null, React.createElement("b", null, fmtDay2(p.date)), " \xB7 ", p.receiptNo, " \xB7 ", q.clientName, " \xB7 ", p.method, " \xB7 ", React.createElement("b", null, money(Number(p.amount)))), React.createElement(Btn, {
+  }, React.createElement("span", null, React.createElement("b", null, fmtDay2(p.date)), " · ", p.receiptNo, " · ", q.clientName, " · ", p.method, " · ", React.createElement("b", null, money(Number(p.amount)))), React.createElement(Btn, {
     small: true,
     kind: "ghost",
     onClick: () => onReceipt(q)
@@ -11295,7 +11329,7 @@ function PreviewModal({
       fontWeight: 700,
       marginBottom: 8
     }
-  }, "Not approved yet \u2014 a PDF made now carries the DRAFT watermark. Close this, click \"Approve & create PDF\", and you get a clean copy to send."), React.createElement("div", {
+  }, "Not approved yet — a PDF made now carries the DRAFT watermark. Close this, click \"Approve & create PDF\", and you get a clean copy to send."), React.createElement("div", {
     className: "flex justify-end gap-2 mb-2 flex-wrap"
   }, canPrint ? React.createElement(React.Fragment, null, canShareFiles && React.createElement(Btn, {
     small: true,
@@ -11531,7 +11565,7 @@ function PreviewModal({
       fontSize: 13,
       color: BRAND.sub
     }
-  }, quote.category, " \xB7 Crew of ", quote.crew, " \xB7 Est. ", quote.days, " working day", quote.days > 1 ? "s" : ""), React.createElement("div", {
+  }, quote.category, " · Crew of ", quote.crew, " · Est. ", quote.days, " working day", quote.days > 1 ? "s" : ""), React.createElement("div", {
     style: {
       fontSize: 13,
       color: BRAND.sub
@@ -11670,7 +11704,7 @@ function PreviewModal({
     style: {
       padding: "9px 12px"
     }
-  }, "Professional labor \u2014 crew of ", quote.crew, ", ", quote.days, " day", quote.days > 1 ? "s" : "", " \xD7 ", quote.hoursPerDay, " hrs"), React.createElement("td", {
+  }, "Professional labor — crew of ", quote.crew, ", ", quote.days, " day", quote.days > 1 ? "s" : "", " × ", quote.hoursPerDay, " hrs"), React.createElement("td", {
     style: {
       textAlign: "right",
       padding: "9px 12px"
@@ -11696,7 +11730,7 @@ function PreviewModal({
       color: BRAND.sub
     },
     colSpan: 3
-  }, "Materials \u2014 supplied by client", (quote.items || []).length ? " (shopping list below)" : ""), React.createElement("td", {
+  }, "Materials — supplied by client", (quote.items || []).length ? " (shopping list below)" : ""), React.createElement("td", {
     style: {
       textAlign: "right",
       padding: "9px 12px",
@@ -11741,12 +11775,12 @@ function PreviewModal({
       textAlign: "right",
       padding: "9px 12px"
     }
-  }, "\u2014"), React.createElement("td", {
+  }, "—"), React.createElement("td", {
     style: {
       textAlign: "right",
       padding: "9px 12px"
     }
-  }, "\u2014"), React.createElement("td", {
+  }, "—"), React.createElement("td", {
     style: {
       textAlign: "right",
       padding: "9px 12px",
@@ -11777,7 +11811,7 @@ function PreviewModal({
       padding: "3px 0",
       color: BRAND.green
     }
-  }, React.createElement("span", null, "Discount (", quote.discountPct, "%)"), React.createElement("span", null, "\u2212", money(c.discount)))) : null, React.createElement("div", {
+  }, React.createElement("span", null, "Discount (", quote.discountPct, "%)"), React.createElement("span", null, "−", money(c.discount)))) : null, React.createElement("div", {
     style: {
       display: "flex",
       justifyContent: "space-between",
@@ -11845,7 +11879,7 @@ function PreviewModal({
         fontWeight: 700,
         color: BRAND.sub
       }
-    }, money(m.low).replace(".00", ""), " \u2013 ", money(m.high).replace(".00", ""))), React.createElement("div", null, React.createElement("div", {
+    }, money(m.low).replace(".00", ""), " – ", money(m.high).replace(".00", ""))), React.createElement("div", null, React.createElement("div", {
       style: {
         fontSize: 11.5,
         color: BRAND.sub
@@ -11896,7 +11930,7 @@ function PreviewModal({
       color: BRAND.gold,
       fontWeight: 700
     }
-  }, "\u2713 "), React.createElement("strong", null, t), " \u2014 ", React.createElement("span", {
+  }, "✓ "), React.createElement("strong", null, t), " — ", React.createElement("span", {
     style: {
       color: BRAND.sub
     }
@@ -11927,7 +11961,7 @@ function PreviewModal({
       color: BRAND.sub,
       marginTop: 4
     }
-  }, "We're happy to pick these up for you \u2014 just ask and we'll quote labor + materials.")) : null, quote.notes ? React.createElement("div", {
+  }, "We're happy to pick these up for you — just ask and we'll quote labor + materials.")) : null, quote.notes ? React.createElement("div", {
     style: {
       fontSize: 13,
       marginTop: 10,
@@ -11998,7 +12032,7 @@ function PreviewModal({
       paddingLeft: 18,
       margin: 0
     }
-  }, React.createElement("li", null, "50% deposit due upon acceptance to reserve your project dates; balance due upon completion and walkthrough."), React.createElement("li", null, "All workmanship is backed by our 90-day workmanship warranty."), React.createElement("li", null, "Pricing is itemized and transparent \u2014 any change in scope will be quoted and approved in writing before extra work begins."), React.createElement("li", null, COMPANY.name, " is licensed and insured. Job site is left clean at the end of each working day."), React.createElement("li", null, "This quote is valid for 30 days from the date above."))), React.createElement("div", {
+  }, React.createElement("li", null, "50% deposit due upon acceptance to reserve your project dates; balance due upon completion and walkthrough."), React.createElement("li", null, "All workmanship is backed by our 90-day workmanship warranty."), React.createElement("li", null, "Pricing is itemized and transparent — any change in scope will be quoted and approved in writing before extra work begins."), React.createElement("li", null, COMPANY.name, " is licensed and insured. Job site is left clean at the end of each working day."), React.createElement("li", null, "This quote is valid for 30 days from the date above."))), React.createElement("div", {
     style: {
       display: "flex",
       gap: 40,
@@ -12020,14 +12054,14 @@ function PreviewModal({
       color: BRAND.sub,
       marginTop: 4
     }
-  }, who, " \u2014 signature & date")))), React.createElement("div", {
+  }, who, " — signature & date")))), React.createElement("div", {
     style: {
       textAlign: "center",
       marginTop: 28,
       fontSize: 11,
       color: BRAND.sub
     }
-  }, "Thank you for the opportunity to earn your business. \u2014 ", COMPANY.name))));
+  }, "Thank you for the opportunity to earn your business. — ", COMPANY.name))));
 }
 ReactDOM.createRoot(document.getElementById("root")).render(React.createElement(ErrorBoundary, null, React.createElement(App, null)));
 </script>
