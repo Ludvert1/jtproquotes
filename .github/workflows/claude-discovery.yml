@@ -1,0 +1,36 @@
+name: Claude Code - supervised development
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+  id-token: write
+
+concurrency:
+  group: claude-supervised
+  cancel-in-progress: false
+
+jobs:
+  develop:
+    if: github.actor == 'Ludvert1'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Claude development task
+        uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          prompt: |
+            Inspect the SI Quotes Pro repository and propose a safe mobile migration plan.
+            This is a discovery-only run: do not edit files, commit, or create a PR.
+            Identify the current React/Babel frontend, Firebase services,
+            Vercel APIs, shared business logic, mobile risks, and first Expo milestones.
+            Do not access production secrets or modify existing web deployment.
+          claude_args: |
+            --max-turns 8
