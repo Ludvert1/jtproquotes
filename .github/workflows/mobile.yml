@@ -19,11 +19,11 @@ jobs:
         run: ./gradlew bundleRelease
       - name: Sign bundle (needs secrets)
         working-directory: .
-        env: { KS: "${{ secrets.ANDROID_KEYSTORE_B64 }}" }
+        env: { KS: "${{ secrets.ANDROID_KEYSTORE_B64 }}", PW: "${{ secrets.ANDROID_KEYSTORE_PASSWORD }}", AL: "${{ secrets.ANDROID_KEY_ALIAS }}" }
         run: |
-          [ -z "$KS" ] && echo "No keystore secret - skipping signing" && exit 0
-          echo "$KS" | base64 -d > ks.jks
-          jarsigner -keystore ks.jks -storepass "${{ secrets.ANDROID_KEYSTORE_PASSWORD }}" mobile/android/app/build/outputs/bundle/release/app-release.aab "${{ secrets.ANDROID_KEY_ALIAS }}"
+          if [ -z "$KS" ]; then echo "No keystore secret - skipping signing"; exit 0; fi
+          echo "$KS" | base64 -d > "$RUNNER_TEMP/ks.jks"
+          jarsigner -keystore "$RUNNER_TEMP/ks.jks" -storepass "$PW" mobile/android/app/build/outputs/bundle/release/app-release.aab "$AL"
       - uses: actions/upload-artifact@v4
         with: { name: android-aab, path: mobile/android/app/build/outputs/bundle/release/*.aab }
   ios:
