@@ -1,0 +1,37 @@
+name: Codex - pull request review
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+
+jobs:
+  review:
+    if: github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.user.login == 'Ludvert1'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: refs/pull/${{ github.event.pull_request.number }}/merge
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install Codex CLI
+        run: npm install --global @openai/codex
+      - name: Review changes without editing files
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          test -n "$OPENAI_API_KEY" || { echo "OPENAI_API_KEY missing"; exit 1; }
+          printf %s "$OPENAI_API_KEY" | codex login --with-api-key
+          codex login status
+          git diff --name-status "$BASE_SHA" HEAD
+          codex exec --sandbox read-only --skip-git-repo-check --output-last-message /tmp/codex-review.txt \
+            "Review the diff from $BASE_SHA to HEAD for security, correctness and tests. Do not modify any files. Return concise findings with paths and severity."
+          test -s /tmp/codex-review.txt
+          cat /tmp/codex-review.txt >> "$GITHUB_STEP_SUMMARY"
