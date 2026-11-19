@@ -1,24 +1,35 @@
 {
   "name": "s-i-quotespro-mobile",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "private": true,
-  "description": "Android + iOS shell (Capacitor) for S-I-Quotespro",
+  "description": "Android and iOS app for S-I-Quotespro",
   "scripts": {
     "sync": "cap sync",
     "add:android": "cap add android",
-    "add:ios": "cap add ios"
+    "add:ios": "cap add ios",
+    "build": "node scripts/build-mobile.cjs",
+    "sync:android": "npm run build && cap sync android",
+    "check": "node --test scripts/mobile.test.cjs"
   },
   "dependencies": {
-    "@capacitor/android": "^6.1.2",
-    "@capacitor/app": "^6.0.1",
-    "@capacitor/core": "^6.1.2",
-    "@capacitor/ios": "^6.1.2",
-    "@capacitor/push-notifications": "^6.0.2",
-    "@capacitor/splash-screen": "^6.0.2",
-    "@capacitor/status-bar": "^6.0.1"
+    "@capacitor/android": "8.6.2",
+    "@capacitor/app": "8.1.2",
+    "@capacitor/core": "8.6.2",
+    "@capacitor/filesystem": "8.1.5",
+    "@capacitor/ios": "8.6.2",
+    "@capacitor/push-notifications": "8.1.3",
+    "@capacitor/share": "8.0.3",
+    "@capacitor/splash-screen": "8.0.2",
+    "@capacitor/status-bar": "8.0.4",
+    "@fontsource/barlow": "5.3.0",
+    "@fontsource/barlow-condensed": "5.3.0",
+    "firebase": "10.12.2",
+    "html2pdf.js": "0.10.2",
+    "react": "18.2.0",
+    "react-dom": "18.2.0"
   },
   "devDependencies": {
-    "@capacitor/assets": "^3.0.5",
-    "@capacitor/cli": "^6.1.2"
+    "@capacitor/assets": "3.0.5",
+    "@capacitor/cli": "8.6.2"
   }
 }

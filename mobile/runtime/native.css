@@ -1,0 +1,13 @@
+html { background: #0b1f3a; }
+body { padding: env(safe-area-inset-top) env(safe-area-inset-right) calc(68px + env(safe-area-inset-bottom)) env(safe-area-inset-left); }
+button, input, select { min-height: 44px; }
+button { touch-action: manipulation; }
+.siq-account-links { display: flex; justify-content: center; gap: 16px; background: #fff; border-top: 1px solid #d9d4c8; padding: 0 10px; font: 14px Barlow,sans-serif; }
+.siq-account-links a { color: #193b66; padding: 13px 4px; text-decoration: underline; }
+.siq-mobile-nav { position: fixed; bottom: 0; left: 0; right: 0; z-index: 20; display: flex; background: #0b1f3a; border-top: 2px solid #c9a227; padding-bottom: env(safe-area-inset-bottom); box-shadow: 0 -3px 12px #0b1f3a22; }
+.siq-mobile-nav button { flex: 1; min-width: 0; min-height: 66px; border: 0; background: transparent; color: #d8dee9; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; font: 600 12px Barlow,sans-serif; }
+.siq-mobile-nav button > span:first-child { font-size: 22px; line-height: 24px; }
+.siq-mobile-nav button[aria-current="page"] { background: #c9a227; color: #0b1f3a; }
+.siq-mobile-nav button:focus-visible, .siq-save-status:focus-visible { outline: 3px solid #397bc3; outline-offset: -3px; }
+.siq-connectivity { position: sticky; top: 0; z-index: 80; background: #fbf3de; color: #5a4315; padding: 10px 14px; font: 14px Barlow,sans-serif; }
+@media print { .siq-account-links, .siq-connectivity, .siq-capture-control, .siq-mobile-nav, .siq-save-status { display: none !important; } body { padding: 0; } }

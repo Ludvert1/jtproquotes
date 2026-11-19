@@ -1,12 +1,13 @@
 # Publishing S-I-Quotespro to Google Play and the App Store
 
 ## Google Play
-1. Create the upload key on your computer (keep the file and passwords private):
-   keytool -genkey -v -keystore siq-upload.jks -alias siq -keyalg RSA -keysize 2048 -validity 10000
-2. GitHub repo > Settings > Secrets: ANDROID_KEYSTORE_B64 (base64 of the .jks), ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS (siq).
-3. Actions > "Mobile builds" > Run workflow; download the android-aab artifact.
-4. Play Console > Create app > upload the .aab to Internal testing, fill Store listing, Data safety, Content rating, then Production > Review.
-   Privacy policy URL: https://www.s-i-quotespro.com/ (add a privacy page first).
+The Android project is now checked in and uses bundled assets. Follow store/PLAY-SUBMISSION.md for release preparation, review requirements, and proposed listing text.
+
+Run npm ci at the repository root and in mobile. Run npm run sync:android and npm run check in mobile. Use the manual Mobile builds workflow with a version code higher than every prior upload.
+
+Release builds require ANDROID_KEYSTORE_B64, ANDROID_KEYSTORE_PASSWORD, and ANDROID_KEY_ALIAS in Actions secrets. A release fails when signing material is missing. Restore the supplied upload key for future releases. If this package already has a Play Console app, confirm its registered upload certificate before uploading.
+
+The signed AAB is for Play Console internal testing. The signed APK is for installation and testing on an Android device. Public privacy/deletion URLs, reviewer access, actual-device tests, screenshots and Play Console declarations must be completed before submission.
 
 ## Apple App Store
 1. developer.apple.com: register App ID com.siquotespro.app; App Store Connect > New App.

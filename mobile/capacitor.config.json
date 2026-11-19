@@ -3,13 +3,26 @@
   "appName": "S-I-Quotespro",
   "webDir": "www",
   "server": {
-    "url": "https://www.s-i-quotespro.com/app",
-    "cleartext": false,
-    "allowNavigation": ["www.s-i-quotespro.com", "s-i-quotespro.com", "*.firebaseapp.com", "*.googleapis.com", "checkout.stripe.com", "billing.stripe.com"]
+    "hostname": "localhost",
+    "androidScheme": "https",
+    "cleartext": false
   },
-  "ios": { "contentInset": "always", "backgroundColor": "#0B1F3A" },
-  "android": { "backgroundColor": "#0B1F3A" },
+  "ios": {
+    "contentInset": "always",
+    "backgroundColor": "#0B1F3A"
+  },
+  "android": {
+    "backgroundColor": "#0B1F3A",
+    "allowMixedContent": false,
+    "webContentsDebuggingEnabled": false
+  },
   "plugins": {
-    "SplashScreen": { "launchShowDuration": 1200, "backgroundColor": "#0B1F3A" }
+    "SplashScreen": {
+      "launchShowDuration": 1200,
+      "backgroundColor": "#0B1F3A",
+      "launchAutoHide": true,
+      "androidSplashResourceName": "siq_icon",
+      "androidScaleType": "CENTER_INSIDE"
+    }
   }
 }

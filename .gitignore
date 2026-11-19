@@ -20,3 +20,19 @@ fbconfig.txt*
 
 # The Web Push private key lives only in Vercel.
 VAPID-PRIVATE-KEY*
+
+# Android build products and signing credentials
+mobile/android/.gradle/
+mobile/android/build/
+mobile/android/app/build/
+mobile/android/local.properties
+mobile/android/capacitor-cordova-android-plugins/
+mobile/android/app/src/main/assets/public/
+mobile/android/app/src/main/assets/capacitor.*json
+mobile/www/
+!mobile/www/.gitkeep
+*.jks
+*.keystore
+keystore.properties
+mobile/android/app/google-services.json
+mobile/ios/
