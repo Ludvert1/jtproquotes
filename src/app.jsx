@@ -218,7 +218,8 @@ let TENANT = null;
 const fsBase = () => (TENANT ? db.collection("companies").doc(TENANT) : db);
 const col = (name) => fsBase().collection(name);
 const PRODUCT = (window.JTPQ_CONFIG && window.JTPQ_CONFIG.productName) || "S-I-Quotespro";
-const ALLOW_COMPANY_SIGNUP = !!(window.JTPQ_CONFIG && window.JTPQ_CONFIG.allowCompanySignup);
+const IS_PLAY_APP = window.SIQ_PLAY_APP === true;
+const ALLOW_COMPANY_SIGNUP = !IS_PLAY_APP && !!(window.JTPQ_CONFIG && window.JTPQ_CONFIG.allowCompanySignup);
 /* Referral: links like s-i-quotespro.com/?start&ref=maria. Kept for 30 days
    on this device so it survives a reload, and saved on the company at sign-up. */
 const REF_CODE = (() => {
@@ -380,6 +381,33 @@ function computeQuote(q, settings) {
   return { labor, materials, baseCost, overhead, totalCost, rawPrice, discount, total, profit, realMargin, deposit: total * 0.5 };
 }
 
+// Device recovery is isolated by company and signed-in account. A recovered
+// draft must still match its cloud revision before it may be written back.
+function nativeDraftPrefix(me) { return "siq_mobile_draft:" + (TENANT || "primary") + ":" + me.id + ":"; }
+function nativeDraftStore(me, quote, baseRevision) {
+  try { localStorage.setItem(nativeDraftPrefix(me) + quote.id, JSON.stringify({ quote, baseRevision, at: new Date().toISOString() })); return true; }
+  catch { return false; }
+}
+function nativeDrafts(me) {
+  try { return Object.keys(localStorage).filter((key) => key.startsWith(nativeDraftPrefix(me))).map((key) => JSON.parse(localStorage.getItem(key))).filter((x) => x && x.quote).sort((a, b) => b.at.localeCompare(a.at)); }
+  catch { return []; }
+}
+function nativeDraftRemove(me, id) { try { localStorage.removeItem(nativeDraftPrefix(me) + id); } catch {} }
+function nativeDraftContent(quote) { const copy = Object.assign({}, quote); delete copy.updatedAt; delete copy.__mobileBaseRevision; return JSON.stringify(copy); }
+function nativeRevision(quote) { return quote ? (quote.updatedAt || quote.createdAt || null) : null; }
+function nativeQuoteErrors(q, settings, submit) {
+  const errors = [];
+  if (!String(q.clientName || "").trim()) errors.push("Enter the client's name.");
+  for (const [key, label, min, max] of [["crew", "Crew size", 1, 1000], ["days", "Days on site", 0, 10000], ["hoursPerDay", "Hours per day", 0, 24], ["laborRate", "Hourly labor rate", 0, 100000], ["overheadPct", "Overhead", 0, 1000], ["marginPct", "Margin", 0, 99.99], ["discountPct", "Discount", 0, 100]]) {
+    const value = Number(q[key] == null ? (key === "overheadPct" ? settings.overheadPct : key === "marginPct" ? settings.targetMargin : 0) : q[key]);
+    if (!Number.isFinite(value) || value < min || value > max || (key === "crew" && !Number.isInteger(value))) errors.push(label + " must be " + (key === "crew" ? "a whole number " : "") + "between " + min + " and " + max + ".");
+  }
+  if (!isLaborOnly(q) && (q.items || []).some((x) => !Number.isFinite(Number(x.qty)) || !Number.isFinite(Number(x.price)) || Number(x.qty) < 0 || Number(x.price) < 0)) errors.push("Material quantities and prices must be zero or greater.");
+  const total = computeQuote(q, settings).total;
+  if (!Number.isFinite(total) || (submit && total <= 0)) errors.push("Add labor or materials so the quote total is greater than $0.");
+  return errors;
+}
+
 function marginHealth(m) {
   if (m < 10) return { color: BRAND.red, label: "Too thin — you're barely covering costs" };
   if (m < 20) return { color: BRAND.amber, label: "Thin margin — fine for repeat clients" };
@@ -438,8 +466,8 @@ const VAPID_PUBLIC = (window.JTPQ_CONFIG && window.JTPQ_CONFIG.vapidPublicKey)
 
 const isIOS = () => /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
 const isStandalone = () => (window.matchMedia && window.matchMedia("(display-mode: standalone)").matches) || window.navigator.standalone === true;
-const nativePush = () => { try { return window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform() ? window.Capacitor.Plugins.PushNotifications : null; } catch { return null; } };
-const pushSupported = () => !!nativePush() || "serviceWorker" in navigator && "PushManager" in window && "Notification" in window;
+const nativePush = () => { if (window.SIQ_PLAY_APP && !window.SIQ_NATIVE_PUSH_ENABLED) return null; try { return window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform() ? window.Capacitor.Plugins.PushNotifications : null; } catch { return null; } };
+const pushSupported = () => !(IS_PLAY_APP && !window.SIQ_NATIVE_PUSH_ENABLED) && (!!nativePush() || "serviceWorker" in navigator && "PushManager" in window && "Notification" in window);
 
 let swReg = null;
 async function getSW() {
@@ -614,6 +642,18 @@ function App() {
   const [helpOpen, setHelpOpen] = useState(false);
   const [receiptId, setReceiptId] = useState("");
   const [adminOpen, setAdminOpen] = useState("");
+
+  useEffect(() => {
+    if (!IS_PLAY_APP) return;
+    const back = (event) => {
+      if (previewQuote) { event.preventDefault(); setPreviewQuote(null); }
+      else if (receiptId) { event.preventDefault(); setReceiptId(""); }
+      else if (helpOpen) { event.preventDefault(); setHelpOpen(false); }
+      else if (view !== "dashboard") { event.preventDefault(); setView("dashboard"); setActiveQuote(null); }
+    };
+    window.addEventListener("siq-native-back", back);
+    return () => window.removeEventListener("siq-native-back", back);
+  }, [view, previewQuote, receiptId, helpOpen]);
 
   const DEFAULT_SETTINGS ={ laborRate: 35, overheadPct: 10, targetMargin: 25, requireTeamCode: false, teamCode: "JTPRO-" + Math.random().toString(36).slice(2, 6).toUpperCase() };
 
@@ -821,7 +861,7 @@ function App() {
   const [askedReview, setAskedReview] = useState(false);
   const reviewSeen = () => { try { return !!(localStorage.getItem("siq_asked_review_" + (TENANT || "")) || localStorage.getItem("siq_reviewed_" + (TENANT || ""))); } catch { return true; } };
   // Ask an owner once, after they've made 5 quotes (never on top of the free-quote heads-up).
-  const inTrial = !!(TENANT && billing && billing.enabled && billing.quoteLimit && billing.billingStatus !== "active" && ["trial", "ok"].includes(billing.access));
+  const inTrial = !IS_PLAY_APP && !!(TENANT && billing && billing.enabled && billing.quoteLimit && billing.billingStatus !== "active" && ["trial", "ok"].includes(billing.access));
   const warnKey = "siq_warn_lastquote_" + (TENANT || "");
   const [warned, setWarned] = useState(() => { try { return !!localStorage.getItem(warnKey); } catch { return false; } });
   const showLastQuoteAlert = inTrial && !warned && billing.quotesUsed === billing.quoteLimit - 1;
@@ -890,10 +930,19 @@ function App() {
   const myQuotes = Object.values(quotes).filter((q) => q.createdBy === me.id);
   const visibleQuotes = isManager ? Object.values(quotes) : myQuotes;
 
-  const upsertQuote = async (q) => {
+  const upsertQuote = async (q, options) => {
     if (CLOUD) {
       const before = quotes && quotes[q.id];
-      await col("quotes").doc(q.id).set(q);
+      if (IS_PLAY_APP) {
+        const reference = col("quotes").doc(q.id);
+        await db.runTransaction(async (transaction) => {
+          const current = await transaction.get(reference);
+          const currentQuote = current.exists ? current.data() : null;
+          if (options && Object.prototype.hasOwnProperty.call(options, "expectedRevision") && nativeRevision(currentQuote) !== options.expectedRevision) throw new Error("This quote changed on another device. Your edits are kept on this phone. Reopen the current quote before applying changes.");
+          const signatures = currentQuote ? currentQuote.signatures : null;
+          transaction.set(reference, Object.assign({}, q, signatures ? { signatures } : {}));
+        });
+      } else await col("quotes").doc(q.id).set(q);
       /* A quote changing hands tells the right people — submitted → the
          approvers, approved or sent back → the associate. Fired after the
          save so the server reads the real stored quote, never trusting what
@@ -910,7 +959,37 @@ function App() {
     if (CLOUD) { await col("quotes").doc(id).delete(); return; }
     const next = Object.assign({}, quotes); delete next[id]; await saveQuotes(next);
   };
+  const saveSignature = async (quote, role, signature) => {
+    const matches = (current) => current && ["approved", "sent", "negotiating", "won"].includes(current.status)
+      && signatureFingerprint(current, settings) === signature.fingerprint;
+    const amend = (current) => {
+      if (!matches(current)) throw new Error("This quote changed. Reopen it and review the current version before signing.");
+      if (current.signatures && current.signatures[role] && current.signatures[role].fingerprint === signature.fingerprint) {
+        throw new Error("This signature is already recorded.");
+      }
+      return Object.assign({}, current, {
+        signatures: Object.assign({}, current.signatures || {}, { [role]: signature }),
+        history: (current.history || []).concat([{ at: signature.at, by: me.name, action: "Recorded " + role + " signature" }]),
+      });
+    };
+    let updated;
+    if (CLOUD) {
+      const reference = col("quotes").doc(quote.id);
+      await db.runTransaction(async (transaction) => {
+        const snapshot = await transaction.get(reference);
+        updated = amend(snapshot.exists ? snapshot.data() : null);
+        transaction.set(reference, updated);
+      });
+    } else {
+      updated = amend(quotes[quote.id]);
+      await upsertQuote(updated);
+    }
+    setPreviewQuote(updated);
+    notify("Signature recorded.");
+  };
   const logout = async () => {
+    if (IS_PLAY_APP && nativeDrafts(me).length && !window.confirm("There are unsynced quote edits on this phone. Signing out will erase those device copies. Stay signed in to recover and save them. Sign out and erase device copies?")) return;
+    if (IS_PLAY_APP) nativeDrafts(me).forEach((x) => nativeDraftRemove(me, x.quote.id));
     if (CLOUD) { await fbAuth.signOut(); TENANT = null; applyBrand(null, true); setMe(null); setView("dashboard"); return; }
     setMe(null); setView("dashboard"); await sessionClear();
   };
@@ -924,7 +1003,7 @@ function App() {
   if (isManager) navItems.push(["team", "Team & review"]);
   if (isManager) navItems.push(["receipts", "Receipts"]);
   if (isOwner) navItems.push(["settings", "Settings"]);
-  if (!TENANT && isOwner && CLOUD) navItems.push(["admin", "Admin"]);
+  if (!IS_PLAY_APP && !TENANT && isOwner && CLOUD) navItems.push(["admin", "Admin"]);
 
   return (
     <div className="min-h-screen" style={{ background: BRAND.paper, color: BRAND.ink }}>
@@ -939,8 +1018,8 @@ function App() {
               <div style={{ color: BRAND.goldBright, fontSize: 11, letterSpacing: "0.1em" }}>{PRODUCT.toUpperCase()}</div>
             </div>
           </div>
-          <nav className="flex items-center gap-1 flex-wrap">
-            {navItems.map(([k, l]) => (
+          <nav aria-label="Account" className="flex items-center gap-1 flex-wrap">
+            {!IS_PLAY_APP && navItems.map(([k, l]) => (
               <button key={k} onClick={() => { setView(k); setActiveQuote(null); }}
                 style={{ background: view === k ? BRAND.gold : "transparent", color: view === k ? BRAND.navy : "#D8DEE9", border: "none", padding: "7px 14px", borderRadius: 7, fontWeight: 600, fontSize: 14, cursor: "pointer" }}>{l}</button>
             ))}
@@ -976,7 +1055,7 @@ function App() {
           <QuoteForm key={activeQuote ? activeQuote.id : "new"} me={me} isOwner={isOwner} isManager={isManager} settings={settings} notify={notify} existing={view === "edit" ? activeQuote : null}
             onAutosave={upsertQuote}
             onSave={async (q, opts) => {
-              await upsertQuote(q);
+              await upsertQuote(q, opts);
               notify(q.status === "draft" ? "Draft saved — visible to the owner"
                 : q.status === "approved" ? "Quote saved & approved"
                 : q.status === "changes" ? "Sent back to " + ((users[q.createdBy] && users[q.createdBy].name) || "the associate")
@@ -998,7 +1077,13 @@ function App() {
         {view === "settings" && isOwner && <SettingsView settings={settings} quotes={quotes} billing={billing} notify={notify} onBilling={setBilling} onSave={async (s) => { try { await saveSettings(s); notify("Settings saved"); } catch (e) { notify(e.message || "Couldn't save settings. Try again."); } }} />}
       </main>
 
-      {previewQuote && <PreviewModal quote={previewQuote} settings={settings} users={users} me={me} onClose={() => setPreviewQuote(null)} />}
+      {IS_PLAY_APP && <nav className="siq-mobile-nav" aria-label="Main navigation">
+        {navItems.map(([key, label]) => <button key={key} aria-current={(view === key || (key === "new" && view === "edit")) ? "page" : undefined} onClick={() => { setView(key); setActiveQuote(null); window.scrollTo(0, 0); }}>
+          <span aria-hidden="true">{({ dashboard: "▦", new: "+", team: "✓", receipts: "▤", settings: "⚙" })[key]}</span>
+          <span>{key === "dashboard" ? "Home" : key === "team" ? "Review" : label}</span>
+        </button>)}
+      </nav>}
+      {previewQuote && <PreviewModal quote={previewQuote} settings={settings} users={users} me={me} onSign={saveSignature} onClose={() => setPreviewQuote(null)} />}
       {receiptId && quotes[receiptId] && <ReceiptModal quote={quotes[receiptId]} settings={settings} me={me} notify={notify} onSave={upsertQuote} onClose={() => setReceiptId("")} />}
       {helpOpen && <HelpModal me={me} notify={notify} onClose={() => setHelpOpen(false)} onReview={() => { setHelpOpen(false); setReviewOpen(true); }} />}
       {(reviewOpen || askReview) && <ReviewModal me={me} notify={notify} onClose={() => { setReviewOpen(false); setAskedReview(true); try { localStorage.setItem("siq_asked_review_" + (TENANT || ""), "1"); } catch {} }} />}
@@ -1171,7 +1256,7 @@ function CloudAuth({ gate }) {
             </Field>
           </React.Fragment>}
           {(mode === "register" || mode === "company") && <Field label={mode === "company" ? "Your full name" : "Full name"}><input style={inputStyle} value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Stephanie Snead" /></Field>}
-          <Field label="Email"><input style={inputStyle} type="email" autoCapitalize="none" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@email.com" /></Field>
+          <Field label="Email"><input type="email" autoComplete="email" style={inputStyle} type="email" autoCapitalize="none" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@email.com" /></Field>
           <Field label="Password" hint={mode === "register" ? "At least 6 characters." : null}>
             <input style={inputStyle} type="password" value={pw} onChange={(e) => setPw(e.target.value)} placeholder="••••••••" />
           </Field>
@@ -1180,10 +1265,10 @@ function CloudAuth({ gate }) {
           {err && <div style={{ color: BRAND.red, fontSize: 13, fontWeight: 600, marginBottom: 12 }}>{err}</div>}
           {msg && <div style={{ color: BRAND.green, fontSize: 13, fontWeight: 600, marginBottom: 12 }}>{msg}</div>}
           <Btn kind="gold" onClick={submit} disabled={busy}>{busy ? "Please wait…" : mode === "login" ? "Sign in" : mode === "company" ? "Start free trial" : "Create account"}</Btn>
-          <button onClick={() => { setMode(mode === "login" ? "register" : "login"); setErr(""); setMsg(""); }}
+          {!IS_PLAY_APP && <button onClick={() => { setMode(mode === "login" ? "register" : "login"); setErr(""); setMsg(""); }}
             style={{ display: "block", marginTop: 14, background: "none", border: "none", color: BRAND.navySoft, fontSize: 13, cursor: "pointer", textDecoration: "underline", padding: 0 }}>
             {mode === "login" ? "New team member? Create your profile" : "Already have an account? Sign in"}
-          </button>
+          </button>}
           {ALLOW_COMPANY_SIGNUP && mode !== "company" && (
             <button onClick={() => { setMode("company"); setErr(""); setMsg(""); }}
               style={{ display: "block", marginTop: 8, background: "none", border: "none", color: BRAND.sub, fontSize: 12, cursor: "pointer", textDecoration: "underline", padding: 0 }}>
@@ -1402,6 +1487,9 @@ function UpcomingJobs({ quotes, onReceipt }) {
 function Dashboard({ me, isOwner, isManager, quotes, users, settings, onOpen, onPreview, onNew, onDelete, onReceipt, onUpdate, notify }) {
   const [period, setPeriod] = useState("month");
   const [filter, setFilter] = useState("all");
+  const [search, setSearch] = useState("");
+  const [recoveryVersion, setRecoveryVersion] = useState(0);
+  const recoveries = IS_PLAY_APP ? nativeDrafts(me) : [];
 
   /* Mark an open quote Won or Declined right from the list. Same fields and
      history entries as the Team & review screen. */
@@ -1453,6 +1541,7 @@ function Dashboard({ me, isOwner, isManager, quotes, users, settings, onOpen, on
   const list = quotes
     .filter((q) => inPeriod(q.createdAt, period))
     .filter((q) => filter === "all" || q.status === filter)
+    .filter((q) => !IS_PLAY_APP || !search.trim() || [q.clientName, q.quoteNo, q.jobTitle, q.clientAddress, q.clientPhone].join(" ").toLowerCase().includes(search.trim().toLowerCase()))
     .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
 
   return (
@@ -1487,6 +1576,29 @@ function Dashboard({ me, isOwner, isManager, quotes, users, settings, onOpen, on
       <UpcomingJobs quotes={quotes} onReceipt={isManager ? onReceipt : null} />
       <FollowUps quotes={quotes} settings={settings} onUpdate={onUpdate} onOpen={onOpen} who={me ? me.name : ""} notify={notify} />
 
+      {IS_PLAY_APP && recoveries.length > 0 && <Card style={{ marginBottom: 16, borderLeft: `4px solid ${BRAND.gold}` }}>
+        <h3 style={{ fontSize: 17, fontWeight: 700, color: BRAND.navy }}>EDITS KEPT ON THIS PHONE</h3>
+        <p style={{ fontSize: 13, marginBottom: 10 }}>Review and save these edits when connected. They have not been confirmed in the cloud.</p>
+        {recoveries.map((backup) => {
+          const current = quotes.find((x) => x.id === backup.quote.id);
+          const matches = nativeRevision(current) === backup.baseRevision;
+          return <div key={backup.quote.id} style={{ padding: "10px 0", borderTop: `1px solid ${BRAND.line}` }}>
+            <strong>{backup.quote.clientName || "Unnamed client"} · {backup.quote.quoteNo}</strong>
+            <div style={{ fontSize: 12, color: BRAND.sub, marginBottom: 6 }}>{matches ? "Device copy saved " + new Date(backup.at).toLocaleString() : "The cloud quote has changed. Open it and compare before re-entering these edits."}</div>
+            <div className="flex gap-2 flex-wrap">
+              {matches && <Btn small kind="gold" onClick={() => onOpen(Object.assign({}, backup.quote, { __mobileBaseRevision: backup.baseRevision }))}>Recover edits</Btn>}
+              {!matches && current && <Btn small onClick={() => onOpen(current)}>Open current quote</Btn>}
+              <Btn small kind="ghost" onClick={() => { const blob = new Blob([JSON.stringify(backup.quote, null, 2)], { type: "application/json" }); const url = URL.createObjectURL(blob); const a = document.createElement("a"); a.href = url; a.download = backup.quote.quoteNo + "-recovery.json"; document.body.append(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 1000); }}>Export device copy</Btn>
+              <Btn small kind="ghost" onClick={() => { if (window.confirm("Discard this phone's unsynced copy of " + backup.quote.quoteNo + "?")) { nativeDraftRemove(me, backup.quote.id); setRecoveryVersion(recoveryVersion + 1); } }}>Discard copy</Btn>
+            </div>
+          </div>;
+        })}
+      </Card>}
+      {IS_PLAY_APP && <div className="flex gap-2 items-center mb-3">
+        <input aria-label="Search quotes" type="search" style={inputStyle} placeholder="Search client, quote, job or address" value={search} onChange={(e) => setSearch(e.target.value)} />
+        {search && <Btn small kind="ghost" onClick={() => setSearch("")}>Clear</Btn>}
+      </div>}
+      {IS_PLAY_APP && search.trim() && <p role="status" style={{ fontSize: 13, color: BRAND.sub, marginBottom: 10 }}>{list.length} matching quote{list.length === 1 ? "" : "s"} in {PERIODS.find(([key]) => key === period)[1].toLowerCase()}. Change the period to search older quotes.</p>}
       <div className="flex gap-2 mb-3 flex-wrap">
         {["all"].concat(Object.keys(STATUS)).map((k) => (
           <button key={k} onClick={() => setFilter(k)}
@@ -1498,7 +1610,7 @@ function Dashboard({ me, isOwner, isManager, quotes, users, settings, onOpen, on
 
       {list.length === 0 ? (
         <Card style={{ textAlign: "center", padding: 40 }}>
-          <div style={{ fontSize: 15, color: BRAND.sub }}>No quotes here yet. Create your first one — it takes about two minutes.</div>
+          <div style={{ fontSize: 15, color: BRAND.sub }}>{IS_PLAY_APP && (search.trim() || filter !== "all") ? "No matching quotes. Try another search, status or period." : "No quotes here yet. Create your first one — it takes about two minutes."}</div>
           <div className="mt-4"><Btn kind="gold" onClick={onNew}>Create a quote</Btn></div>
         </Card>
       ) : (
@@ -1669,13 +1781,23 @@ function loadHtml2pdf() {
   if (!html2pdfLoading) {
     html2pdfLoading = new Promise((resolve, reject) => {
       const sc = document.createElement("script");
-      sc.src = "https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js";
+      sc.src = IS_PLAY_APP ? "./vendor/html2pdf.bundle.min.js" : "https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js";
       sc.onload = () => resolve(window.html2pdf);
       sc.onerror = () => { html2pdfLoading = null; reject(new Error("Couldn't load the PDF maker. Check your connection.")); };
       document.head.appendChild(sc);
     });
   }
   return html2pdfLoading;
+}
+
+async function nativePdfDocument(element) {
+  if (!IS_PLAY_APP || !window.SIQ_PDF_IMAGE) return element;
+  const clone = element.cloneNode(true);
+  await Promise.all(Array.from(clone.querySelectorAll("img")).map(async (image) => {
+    const source = image.getAttribute("src") || "";
+    if (source.startsWith("/api/img?u=")) image.src = await window.SIQ_PDF_IMAGE(source);
+  }));
+  return clone;
 }
 
 const attSrc = (a) => (a && (a.url || a.thumb)) || "";
@@ -2258,8 +2380,8 @@ function AiAssistant({ me, q, settings, disabled, onApplyDraft, onApplyLead, onS
 }
 
 /* ================= QUOTE FORM ================= */
-function QuoteForm({ me, isOwner, isManager, settings, notify, existing, onSave, onAutosave, onPreview, onCancel }) {
-  const [q, setQ] = useState(existing || {
+function QuoteForm({ me, isOwner, isManager, settings, notify, existing, onSave, onAutosave: persistAutosave, onPreview, onCancel }) {
+  const [q, setQ] = useState(() => { const initial = existing || {
     id: uid(),
     quoteNo: "Q-" + new Date().getFullYear() + "-" + Math.floor(1000 + Math.random() * 9000),
     createdBy: me.id, createdAt: new Date().toISOString(), status: "draft",
@@ -2273,8 +2395,38 @@ function QuoteForm({ me, isOwner, isManager, settings, notify, existing, onSave,
     preparedBy: { id: me.id, name: me.name || "", email: me.email || "" },
     items: [], overheadPct: settings.overheadPct, marginPct: settings.targetMargin,
     discountPct: 0, notes: "", history: [{ at: new Date().toISOString(), by: me.name, action: "Created" }],
-  });
-  const [dirty, setDirty] = useState(false);
+  }; const clean = Object.assign({}, initial); delete clean.__mobileBaseRevision; return clean; });
+  const [dirty, setDirty] = useState(!!(IS_PLAY_APP && existing && Object.prototype.hasOwnProperty.call(existing, "__mobileBaseRevision")));
+  const [saveState, setSaveState] = useState("");
+  const [saveError, setSaveError] = useState("");
+  const [saving, setSaving] = useState(false);
+  const qRef = useRef(q); qRef.current = q;
+  const baseRevision = useRef(existing && Object.prototype.hasOwnProperty.call(existing, "__mobileBaseRevision") ? existing.__mobileBaseRevision : nativeRevision(existing));
+  const saveQueue = useRef(Promise.resolve());
+  const onAutosave = (draft) => {
+    if (!IS_PLAY_APP) return persistAutosave(draft);
+    const work = saveQueue.current.catch(() => {}).then(async () => {
+      if (navigator.onLine === false) throw new Error("You're offline. Reconnect, then retry saving your edits.");
+      const errors = nativeQuoteErrors(draft, settings, false).filter((x) => x !== "Enter the client's name.");
+      if (errors.length) throw new Error(errors.join(" "));
+      setSaveState("Saving to cloud…");
+      await persistAutosave(draft, { expectedRevision: baseRevision.current });
+      baseRevision.current = nativeRevision(draft);
+      if (nativeDraftContent(qRef.current) === nativeDraftContent(draft)) { nativeDraftRemove(me, q.id); setSaveState("Saved to cloud"); setSaveError(""); }
+      else nativeDraftStore(me, qRef.current, baseRevision.current);
+    }).catch((e) => {
+      const kept = nativeDraftStore(me, qRef.current, baseRevision.current);
+      setSaveState(kept ? "Edits kept on this phone" : "Edits are not saved");
+      setSaveError(e.message || "Could not save. Reconnect and retry.");
+    });
+    saveQueue.current = work;
+    return work;
+  };
+  useEffect(() => {
+    if (!IS_PLAY_APP || !dirty) return;
+    const kept = nativeDraftStore(me, q, baseRevision.current);
+    setSaveState(kept ? "Edits kept on this phone" : "Device storage is full. Keep this screen open until saved.");
+  }, [q, dirty]);
   const [loggedStart, setLoggedStart] = useState(false);
   /* Autosave runs 1.2 s after typing stops. Submitting, approving, sending
      back or voiding stops it first, so an old draft can never land on top. */
@@ -2383,8 +2535,28 @@ function QuoteForm({ me, isOwner, isManager, settings, notify, existing, onSave,
     if (mode === "turnkey" && !locked) detectMaterials();
   };
 
+  const commitQuote = async (next, opts) => {
+    if (!IS_PLAY_APP) return onSave(next, opts);
+    setSaving(true); setSaveError("");
+    try {
+      await saveQueue.current;
+      if (navigator.onLine === false) throw new Error("You're offline. Reconnect and retry saving.");
+      await onSave(next, Object.assign({}, opts, { expectedRevision: baseRevision.current }));
+      nativeDraftRemove(me, q.id);
+      return true;
+    } catch (e) {
+      const kept = nativeDraftStore(me, q, baseRevision.current);
+      setSaveError(e.message || "Could not save. Reconnect and retry.");
+      setSaveState(kept ? "Edits kept on this phone" : "Edits are not saved. Keep this screen open.");
+      return false;
+    } finally { setSaving(false); }
+  };
+
   const save = async (submit, opts) => {
-    if (!q.clientName.trim()) return alert("Enter the client's name.");
+    if (IS_PLAY_APP) {
+      const errors = nativeQuoteErrors(q, settings, submit);
+      if (errors.length) { setSaveError(errors.join(" ")); document.getElementById("siq-save-status")?.focus(); return; }
+    } else if (!q.clientName.trim()) return alert("Enter the client's name.");
     stopAutosave();
     if (submit && !(Number(q.days) > 0) && !(q.items || []).length) return alert("Add the days on site (or materials) before submitting — the quote is still $0.");
     const next = Object.assign({}, q, { updatedAt: new Date().toISOString() });
@@ -2396,7 +2568,7 @@ function QuoteForm({ me, isOwner, isManager, settings, notify, existing, onSave,
       next.history = (q.history || []).concat([{ at: new Date().toISOString(), by: me.name, action: "Saved draft" }]);
       logActivity(me.name, "Saved draft", q.quoteNo);
     }
-    await onSave(next, opts);
+    await commitQuote(next, opts);
     // Who gets told (and how) is decided in upsertQuote, for every save path.
   };
 
@@ -2405,11 +2577,11 @@ function QuoteForm({ me, isOwner, isManager, settings, notify, existing, onSave,
   const canReview = isManager && existing && q.createdBy !== me.id
     && ["pending", "changes", "draft"].includes(q.status);
 
-  const sendBack = () => {
+  const sendBack = async () => {
     stopAutosave();
     const note = window.prompt("What should they change?\n(e.g. Margin too thin — raise to 22%)", q.reviewNote || "");
     if (note === null) { autosavePaused.current = false; return; }
-    onSave(Object.assign({}, q, {
+    await commitQuote(Object.assign({}, q, {
       status: "changes",
       reviewNote: note.trim(),
       updatedAt: new Date().toISOString(),
@@ -2418,12 +2590,12 @@ function QuoteForm({ me, isOwner, isManager, settings, notify, existing, onSave,
     logActivity(me.name, "Requested changes on quote", q.quoteNo);
   };
 
-  const voidThis = () => {
+  const voidThis = async () => {
     stopAutosave();
     if (!window.confirm("Void quote " + q.quoteNo + "?\n\nVoiding is permanent. The quote is frozen for good — it can't be edited, printed, or brought back, and it stops counting toward any total.")) { autosavePaused.current = false; return; }
     const reason = window.prompt("Why is this quote being voided?\n(e.g. duplicate, client cancelled, priced in error)");
     if (reason === null) return;
-    onSave(Object.assign({}, q, {
+    await commitQuote(Object.assign({}, q, {
       status: "void", voidReason: reason.trim(), voidedAt: new Date().toISOString(),
       voidedBy: me.name, prevStatus: q.status,
       history: (q.history || []).concat([{ at: new Date().toISOString(), by: me.name, action: "Voided" + (reason.trim() ? " — " + reason.trim() : "") }]),
@@ -2435,9 +2607,9 @@ function QuoteForm({ me, isOwner, isManager, settings, notify, existing, onSave,
     <div>
       <div style={{ fontSize: 12, textTransform: "uppercase", letterSpacing: "0.08em", color: BRAND.sub, fontWeight: 700, marginBottom: 6, fontFamily: "'Barlow Condensed', sans-serif" }}>{label}</div>
       <div className="flex items-center gap-2">
-        <button onClick={() => onChange(Math.max(min, value - 1))} disabled={locked} style={{ width: 36, height: 36, borderRadius: 8, border: `1.5px solid ${BRAND.line}`, background: "#fff", fontSize: 18, cursor: "pointer", color: BRAND.navy }}>−</button>
+        <button aria-label={"Decrease " + label.toLowerCase()} onClick={() => onChange(Math.max(min, value - 1))} disabled={locked} style={{ width: 36, height: 36, borderRadius: 8, border: `1.5px solid ${BRAND.line}`, background: "#fff", fontSize: 18, cursor: "pointer", color: BRAND.navy }}>−</button>
         <div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontSize: 26, fontWeight: 700, color: BRAND.navy, minWidth: 44, textAlign: "center" }}>{value}<span style={{ fontSize: 13, color: BRAND.sub, fontWeight: 500 }}> {unit}</span></div>
-        <button onClick={() => onChange(value + 1)} disabled={locked} style={{ width: 36, height: 36, borderRadius: 8, border: `1.5px solid ${BRAND.gold}`, background: BRAND.gold, fontSize: 18, cursor: "pointer", color: BRAND.navy, fontWeight: 700 }}>+</button>
+        <button aria-label={"Increase " + label.toLowerCase()} onClick={() => onChange(value + 1)} disabled={locked} style={{ width: 36, height: 36, borderRadius: 8, border: `1.5px solid ${BRAND.gold}`, background: BRAND.gold, fontSize: 18, cursor: "pointer", color: BRAND.navy, fontWeight: 700 }}>+</button>
       </div>
     </div>
   );
@@ -2625,6 +2797,11 @@ function QuoteForm({ me, isOwner, isManager, settings, notify, existing, onSave,
 
   return (
     <div className="grid md-grid-cols-3 gap-5">
+      {IS_PLAY_APP && <div id="siq-save-status" tabIndex={-1} role={saveError ? "alert" : "status"} className="siq-save-status md-col-span-3" style={{ gridColumn: "1 / -1", padding: 12, background: saveError ? "#F9E5E3" : "#fff", borderRadius: 8 }}>
+        <strong>{saving ? "Saving…" : saveState || "New edits will be backed up on this phone"}</strong>
+        {saveError && <p style={{ marginTop: 5 }}>{saveError}</p>}
+        {!locked && saveError && <Btn small kind="ghost" disabled={saving} onClick={() => onAutosave(Object.assign({}, q, { updatedAt: new Date().toISOString() }))}>Retry cloud save</Btn>}
+      </div>}
       <div className="md-col-span-2 flex flex-col gap-5">
         <Card>
           <h3 style={h3Style}>1 · CLIENT</h3>
@@ -2651,7 +2828,7 @@ function QuoteForm({ me, isOwner, isManager, settings, notify, existing, onSave,
           )}
           <div className="grid md-grid-cols-2 gap-x-4">
             <Field label="Client name"><input style={inputStyle} disabled={locked} value={q.clientName} onChange={(e) => set("clientName", e.target.value)} placeholder="Full name" /></Field>
-            <Field label="Phone"><input style={inputStyle} disabled={locked} value={q.clientPhone} onChange={(e) => set("clientPhone", e.target.value)} placeholder="(832) 000-0000" /></Field>
+            <Field label="Phone"><input type="tel" autoComplete="tel" style={inputStyle} disabled={locked} value={q.clientPhone} onChange={(e) => set("clientPhone", e.target.value)} placeholder="(832) 000-0000" /></Field>
             <Field label="Email"><input style={inputStyle} disabled={locked} value={q.clientEmail} onChange={(e) => set("clientEmail", e.target.value)} placeholder="client@email.com" /></Field>
             <Field label="Job address"><input style={inputStyle} disabled={locked} value={q.clientAddress} onChange={(e) => set("clientAddress", e.target.value)} placeholder="Street, City, TX" /></Field>
           </div>
@@ -2871,7 +3048,7 @@ function QuoteForm({ me, isOwner, isManager, settings, notify, existing, onSave,
       <div>
         <div style={{ position: "sticky", top: 16 }}>
           <Card style={{ borderTop: `4px solid ${BRAND.gold}` }}>
-            <h3 style={Object.assign({}, h3Style, { marginBottom: 12 })}>QUOTE SUMMARY</h3>
+            <h3 style={Object.assign({}, h3Style, { marginBottom: 12 })}>QUOTE SUMMARY</h3>{IS_PLAY_APP && q.reviewNote && <p role="status" style={{ padding: 10, background: "#FBF3DE", marginBottom: 12 }}>Owner feedback — {q.reviewNote}</p>}
             {c.total === 0 && !q.aiDraft && (
               <div style={{ background: BRAND.paper, borderRadius: 8, padding: "8px 10px", fontSize: 12.5, color: BRAND.sub, marginBottom: 12 }}>
                 Nothing priced yet. Set the days on site and materials, or use the AI assistant at the top.
@@ -2934,13 +3111,13 @@ function QuoteForm({ me, isOwner, isManager, settings, notify, existing, onSave,
 
             <div className="flex flex-col gap-2 mt-4">
               <Btn kind="gold" onClick={() => onPreview(Object.assign({}, q))}>Preview client quote</Btn>
-              {!locked && isManager && <Btn onClick={() => save(true, { preview: true })}>Approve & create PDF</Btn>}
-              {!locked && <Btn kind={isManager ? "ghost" : "primary"} onClick={() => save(true)}>{isManager ? "Save & approve" : "Submit for review"}</Btn>}
+              {!locked && isManager && <Btn disabled={IS_PLAY_APP && saving} onClick={() => save(true, { preview: true })}>Approve & create PDF</Btn>}
+              {!locked && <Btn kind={isManager ? "ghost" : "primary"} disabled={IS_PLAY_APP && saving} onClick={() => save(true)}>{isManager ? "Save & approve" : "Submit for review"}</Btn>}
               {/* Reviewing someone else's work: send it back or kill it,
                   without having to go to the Team & review tab. */}
               {canReview && <Btn kind="danger" onClick={sendBack}>Request changes</Btn>}
               {canReview && <Btn kind="ghost" onClick={voidThis}>Void quote</Btn>}
-              {!locked && <Btn kind="ghost" onClick={() => save(false)}>Save as draft</Btn>}
+              {!locked && <Btn kind="ghost" disabled={IS_PLAY_APP && saving} onClick={() => save(false)}>Save as draft</Btn>}
               <Btn kind="ghost" onClick={onCancel}>Back</Btn>
             </div>
             {locked && <div style={{ fontSize: 12, color: BRAND.sub, marginTop: 10 }}>This quote is {STATUS[q.status].label.toLowerCase()} and locked. Ask the owner to reopen it for edits.</div>}
@@ -4080,6 +4257,7 @@ function AdminCompany({ cid, onBack, notify }) {
 
 /* ---------- billing (other companies only; JTProconstruction is never billed) ---------- */
 async function billingCall(action, extra) {
+  if (IS_PLAY_APP && !["status", "cancel"].includes(action)) throw new Error("Subscription purchase is unavailable in this app.");
   const idToken = await fbAuth.currentUser.getIdToken();
   const r = await fetch("/api/billing", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(Object.assign({ idToken, action }, extra || {})) });
   const data = await r.json().catch(() => ({}));
@@ -4172,6 +4350,10 @@ function PlanModal({ billing, isOwner, lastQuote, notify, onClose }) {
 
 /* Full screen shown instead of the app when a plan is needed. */
 function BillingGate({ billing, isOwner, onSignOut, notify, onBilling }) {
+  if (IS_PLAY_APP) return <div className="min-h-screen flex items-center justify-center px-4" style={{ background: BRAND.navy }}><Card style={{ maxWidth: 440 }}>
+    <h2 style={{ color: BRAND.navy, fontSize: 24, marginBottom: 12 }}>ACCOUNT ACCESS</h2><p style={{ marginBottom: 14 }}>Your company account is currently unavailable. Contact your company owner or support for help.</p>
+    <a href={"mailto:" + SUPPORT.email}>Email support</a><div className="mt-4"><Btn onClick={onSignOut}>Sign out</Btn></div>
+  </Card></div>;
   const limit = billing.access === "limit";
   const locked = billing.access === "locked" || limit;
   const [starting, setStarting] = useState(false);
@@ -4331,7 +4513,24 @@ function CancelFlow({ billing, onBilling, onClose, notify }) {
   );
 }
 
+function NativePlanStatus({ billing, notify, onBilling }) {
+  const [busy, setBusy] = useState(false);
+  if (!billing || billing.exempt || !billing.enabled) return null;
+  const cancel = async () => {
+    if (!window.confirm("Cancel renewal of your current subscription? Access continues through the current paid period.")) return;
+    setBusy(true);
+    try { const next = await billingCall("cancel", { reason: "Cancelled in Android app" }); onBilling(next); notify("Subscription renewal cancelled."); }
+    catch (error) { notify(error.message || "Cancellation could not be completed."); }
+    setBusy(false);
+  };
+  return <Card style={{ marginBottom: 14 }}><h3 style={{ color: BRAND.navy, fontSize: 20, marginBottom: 10 }}>ACCOUNT PLAN</h3><p>{PLAN_LABEL[billing.plan] || "Company account"} · {BILL_STATUS[billing.billingStatus] || billing.billingStatus || "Active"}</p>
+    {billing.hasCard && !billing.cancelAtPeriodEnd && <div className="mt-3"><Btn kind="ghost" disabled={busy} onClick={cancel}>{busy ? "Cancelling…" : "Cancel subscription renewal"}</Btn></div>}
+    {billing.cancelAtPeriodEnd && <p className="mt-2">Renewal cancelled.</p>}
+  </Card>;
+}
+
 function BillingCard({ billing, notify, onBilling }) {
+  if (IS_PLAY_APP) return <NativePlanStatus billing={billing} notify={notify} onBilling={onBilling} />;
   const [cancelOpen, setCancelOpen] = useState(false);
   const [resuming, setResuming] = useState(false);
   if (!billing || billing.exempt || !billing.enabled) return null;
@@ -4513,7 +4712,7 @@ function ReceiptModal({ quote: liveQuote, settings, me, onSave: saveQuote, onClo
     const el = document.getElementById(mode === "inv" ? "invoice-doc" : "receipt-doc");
     const sx = window.scrollX, sy = window.scrollY; window.scrollTo(0, 0);
     try {
-      return await lib().set({ margin: [8, 8, 8, 8], filename: fileName, image: { type: "jpeg", quality: 0.95 }, html2canvas: { scale: 2, useCORS: true, backgroundColor: "#ffffff", scrollX: 0, scrollY: 0 }, jsPDF: { unit: "mm", format: "letter", orientation: "portrait" } }).from(el).outputPdf("blob");
+      return await lib().set({ margin: [8, 8, 8, 8], filename: fileName, image: { type: "jpeg", quality: 0.95 }, html2canvas: { scale: 2, useCORS: true, backgroundColor: "#ffffff", scrollX: 0, scrollY: 0 }, jsPDF: { unit: "mm", format: "letter", orientation: "portrait" } }).from(await nativePdfDocument(el)).outputPdf("blob");
     } finally { window.scrollTo(sx, sy); }
   };
   const download = async () => {
@@ -4844,7 +5043,90 @@ function ReceiptsView({ quotes, settings, onReceipt }) {
   );
 }
 
-function PreviewModal({ quote, settings, users, me, onClose }) {
+function signatureFingerprint(quote, settings) {
+  return JSON.stringify({
+    quoteNo: quote.quoteNo, client: [quote.clientName, quote.clientAddress, quote.clientEmail],
+    title: quote.jobTitle, category: quote.category, description: quote.description, notes: quote.notes,
+    scope: (quote.scopeItems || []).filter((item) => item.on).map((item) => item.text),
+    exclusions: (quote.exclusions || []).filter((item) => item.on).map((item) => item.text),
+    crew: [quote.crew, quote.days, quote.hoursPerDay, quote.laborRate],
+    pricing: [quote.pricingMode, quote.items, computeQuote(quote, settings).total],
+  });
+}
+
+function QuoteSignature({ quote, settings, role, onSign }) {
+  const canvas = useRef(null);
+  const stroke = useRef(null);
+  const drawn = useRef(false);
+  const [open, setOpen] = useState(false);
+  const [name, setName] = useState("");
+  const [consent, setConsent] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const stored = quote.signatures && quote.signatures[role];
+  const signature = stored && stored.fingerprint === signatureFingerprint(quote, settings) ? stored : null;
+  const point = (event) => {
+    const rect = canvas.current.getBoundingClientRect();
+    return [(event.clientX - rect.left) * 700 / rect.width, (event.clientY - rect.top) * 220 / rect.height];
+  };
+  const start = (event) => {
+    if (event.button !== 0 || stroke.current) return;
+    event.currentTarget.setPointerCapture(event.pointerId);
+    stroke.current = { id: event.pointerId, point: point(event) };
+  };
+  const move = (event) => {
+    if (!stroke.current || stroke.current.id !== event.pointerId) return;
+    const next = point(event);
+    const previous = stroke.current.point;
+    if (Math.hypot(next[0] - previous[0], next[1] - previous[1]) < 1) return;
+    const context = canvas.current.getContext("2d");
+    context.strokeStyle = BRAND.navy;
+    context.lineWidth = 3;
+    context.lineCap = "round";
+    context.beginPath(); context.moveTo(...previous); context.lineTo(...next); context.stroke();
+    stroke.current.point = next; drawn.current = true;
+  };
+  const clear = () => {
+    canvas.current.getContext("2d").clearRect(0, 0, 700, 220);
+    stroke.current = null; drawn.current = false; setError("");
+  };
+  const save = async () => {
+    if (!name.trim() || !drawn.current || !consent) return setError("Enter the signer’s name, draw a signature, and confirm acceptance.");
+    setBusy(true); setError("");
+    try {
+      await onSign(quote, role, {
+        name: name.trim(), image: canvas.current.toDataURL("image/png"), at: new Date().toISOString(),
+        fingerprint: signatureFingerprint(quote, settings), recordedBy: role === "client" ? "Client on contractor device" : "Contractor on device",
+      });
+      setOpen(false);
+    } catch (failure) { setError(failure.message || "The signature could not be saved."); }
+    setBusy(false);
+  };
+  return <div>
+    {signature ? <div><img src={signature.image} alt={role + " signature"} style={{ width: "100%", height: 75, objectFit: "contain" }} />
+      <div style={{ fontSize: 12 }}>{signature.name} · {fmtDate(signature.at)}</div></div>
+      : onSign ? <div className="siq-capture-control" data-html2canvas-ignore="true"><Btn small kind="ghost" onClick={() => { drawn.current = false; setOpen(true); }}>Capture {role} signature</Btn></div>
+      : <div style={{ height: 34, borderBottom: "1px solid #142641" }} />}
+    {open && <div role="dialog" aria-modal="true" aria-label={role + " signature"} style={{ position: "fixed", inset: 0, background: "rgba(11,31,58,.7)", zIndex: 90, padding: 16, display: "flex", alignItems: "center", justifyContent: "center" }}>
+      <div style={{ background: "#fff", padding: 20, borderRadius: 12, width: "100%", maxWidth: 480, maxHeight: "95dvh", overflow: "auto" }}>
+        <h3 style={{ color: BRAND.navy, fontSize: 20, marginBottom: 10 }}>{role === "client" ? "CLIENT ACCEPTANCE" : "CONTRACTOR SIGNATURE"}</h3>
+        <p style={{ marginBottom: 12 }}>{quote.quoteNo} · {money(computeQuote(quote, settings).total)}</p>
+        <Field label="Signer name"><input style={inputStyle} maxLength={100} value={name} onChange={(event) => setName(event.target.value)} /></Field>
+        <canvas ref={canvas} width={700} height={220} aria-label="Draw signature" onPointerDown={start} onPointerMove={move}
+          onPointerUp={() => { stroke.current = null; }} onPointerCancel={() => { stroke.current = null; }}
+          style={{ width: "100%", background: "#F7F5F0", border: "1px dashed #8FA0B8", borderRadius: 8, touchAction: "none" }} />
+        <label className="flex items-start gap-2 mt-3" style={{ fontSize: 14 }}><input type="checkbox" checked={consent} onChange={(event) => setConsent(event.target.checked)} style={{ minHeight: 20, width: 20 }} />
+          I have reviewed this quote, including its scope, total and terms, and agree to record my signature.</label>
+        {error && <p role="alert" style={{ color: BRAND.red, marginTop: 10 }}>{error}</p>}
+        <div className="flex flex-wrap gap-2 mt-4"><Btn small kind="ghost" disabled={busy} onClick={clear}>Clear</Btn>
+          <Btn small kind="ghost" disabled={busy} onClick={() => setOpen(false)}>Cancel</Btn>
+          <Btn small kind="gold" disabled={busy} onClick={save}>{busy ? "Saving…" : "Save signature"}</Btn></div>
+      </div>
+    </div>}
+  </div>;
+}
+
+function PreviewModal({ quote, settings, users, me, onSign, onClose }) {
   const c = computeQuote(quote, settings);
   const author = users[quote.createdBy];
   /* Who prepared it: the name saved on the quote, or the author's profile.
@@ -4888,7 +5170,7 @@ function PreviewModal({ quote, settings, users, me, onClose }) {
         html2canvas: { scale, useCORS: true, backgroundColor: "#ffffff", scrollX: 0, scrollY: 0 },
         jsPDF: { unit: "mm", format: "letter", orientation: "portrait" },
         pagebreak: { mode: ["css", "legacy"], avoid: ["tr", "li", ".keep-together"] },
-      }).from(el).outputPdf("blob");
+      }).from(await nativePdfDocument(el)).outputPdf("blob");
       if (!blob || blob.size < 3000) throw new Error("The PDF came out empty. Use Print → Save as PDF instead.");
       return blob;
     } finally { window.scrollTo(sx, sy); }
@@ -5184,7 +5466,9 @@ function PreviewModal({ quote, settings, users, me, onClose }) {
           <div style={{ display: "flex", gap: 40, marginTop: 34 }}>
             {["Client acceptance", COMPANY.name + (preparer.name ? " — " + preparer.name : "")].map((who) => (
               <div key={who} style={{ flex: 1 }}>
-                <div style={{ borderBottom: `1.5px solid ${BRAND.ink}`, height: 34 }} />
+                {IS_PLAY_APP && releasable
+                  ? <QuoteSignature quote={quote} settings={settings} role={who === "Client acceptance" ? "client" : "contractor"} onSign={isOwnerViewer ? onSign : null} />
+                  : <div style={{ borderBottom: `1.5px solid ${BRAND.ink}`, height: 34 }} />}
                 <div style={{ fontSize: 11, color: BRAND.sub, marginTop: 4 }}>{who} — signature &amp; date</div>
               </div>
             ))}

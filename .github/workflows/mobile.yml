@@ -1,41 +1,111 @@
 name: Mobile builds
-on: { workflow_dispatch: {} }
+
+on:
+  workflow_dispatch:
+    inputs:
+      version_code:
+        description: Android version code, greater than all prior Play uploads
+        default: '2'
+        required: true
+  pull_request:
+    paths:
+      - 'mobile/**'
+      - 'src/**'
+      - 'config.js'
+      - '.github/workflows/mobile.yml'
+
+permissions:
+  contents: read
+
 jobs:
   android:
     runs-on: ubuntu-latest
-    defaults: { run: { working-directory: mobile } }
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
-        with: { node-version: 20 }
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            mobile/package-lock.json
       - uses: actions/setup-java@v4
-        with: { distribution: temurin, java-version: 17 }
-      - run: npm install
-      - run: npx cap add android
-      - run: npx capacitor-assets generate --android || true
-      - run: npx cap sync android
-      - name: Build release bundle
-        working-directory: mobile/android
-        run: ./gradlew bundleRelease
-      - name: Sign bundle (needs secrets)
-        working-directory: .
-        env: { KS: "${{ secrets.ANDROID_KEYSTORE_B64 }}", PW: "${{ secrets.ANDROID_KEYSTORE_PASSWORD }}", AL: "${{ secrets.ANDROID_KEY_ALIAS }}" }
+        with:
+          distribution: temurin
+          java-version: 21
+      - run: npm ci
+      - run: npm ci
+        working-directory: mobile
+      - name: Restore optional Firebase Android configuration
+        env:
+          CONFIG: ${{ secrets.ANDROID_GOOGLE_SERVICES_JSON_B64 }}
         run: |
-          if [ -z "$KS" ]; then echo "No keystore secret - skipping signing"; exit 0; fi
-          echo "$KS" | base64 -d > "$RUNNER_TEMP/ks.jks"
-          jarsigner -keystore "$RUNNER_TEMP/ks.jks" -storepass "$PW" mobile/android/app/build/outputs/bundle/release/app-release.aab "$AL"
+          if [ -n "$CONFIG" ]; then
+            printf '%s' "$CONFIG" | base64 --decode > mobile/android/app/google-services.json
+          fi
+      - run: npm run sync:android
+        working-directory: mobile
+      - run: npm run check
+        working-directory: mobile
+      - name: Verify pull request build
+        if: github.event_name == 'pull_request'
+        working-directory: mobile/android
+        run: ./gradlew --no-daemon assembleDebug lintDebug
+      - name: Restore release upload key
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          KEYSTORE: ${{ secrets.ANDROID_KEYSTORE_B64 }}
+          PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+        run: |
+          test -n "$KEYSTORE" && test -n "$PASSWORD" && test -n "$ALIAS" || {
+            echo "Android upload signing secrets are required."
+            exit 1
+          }
+          printf '%s' "$KEYSTORE" | base64 --decode > "$RUNNER_TEMP/siq-upload.jks"
+          chmod 600 "$RUNNER_TEMP/siq-upload.jks"
+      - name: Build signed Android release
+        if: github.event_name == 'workflow_dispatch'
+        working-directory: mobile/android
+        env:
+          ANDROID_KEYSTORE_PATH: ${{ runner.temp }}/siq-upload.jks
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_VERSION_CODE: ${{ inputs.version_code }}
+        run: ./gradlew --no-daemon bundleRelease assembleRelease lintRelease
+      - name: Verify signed release
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          python3 mobile/scripts/verify-release.py
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify mobile/android/app/build/outputs/apk/release/app-release.apk
+          "$ANDROID_HOME/build-tools/36.0.0/zipalign" -c -P 16 4 mobile/android/app/build/outputs/apk/release/app-release.apk
       - uses: actions/upload-artifact@v4
-        with: { name: android-aab, path: mobile/android/app/build/outputs/bundle/release/*.aab }
+        if: github.event_name == 'workflow_dispatch'
+        with:
+          name: si-quotes-pro-android-release
+          if-no-files-found: error
+          path: |
+            mobile/android/app/build/outputs/bundle/release/app-release.aab
+            mobile/android/app/build/outputs/apk/release/app-release.apk
+            mobile/android/app/build/reports/lint-results-release.html
+      - name: Clean signing file
+        if: always()
+        run: rm -f "$RUNNER_TEMP/siq-upload.jks" mobile/android/app/google-services.json
+
   ios:
+    if: github.event_name == 'workflow_dispatch'
     runs-on: macos-latest
-    defaults: { run: { working-directory: mobile } }
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
-        with: { node-version: 20 }
-      - run: npm install
-      - run: npx cap add ios
-      - run: npx capacitor-assets generate --ios || true
-      - run: npx cap sync ios
+        with:
+          node-version: 22
+      - run: npm ci
+      - run: npm ci && npm run build && npx cap add ios && npx capacitor-assets generate --ios && npx cap sync ios
+        working-directory: mobile
       - uses: actions/upload-artifact@v4
-        with: { name: ios-project, path: mobile/ios }
+        with:
+          name: ios-project
+          path: mobile/ios
+          if-no-files-found: error
