@@ -59,6 +59,9 @@ async function quotesUsed(cid, co) {
 /* ok · trial (free, still allowed) · limit (7 free quotes used) · locked · suspended */
 function accessOf(co) {
   if (co.suspended) return "suspended";
+  // Server-admin-only entitlement for an isolated app-store review workspace.
+  // Firestore rules forbid clients from creating or changing billing fields.
+  if (co.reviewDemo === true) return "ok";
   if (!stripeOn()) return "ok"; // billing not switched on yet
   const used = Number(co.trialQuotesUsed || 0);
   if (co.stripeSubscriptionId) {

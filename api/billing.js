@@ -57,6 +57,14 @@ async function referralCoupon() {
 }
 
 function publicView(co) {
+  if (co.reviewDemo === true) return {
+    access: accessOf(co), reviewDemo: true,
+    trialDaysLeft: 0, quotesUsed: Number(co.trialQuotesUsed || 0), quoteLimit: null,
+    trialAvailable: false, referralDiscount: false,
+    plan: "Review demo", billingStatus: "Review access", trialEnds: "",
+    currentPeriodEnd: "", cancelAtPeriodEnd: false, hasCard: false, cardCheck: "",
+    offersUsed: [], testMode: testMode(), enabled: stripeOn(), plans: [],
+  };
   const left = co.trialEnds ? Math.max(0, Math.ceil((new Date(co.trialEnds).getTime() - Date.now()) / DAY)) : 0;
   const used = Number(co.trialQuotesUsed || 0);
   return {
